@@ -2,11 +2,12 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{DataStruct, Fields, Ident};
 
+use crate::container_attrs::ContainerAttributes;
 use crate::type_utils::{get_schema_type_from_rust_type, is_option_type};
 use crate::parsers::field_parser::parse_field_attributes;
 
 /// Generate the schema implementation for a struct
-pub fn generate_struct_schema(name: &Ident, data_struct: &DataStruct) -> TokenStream {
+pub fn generate_struct_schema(name: &Ident, data_struct: &DataStruct, container_attrs: &ContainerAttributes) -> TokenStream {
     let mut property_setters = Vec::new();
     let mut required_setters = Vec::new();
     
@@ -81,6 +82,15 @@ pub fn generate_struct_schema(name: &Ident, data_struct: &DataStruct) -> TokenSt
         _ => panic!("LLMModel can only be derived for structs with named fields"),
     }
     
+    // Handle container description
+    let description_setter = if let Some(desc) = &container_attrs.description {
+        quote! {
+            schema_obj["description"] = ::serde_json::Value::String(#desc.to_string());
+        }
+    } else {
+        quote! {}
+    };
+    
     // Generate implementation
     quote! {
         impl ::rstructor::schema::SchemaType for #name {
@@ -91,6 +101,9 @@ pub fn generate_struct_schema(name: &Ident, data_struct: &DataStruct) -> TokenSt
                     "title": stringify!(#name),
                     "properties": {}
                 });
+                
+                // Add description if available
+                #description_setter
                 
                 // Fill properties
                 #(#property_setters)*

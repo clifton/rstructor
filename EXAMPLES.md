@@ -1,6 +1,30 @@
-# RStructor Field Attribute Examples
+# RStructor Attribute Examples
 
-This document shows how to properly use the various field attributes with different Rust types.
+This document shows how to properly use the various attributes with different Rust types.
+
+## Container-Level Attributes
+
+You can add attributes to the entire struct or enum:
+
+```rust
+// Add a description to a struct
+#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[llm(description = "Represents a person with their basic information")]
+struct Person {
+    // Fields...
+}
+
+// Add a description to an enum
+#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[llm(description = "Represents a person's role in an organization")]
+enum Role {
+    Employee,
+    Manager,
+    Director,
+}
+```
+
+## Field-Level Attributes
 
 ## Type-Specific Examples
 
