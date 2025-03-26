@@ -110,6 +110,85 @@ middle_name: Option<String>,
 phone: Option<String>,
 ```
 
+### Enums
+
+RStructor supports both simple enums and enums with associated data.
+
+#### Simple Enums
+
+```rust
+#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[llm(description = "Sentiment of the text analysis")]
+enum Sentiment {
+    #[llm(description = "The text is positive in tone")]
+    Positive,
+
+    #[llm(description = "The text is negative in tone")]
+    Negative,
+
+    #[llm(description = "The sentiment is neutral or mixed")]
+    Neutral,
+}
+```
+
+#### Enums with Simple Associated Data
+
+```rust
+#[derive(LLMModel, Serialize, Deserialize, Debug)]
+enum UserStatus {
+    #[llm(description = "The user is online")]
+    Online,
+
+    #[llm(description = "The user is offline")]
+    Offline,
+
+    #[llm(description = "The user is away with an optional message")]
+    Away(String),
+
+    #[llm(description = "The user is busy until a specific time")]
+    Busy(u32),
+}
+```
+
+#### Enums with Complex Associated Data
+
+```rust
+// Defining structs used in enum variants
+#[derive(Serialize, Deserialize, Debug)]
+struct Address {
+    street: String,
+    city: String,
+    zip: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PaymentCard {
+    card_number: String,
+    exp_date: String,
+    cvv: String,
+}
+
+// Enum with various types of associated data
+#[derive(LLMModel, Serialize, Deserialize, Debug)]
+enum PaymentMethod {
+    #[llm(description = "Payment made with a credit or debit card")]
+    Card(PaymentCard),
+
+    #[llm(description = "Payment made with PayPal")]
+    PayPal(String),
+
+    #[llm(description = "Payment will be made on delivery")]
+    CashOnDelivery,
+
+    #[llm(description = "Payment made via bank transfer with account details")]
+    BankTransfer {
+        account_number: String,
+        routing_number: String,
+        bank_name: String,
+    },
+}
+```
+
 ## General Guidelines
 
 1. For simple types like strings, numbers, and booleans, you can use literals directly
@@ -117,3 +196,4 @@ phone: Option<String>,
 3. When providing a literal that doesn't match the field type, the macro will try to convert it or use it as a string
 4. `Option<T>` types are automatically detected as optional fields
 5. The generated schema respects the types of your Rust struct
+6. Enums with associated data are represented using JSON Schema's `oneOf` pattern for better LLM understanding
