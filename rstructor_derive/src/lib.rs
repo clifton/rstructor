@@ -141,26 +141,24 @@ fn extract_container_attributes(attrs: &[syn::Attribute]) -> ContainerAttributes
                     let value = meta.value()?;
 
                     // Try to parse as array expression
-                    if let Ok(expr) = value.parse::<syn::Expr>() {
-                        if let syn::Expr::Array(array) = expr {
-                            // For each element in the array, convert to TokenStream
-                            for elem in array.elems.iter() {
-                                // For string literals, wrap them in serde_json::Value::String constructors
-                                if let syn::Expr::Lit(lit_expr) = elem {
-                                    if let syn::Lit::Str(lit_str) = &lit_expr.lit {
-                                        let str_val = lit_str.value();
-                                        let json_str = quote::quote! {
-                                            ::serde_json::Value::String(#str_val.to_string())
-                                        };
-                                        examples.push(json_str);
-                                    } else {
-                                        // For other literals, pass them through
-                                        examples.push(elem.to_token_stream());
-                                    }
+                    if let Ok(syn::Expr::Array(array)) = value.parse::<syn::Expr>() {
+                        // For each element in the array, convert to TokenStream
+                        for elem in array.elems.iter() {
+                            // For string literals, wrap them in serde_json::Value::String constructors
+                            if let syn::Expr::Lit(lit_expr) = elem {
+                                if let syn::Lit::Str(lit_str) = &lit_expr.lit {
+                                    let str_val = lit_str.value();
+                                    let json_str = quote::quote! {
+                                        ::serde_json::Value::String(#str_val.to_string())
+                                    };
+                                    examples.push(json_str);
                                 } else {
-                                    // For non-literals (like objects), pass them through
+                                    // For other literals, pass them through
                                     examples.push(elem.to_token_stream());
                                 }
+                            } else {
+                                // For non-literals (like objects), pass them through
+                                examples.push(elem.to_token_stream());
                             }
                         }
                     }

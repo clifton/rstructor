@@ -13,6 +13,7 @@ pub enum Model {
     Gpt35Turbo,
     Gpt4,
     Gpt4Turbo,
+    Gpt4O,
 }
 
 impl Model {
@@ -21,6 +22,7 @@ impl Model {
             Model::Gpt35Turbo => "gpt-3.5-turbo",
             Model::Gpt4 => "gpt-4",
             Model::Gpt4Turbo => "gpt-4-turbo-preview",
+            Model::Gpt4O => "gpt-4o",
         }
     }
 }
@@ -65,12 +67,14 @@ struct ChatCompletionRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct FunctionCall {
     name: String,
     arguments: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ResponseMessage {
     role: String,
     content: Option<String>,
@@ -78,6 +82,7 @@ struct ResponseMessage {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ChatCompletionChoice {
     message: ResponseMessage,
     finish_reason: String,
@@ -93,7 +98,7 @@ impl OpenAIClient {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let config = OpenAIConfig {
             api_key: api_key.into(),
-            model: Model::Gpt35Turbo,
+            model: Model::Gpt4O, // Default to GPT-4o
             temperature: 0.0,
             max_tokens: None,
         };

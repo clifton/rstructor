@@ -72,6 +72,7 @@ impl Schema {
         &self.schema
     }
 
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         self.schema.to_string()
     }

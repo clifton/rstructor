@@ -1,5 +1,5 @@
-use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel, AnthropicClient, AnthropicModel};
-use serde::{Serialize, Deserialize};
+use rstructor::{AnthropicClient, AnthropicModel, LLMClient, LLMModel, OpenAIClient, OpenAIModel};
+use serde::{Deserialize, Serialize};
 use std::env;
 
 // Define an enum for article categories
@@ -24,27 +24,32 @@ enum ArticleCategory {
 #[derive(LLMModel, Serialize, Deserialize, Debug)]
 #[llm(description = "An entity mentioned in the article")]
 struct Entity {
-    #[llm(description = "Name of the entity",
-          example = "Microsoft")]
+    #[llm(description = "Name of the entity", example = "Microsoft")]
     name: String,
-    
-    #[llm(description = "Type of the entity (person, organization, location, etc.)",
-          example = "organization")]
+
+    #[llm(
+        description = "Type of the entity (person, organization, location, etc.)",
+        example = "organization"
+    )]
     entity_type: String,
-    
-    #[llm(description = "How important this entity is to the article (1-10 scale)",
-          example = 8)]
+
+    #[llm(
+        description = "How important this entity is to the article (1-10 scale)",
+        example = 8
+    )]
     relevance: u8,
 }
 
 // Custom validation for Entity
 impl Entity {
+    #[allow(dead_code)]
     fn validate(&self) -> rstructor::Result<()> {
         // Check that relevance is within the expected range (1-10)
         if self.relevance < 1 || self.relevance > 10 {
-            return Err(rstructor::RStructorError::ValidationError(
-                format!("Relevance must be between 1 and 10, got {}", self.relevance)
-            ));
+            return Err(rstructor::RStructorError::ValidationError(format!(
+                "Relevance must be between 1 and 10, got {}",
+                self.relevance
+            )));
         }
         Ok(())
     }
@@ -68,58 +73,66 @@ impl Entity {
         })
       ])]
 struct ArticleAnalysis {
-    #[llm(description = "Title of the article",
-          example = "Tech Stocks Tumble as Inflation Fears Rise")]
+    #[llm(
+        description = "Title of the article",
+        example = "Tech Stocks Tumble as Inflation Fears Rise"
+    )]
     title: String,
-    
+
     #[llm(description = "Category the article belongs to")]
     category: ArticleCategory,
-    
-    #[llm(description = "A brief summary of the article (2-3 sentences)",
-          example = "The article discusses recent market movements in the technology sector. Major tech stocks fell by an average of 3% following concerns about rising inflation.")]
+
+    #[llm(
+        description = "A brief summary of the article (2-3 sentences)",
+        example = "The article discusses recent market movements in the technology sector. Major tech stocks fell by an average of 3% following concerns about rising inflation."
+    )]
     summary: String,
-    
-    #[llm(description = "Overall sentiment of the article (Positive, Negative, or Neutral)",
-          example = "Negative")]
+
+    #[llm(
+        description = "Overall sentiment of the article (Positive, Negative, or Neutral)",
+        example = "Negative"
+    )]
     sentiment: String,
-    
+
     #[llm(description = "Main entities mentioned in the article")]
     entities: Vec<Entity>,
-    
+
     #[llm(description = "Important keywords from the article",
           example = ["stocks", "technology", "inflation", "market"])]
     keywords: Vec<String>,
-    
-    #[llm(description = "Assessment of any bias in the reporting",
-          example = "The article presents a somewhat negative view of tech companies, with limited perspective from industry insiders.")]
+
+    #[llm(
+        description = "Assessment of any bias in the reporting",
+        example = "The article presents a somewhat negative view of tech companies, with limited perspective from industry insiders."
+    )]
     bias_assessment: String,
 }
 
 // Function to analyze an article using an LLM
-async fn analyze_article(article_text: &str) -> Result<ArticleAnalysis, Box<dyn std::error::Error>> {
+async fn analyze_article(
+    article_text: &str,
+) -> Result<ArticleAnalysis, Box<dyn std::error::Error>> {
     // Try using available API keys
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         println!("Using OpenAI for article analysis...");
-        
+
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt4)
             .temperature(0.0)
             .build();
-        
+
         let prompt = format!("Analyze the following news article:\n\n{}", article_text);
         Ok(client.generate_struct::<ArticleAnalysis>(&prompt).await?)
-        
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("Using Anthropic for article analysis...");
-        
+
         let client = AnthropicClient::new(api_key)?
             .model(AnthropicModel::Claude3Sonnet)
             .temperature(0.0)
             .build();
-        
+
         let prompt = format!("Analyze the following news article:\n\n{}", article_text);
         Ok(client.generate_struct::<ArticleAnalysis>(&prompt).await?)
-        
     } else {
         Err("No API keys found. Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY.".into())
     }
@@ -155,7 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     The N-2000 processor is expected to begin shipping to select enterprise customers in Q3, with wider 
     availability planned for early next year.
     "#;
-    
+
     // Analyze the article
     match analyze_article(article).await {
         Ok(analysis) => {
@@ -164,20 +177,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Category: {:?}", analysis.category);
             println!("\nSummary: {}", analysis.summary);
             println!("\nSentiment: {}", analysis.sentiment);
-            
+
             println!("\nEntities:");
             for entity in analysis.entities {
-                println!("• {} ({}): Relevance {}/10", 
-                         entity.name, entity.entity_type, entity.relevance);
+                println!(
+                    "• {} ({}): Relevance {}/10",
+                    entity.name, entity.entity_type, entity.relevance
+                );
             }
-            
+
             println!("\nKeywords: {}", analysis.keywords.join(", "));
             println!("\nBias Assessment: {}", analysis.bias_assessment);
-        },
+        }
         Err(e) => {
             println!("Error analyzing article: {}", e);
         }
     }
-    
+
     Ok(())
 }

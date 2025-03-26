@@ -30,9 +30,9 @@ struct Book {
 #[llm(description = "Represents the status of a book in the library")]
 enum BookStatus {
     Available,
-    Checked_Out,
-    On_Hold,
-    In_Repair,
+    CheckedOut,
+    OnHold,
+    InRepair,
 }
 
 fn main() {

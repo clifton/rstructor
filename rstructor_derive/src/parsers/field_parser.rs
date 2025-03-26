@@ -37,18 +37,18 @@ pub fn parse_field_attributes(field: &Field) -> FieldAttributes {
                     description = Some(content.value());
                 } else if meta.path.is_ident("example") {
                     let value = meta.value()?;
-                    
+
                     // First, try to parse as an array literal for array types
                     if let TypeCategory::Array = get_type_category(base_type) {
                         // Try to parse as an array literal
-                        if let Some(array_tokens) = parse_array_literal(&value) {
+                        if let Some(array_tokens) = parse_array_literal(value) {
                             example_value = Some(quote! {
                                 ::serde_json::Value::Array(vec![#(#array_tokens),*])
                             });
                             return Ok(());
                         }
                     }
-                    
+
                     // If not an array literal or not an array type, parse based on field type
                     match get_type_category(base_type) {
                         TypeCategory::String => {
@@ -115,7 +115,7 @@ pub fn parse_field_attributes(field: &Field) -> FieldAttributes {
                             // Parse the attribute value as a string first
                             if let Ok(content) = value.parse::<syn::LitStr>() {
                                 let array_str = content.value();
-                                
+
                                 // Check if it's a bracketed array like ["a", "b", "c"]
                                 if array_str.starts_with('[') && array_str.ends_with(']') {
                                     // Parse as JSON array, but convert single quotes to double quotes
@@ -150,13 +150,13 @@ pub fn parse_field_attributes(field: &Field) -> FieldAttributes {
                 } else if meta.path.is_ident("examples") {
                     // First, try to parse as an array literal
                     let value = meta.value()?;
-                    
-                    if let Some(array_tokens) = parse_array_literal(&value) {
+
+                    if let Some(array_tokens) = parse_array_literal(value) {
                         // Use the parsed array tokens directly
                         examples_array = array_tokens;
                         return Ok(());
                     }
-                    
+
                     // If not an array literal, handle examples based on type
                     match get_type_category(base_type) {
                         TypeCategory::String => {
@@ -238,7 +238,7 @@ pub fn parse_field_attributes(field: &Field) -> FieldAttributes {
                             let value = meta.value()?;
                             let content: syn::LitStr = value.parse()?;
                             let json_str = content.value();
-                            
+
                             examples_array.push(quote! {
                                 match ::serde_json::from_str::<::serde_json::Value>(#json_str) {
                                     Ok(val) => val,

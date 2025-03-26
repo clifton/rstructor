@@ -3,6 +3,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024"/>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"/>
+  <img src="https://github.com/clifton/rstructor/actions/workflows/test.yml/badge.svg" alt="Tests Status"/>
+  <img src="https://github.com/clifton/rstructor/actions/workflows/clippy.yml/badge.svg" alt="Clippy Status"/>
 </p>
 
 RStructor is a Rust library for extracting structured data from Large Language Models (LLMs) with built-in validation. Define your schemas as Rust structs/enums, and RStructor will handle the rest—generating JSON Schemas, communicating with LLMs, parsing responses, and validating the results.
@@ -183,6 +185,10 @@ struct Recipe {
 
 ### Working with Enums
 
+RStructor supports both simple enums and enums with associated data.
+
+#### Simple Enums
+
 Use enums for categorical data:
 
 ```rust
@@ -193,8 +199,13 @@ use serde::{Serialize, Deserialize};
 #[derive(LLMModel, Serialize, Deserialize, Debug)]
 #[llm(description = "The sentiment of a text")]
 enum Sentiment {
+    #[llm(description = "Positive or favorable sentiment")]
     Positive,
+    
+    #[llm(description = "Negative or unfavorable sentiment")]
     Negative,
+    
+    #[llm(description = "Neither clearly positive nor negative")]
     Neutral,
 }
 
@@ -213,6 +224,70 @@ struct SentimentAnalysis {
 
 // Usage:
 // let analysis: SentimentAnalysis = client.generate_struct("Analyze the sentiment of: I love this product!").await?;
+```
+
+#### Enums with Associated Data (Tagged Unions)
+
+RStructor also supports more complex enums with associated data:
+
+```rust
+use rstructor::{LLMModel, SchemaType};
+use serde::{Deserialize, Serialize};
+
+// Enum with different types of associated data
+#[derive(LLMModel, Serialize, Deserialize, Debug)]
+enum UserStatus {
+    #[llm(description = "The user is online")]
+    Online,
+
+    #[llm(description = "The user is offline")]
+    Offline,
+
+    #[llm(description = "The user is away with an optional message")]
+    Away(String),
+
+    #[llm(description = "The user is busy until a specific time in minutes")]
+    Busy(u32),
+}
+
+// Using struct variants for more complex associated data
+#[derive(LLMModel, Serialize, Deserialize, Debug)]
+enum PaymentMethod {
+    #[llm(description = "Payment with credit card")]
+    Card {
+        #[llm(description = "Credit card number")]
+        number: String,
+        
+        #[llm(description = "Expiration date in MM/YY format")]
+        expiry: String,
+    },
+
+    #[llm(description = "Payment via PayPal account")]
+    PayPal(String),
+
+    #[llm(description = "Payment will be made on delivery")]
+    CashOnDelivery,
+}
+
+// Usage:
+// let user_status: UserStatus = client.generate_struct("What's the user's status?").await?;
+```
+
+When serialized to JSON, these enum variants with data become tagged unions:
+
+```json
+// UserStatus::Away("Back in 10 minutes")
+{
+  "Away": "Back in 10 minutes"
+}
+
+// PaymentMethod::Card { number: "4111...", expiry: "12/25" }
+{
+  "Card": {
+    "number": "4111 1111 1111 1111",
+    "expiry": "12/25"
+  }
+}
 ```
 
 ### Configuring Different LLM Providers
@@ -322,6 +397,7 @@ See the `examples/` directory for complete, working examples:
 - `structured_movie_info.rs`: Basic example of getting movie information with validation
 - `nested_objects_example.rs`: Working with complex nested structures for recipe data
 - `news_article_categorizer.rs`: Using enums for categorization
+- `enum_with_data_example.rs`: Working with enums that have associated data (tagged unions)
 - `event_planner.rs`: Interactive event planning with user input
 - `weather_example.rs`: Simple model with validation demonstration
 
@@ -348,7 +424,7 @@ cargo run --example news_article_categorizer
 - [x] Custom validation capabilities
 - [x] Support for nested structures
 - [x] Rich validation API with custom domain rules
-- [ ] Support for enums with associated data (tagged unions)
+- [x] Support for enums with associated data (tagged unions)
 - [ ] Streaming responses
 - [ ] Support for additional LLM providers
 - [ ] Integration with web frameworks (Axum, Actix)

@@ -12,7 +12,7 @@ mod integration_tests {
         #[llm(description = "An integer field", example = 42)]
         int_field: i32,
 
-        #[llm(description = "A float field", example = 3.14)]
+        #[llm(description = "A float field", example = 3.5)]
         float_field: f64,
 
         #[llm(description = "A boolean field", example = true)]
@@ -118,7 +118,9 @@ mod integration_tests {
         // Check examples
         assert_eq!(props["string_field"]["example"], "Hello World");
         assert_eq!(props["int_field"]["example"], 42);
-        assert_eq!(props["float_field"]["example"], std::f64::consts::PI);
+        // Check the float value matches the example (3.14)
+        // Use a completely different value to avoid clippy PI approximation warning
+        assert_eq!(props["float_field"]["example"], 3.5);
         assert_eq!(props["bool_field"]["example"], true);
 
         // Check required fields
