@@ -1,5 +1,5 @@
-use rstructor::{Schema, SchemaType};
 use rstructor::schema::SchemaBuilder;
+use rstructor::{Schema, SchemaType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -23,7 +23,7 @@ impl SchemaType for WeatherInfo {
                     "type": "string",
                     "description": "City name to get weather for"
                 }),
-                true
+                true,
             )
             .property(
                 "temperature",
@@ -32,7 +32,7 @@ impl SchemaType for WeatherInfo {
                     "description": "Current temperature in Celsius",
                     "example": 22.5
                 }),
-                true
+                true,
             )
             .property(
                 "description",
@@ -40,7 +40,7 @@ impl SchemaType for WeatherInfo {
                     "type": "string",
                     "description": "Weather description"
                 }),
-                false
+                false,
             )
             .build()
     }
@@ -53,17 +53,20 @@ impl SchemaType for WeatherInfo {
 fn main() {
     // Get the schema
     let schema = WeatherInfo::schema();
-    
+
     println!("Weather Info Schema:");
-    println!("{}", serde_json::to_string_pretty(schema.to_json()).unwrap());
-    
+    println!(
+        "{}",
+        serde_json::to_string_pretty(schema.to_json()).unwrap()
+    );
+
     // Create a sample instance
     let weather = WeatherInfo {
         city: "Paris".to_string(),
         temperature: 25.5,
         description: Some("Sunny".to_string()),
     };
-    
+
     // Serialize to JSON
     println!("\nSample Weather Info:");
     println!("{}", serde_json::to_string_pretty(&weather).unwrap());

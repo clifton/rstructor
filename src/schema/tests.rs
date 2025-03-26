@@ -1,5 +1,5 @@
-use serde_json::json;
 use super::{Schema, SchemaBuilder};
+use serde_json::json;
 
 #[test]
 fn test_schema_creation() {
@@ -17,9 +17,9 @@ fn test_schema_creation() {
         },
         "required": ["name"]
     });
-    
+
     let schema = Schema::new(schema_json.clone());
-    
+
     assert_eq!(schema.to_json(), &schema_json);
     assert_eq!(schema.to_string(), schema_json.to_string());
 }
@@ -35,7 +35,7 @@ fn test_schema_builder() {
                 "type": "string",
                 "description": "The person's name"
             }),
-            true
+            true,
         )
         .property(
             "age",
@@ -43,7 +43,7 @@ fn test_schema_builder() {
                 "type": "integer",
                 "description": "The person's age"
             }),
-            true
+            true,
         )
         .property(
             "address",
@@ -54,25 +54,25 @@ fn test_schema_builder() {
                     "city": { "type": "string" }
                 }
             }),
-            false
+            false,
         )
         .build();
-    
+
     // Get the schema JSON to check properties
     let schema_json = schema.to_json();
-    
+
     // Verify correct properties
     assert_eq!(schema_json["type"], "object");
     assert_eq!(schema_json["title"], "Person");
     assert_eq!(schema_json["description"], "A person object");
-    
+
     // Check that properties exist and are correct
     assert!(schema_json["properties"]["name"]["type"] == "string");
     assert!(schema_json["properties"]["name"]["description"] == "The person's name");
     assert!(schema_json["properties"]["age"]["type"] == "integer");
     assert!(schema_json["properties"]["age"]["description"] == "The person's age");
     assert!(schema_json["properties"]["address"]["type"] == "object");
-    
+
     // Check that required fields exist (but don't enforce order)
     let required = schema_json["required"].as_array().unwrap();
     assert_eq!(required.len(), 2);

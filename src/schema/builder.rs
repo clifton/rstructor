@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
 use super::Schema;
@@ -21,28 +21,28 @@ impl SchemaBuilder {
             ..Default::default()
         }
     }
-    
+
     pub fn object() -> Self {
         Self::new()
     }
-    
+
     pub fn array(items: Value) -> Self {
         let mut builder = Self::new();
         builder.schema_type = "array".to_string();
         builder.properties.insert("items".to_string(), items);
         builder
     }
-    
+
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
-    
+
     pub fn description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
     }
-    
+
     pub fn property(
         mut self,
         name: impl Into<String>,
@@ -56,29 +56,29 @@ impl SchemaBuilder {
         }
         self
     }
-    
+
     pub fn example(mut self, example: Value) -> Self {
         self.examples.push(example);
         self
     }
-    
+
     pub fn build(self) -> Schema {
         let mut schema = json!({
             "type": self.schema_type
         });
-        
+
         if let Some(title) = self.title {
             schema["title"] = json!(title);
         }
-        
+
         if let Some(description) = self.description {
             schema["description"] = json!(description);
         }
-        
+
         if !self.properties.is_empty() {
             if self.schema_type == "object" {
                 schema["properties"] = json!(self.properties);
-                
+
                 if !self.required.is_empty() {
                     schema["required"] = json!(self.required);
                 }
@@ -88,7 +88,7 @@ impl SchemaBuilder {
                 }
             }
         }
-        
+
         if !self.examples.is_empty() {
             if self.examples.len() == 1 {
                 schema["example"] = self.examples[0].clone();
@@ -96,7 +96,7 @@ impl SchemaBuilder {
                 schema["examples"] = json!(self.examples);
             }
         }
-        
+
         Schema::new(schema)
     }
 }

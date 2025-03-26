@@ -22,3 +22,12 @@
 - Test all new functionality with unit tests
 - Format code with rustfmt and address clippy warnings before committing
 - Use feature flags for optional dependencies (e.g., specific LLM backends)
+
+## Macro Attribute Implementation Guidelines
+- Always implement attribute parsing directly within the macro system, not with JSON strings
+- Use native Rust syntax for attribute values and complex data structures
+- For example, array literals should be parsed directly as `#[llm(examples = ["one", "two", "three"])]`
+- Never use JSON serialized strings for attribute values (e.g., do not use `examples = r#"["value1"]"#`)
+- Parse container attributes individually without relying on JSON parsing
+- Support multiple attribute specification styles that feel natural in Rust
+- For multi-value attributes, support both parentheses and array syntax

@@ -2,8 +2,8 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::Field;
 
-use crate::type_utils::{TypeCategory, get_type_category, is_option_type, get_option_inner_type};
 use crate::parsers::array_parser::parse_array_literal;
+use crate::type_utils::{TypeCategory, get_option_inner_type, get_type_category, is_option_type};
 
 /// Represents parsed field attributes
 pub struct FieldAttributes {

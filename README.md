@@ -22,6 +22,13 @@ use serde::{Serialize, Deserialize};
 
 // Define your data model
 #[derive(LLMModel, Serialize, Deserialize)]
+#[llm(description = "Information about a movie", 
+      title = "DetailedMovieInfo",
+      examples = [
+        ::serde_json::json!({"title": "Inception", "director": "Christopher Nolan", "year": 2010, "genres": ["Sci-Fi", "Action"], "rating": 8.8}),
+        ::serde_json::json!({"title": "The Godfather", "director": "Francis Ford Coppola", "year": 1972, "genres": ["Crime", "Drama"]})
+      ])]
+#[serde(rename_all = "camelCase")]
 struct MovieInfo {
     #[llm(description = "Title of the movie")]
     title: String,
@@ -29,13 +36,13 @@ struct MovieInfo {
     #[llm(description = "Name of the director", example = "Christopher Nolan")]
     director: String,
     
-    #[llm(description = "Year the movie was released", example = "2010")]
+    #[llm(description = "Year the movie was released", example = 2010)]
     year: u16,
     
-    #[llm(description = "Genres of the movie", example = r#"["Action", "Sci-Fi"]"#)]
+    #[llm(description = "Genres of the movie", example = ["Action", "Sci-Fi"])]
     genres: Vec<String>,
     
-    #[llm(description = "IMDB rating from 0.0 to 10.0", example = "8.8", optional)]
+    #[llm(description = "IMDB rating from 0.0 to 10.0", example = 8.8)]
     rating: Option<f32>,
 }
 
@@ -62,9 +69,15 @@ async fn get_movie_info() -> Result<MovieInfo, Box<dyn std::error::Error>> {
 - [x] Core traits and interfaces
 - [x] OpenAI backend implementation
 - [x] Anthropic backend implementation
-- [ ] Procedural macro for deriving `LLMModel`
-- [ ] Schema generation functionality
-- [ ] Enhanced validation capabilities
+- [x] Procedural macro for deriving `LLMModel`
+- [x] Schema generation functionality
+- [x] Field-level attributes (description, example, examples)
+- [x] Container-level attributes (description, title, examples)
+- [x] Serde integration (rename_all)
+- [x] Array literal support for examples
+- [x] Basic validation capabilities
+- [ ] Enhanced validation with custom validators
+- [ ] Support for enums with associated data
 - [ ] Streaming responses
 - [ ] Support for more LLM providers
 

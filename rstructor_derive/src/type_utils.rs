@@ -1,39 +1,42 @@
-use syn::{Type, PathArguments, GenericArgument};
+use syn::{GenericArgument, PathArguments, Type};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use syn::parse_quote;
-    
+
     #[test]
     fn test_is_option_type() {
         // Create test types
         let option_type: Type = parse_quote!(Option<String>);
         let string_type: Type = parse_quote!(String);
         let vec_type: Type = parse_quote!(Vec<u32>);
-        
+
         // Check type detection
         assert!(is_option_type(&option_type));
         assert!(!is_option_type(&string_type));
         assert!(!is_option_type(&vec_type));
     }
-    
+
     #[test]
     fn test_get_option_inner_type() {
         // Create an Option<String> type
         let option_type: Type = parse_quote!(Option<String>);
-        
+
         // Get inner type
         let inner_type = get_option_inner_type(&option_type);
-        
+
         // Should be a String
         if let Type::Path(type_path) = inner_type {
-            assert_eq!(type_path.path.segments.first().unwrap().ident.to_string(), "String");
+            assert_eq!(
+                type_path.path.segments.first().unwrap().ident.to_string(),
+                "String"
+            );
         } else {
             panic!("Inner type is not a Path");
         }
     }
-    
+
     #[test]
     fn test_get_type_category() {
         // Create test types
@@ -44,17 +47,32 @@ mod tests {
         let vec_type: Type = parse_quote!(Vec<String>);
         let map_type: Type = parse_quote!(HashMap<String, i32>);
         let custom_type: Type = parse_quote!(MyCustomType);
-        
+
         // Check type categories
-        assert!(matches!(get_type_category(&string_type), TypeCategory::String));
-        assert!(matches!(get_type_category(&int_type), TypeCategory::Integer));
-        assert!(matches!(get_type_category(&float_type), TypeCategory::Float));
-        assert!(matches!(get_type_category(&bool_type), TypeCategory::Boolean));
+        assert!(matches!(
+            get_type_category(&string_type),
+            TypeCategory::String
+        ));
+        assert!(matches!(
+            get_type_category(&int_type),
+            TypeCategory::Integer
+        ));
+        assert!(matches!(
+            get_type_category(&float_type),
+            TypeCategory::Float
+        ));
+        assert!(matches!(
+            get_type_category(&bool_type),
+            TypeCategory::Boolean
+        ));
         assert!(matches!(get_type_category(&vec_type), TypeCategory::Array));
         assert!(matches!(get_type_category(&map_type), TypeCategory::Object));
-        assert!(matches!(get_type_category(&custom_type), TypeCategory::Object));
+        assert!(matches!(
+            get_type_category(&custom_type),
+            TypeCategory::Object
+        ));
     }
-    
+
     #[test]
     fn test_get_schema_type_from_rust_type() {
         // Create test types
@@ -65,7 +83,7 @@ mod tests {
         let vec_type: Type = parse_quote!(Vec<String>);
         let map_type: Type = parse_quote!(HashMap<String, i32>);
         let option_type: Type = parse_quote!(Option<String>);
-        
+
         // Check schema types
         assert_eq!(get_schema_type_from_rust_type(&string_type), "string");
         assert_eq!(get_schema_type_from_rust_type(&int_type), "integer");
@@ -122,8 +140,8 @@ pub fn get_type_category(ty: &Type) -> TypeCategory {
             match type_name.as_str() {
                 "String" | "str" | "char" => return TypeCategory::String,
                 "bool" => return TypeCategory::Boolean,
-                "i8" | "i16" | "i32" | "i64" | "i128" | "isize" |
-                "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => return TypeCategory::Integer,
+                "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64"
+                | "u128" | "usize" => return TypeCategory::Integer,
                 "f32" | "f64" => return TypeCategory::Float,
                 "Vec" | "Array" | "HashSet" | "BTreeSet" => return TypeCategory::Array,
                 "HashMap" | "BTreeMap" => return TypeCategory::Object,
@@ -142,8 +160,8 @@ pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
             match type_name.as_str() {
                 "String" | "str" | "char" => return "string",
                 "bool" => return "boolean",
-                "i8" | "i16" | "i32" | "i64" | "i128" | "isize" |
-                "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => return "integer",
+                "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64"
+                | "u128" | "usize" => return "integer",
                 "f32" | "f64" => return "number",
                 "Vec" | "Array" | "HashSet" | "BTreeSet" => return "array",
                 "HashMap" | "BTreeMap" => return "object",

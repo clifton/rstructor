@@ -1,11 +1,11 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
-use crate::error::{Result, RStructorError};
-use crate::model::LLMModel;
 use crate::backend::LLMClient;
+use crate::error::{RStructorError, Result};
+use crate::model::LLMModel;
 
 /// OpenAI models available for completion
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,31 +97,31 @@ impl OpenAIClient {
             temperature: 0.0,
             max_tokens: None,
         };
-        
+
         Ok(Self {
             config,
             client: reqwest::Client::new(),
         })
     }
-    
+
     /// Set the model to use
     pub fn model(mut self, model: Model) -> Self {
         self.config.model = model;
         self
     }
-    
+
     /// Set the temperature (0.0 to 1.0, lower = more deterministic)
     pub fn temperature(mut self, temp: f32) -> Self {
         self.config.temperature = temp;
         self
     }
-    
+
     /// Set the maximum tokens to generate
     pub fn max_tokens(mut self, max: u32) -> Self {
         self.config.max_tokens = Some(max);
         self
     }
-    
+
     /// Build the client (chainable after configuration)
     pub fn build(self) -> Self {
         self
@@ -132,125 +132,142 @@ impl OpenAIClient {
 impl LLMClient for OpenAIClient {
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
-        T: LLMModel + DeserializeOwned + Send + 'static
+        T: LLMModel + DeserializeOwned + Send + 'static,
     {
         // Get the schema for type T
         let schema = T::schema();
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
-        
+
         // Create function definition with the schema
         let function = FunctionDef {
             name: schema_name.clone(),
             description: "Output in the specified format".to_string(),
             parameters: schema.to_json().clone(),
         };
-        
+
         // Build the request
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: prompt.to_string(),
-                },
-            ],
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
             functions: Some(vec![function]),
             function_call: Some(json!({ "name": schema_name })),
             temperature: self.config.temperature,
             max_tokens: self.config.max_tokens,
         };
-        
+
         // Send the request to OpenAI
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
             .await?;
-        
+
         // Parse the response
         if !response.status().is_success() {
             let error_text = response.text().await?;
-            return Err(RStructorError::ApiError(format!("OpenAI API error: {}", error_text)));
+            return Err(RStructorError::ApiError(format!(
+                "OpenAI API error: {}",
+                error_text
+            )));
         }
-        
+
         let completion: ChatCompletionResponse = response.json().await?;
         if completion.choices.is_empty() {
-            return Err(RStructorError::ApiError("No completion choices returned".to_string()));
+            return Err(RStructorError::ApiError(
+                "No completion choices returned".to_string(),
+            ));
         }
-        
+
         let message = &completion.choices[0].message;
-        
+
         // Extract the function arguments JSON
         if let Some(function_call) = &message.function_call {
             // Parse the arguments JSON string into our target type
-            let result: T = serde_json::from_str(&function_call.arguments)
-                .map_err(|e| RStructorError::ValidationError(format!("Failed to parse response: {}", e)))?;
-            
+            let result: T = serde_json::from_str(&function_call.arguments).map_err(|e| {
+                RStructorError::ValidationError(format!("Failed to parse response: {}", e))
+            })?;
+
             // Apply any custom validation
             result.validate()?;
-            
+
             Ok(result)
         } else {
             // If no function call, try to extract from content if available
             if let Some(content) = &message.content {
                 // Try to extract JSON from the content (assuming the model might have returned JSON directly)
-                let result: T = serde_json::from_str(content)
-                    .map_err(|e| RStructorError::ValidationError(format!("Failed to parse response content: {}", e)))?;
-                
+                let result: T = serde_json::from_str(content).map_err(|e| {
+                    RStructorError::ValidationError(format!(
+                        "Failed to parse response content: {}",
+                        e
+                    ))
+                })?;
+
                 // Apply any custom validation
                 result.validate()?;
-                
+
                 Ok(result)
             } else {
-                Err(RStructorError::ApiError("No function call or content in response".to_string()))
+                Err(RStructorError::ApiError(
+                    "No function call or content in response".to_string(),
+                ))
             }
         }
     }
-    
+
     async fn generate(&self, prompt: &str) -> Result<String> {
         // Build the request without functions
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: prompt.to_string(),
-                },
-            ],
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }],
             functions: None,
             function_call: None,
             temperature: self.config.temperature,
             max_tokens: self.config.max_tokens,
         };
-        
+
         // Send the request to OpenAI
-        let response = self.client
+        let response = self
+            .client
             .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
             .await?;
-        
+
         // Parse the response
         if !response.status().is_success() {
             let error_text = response.text().await?;
-            return Err(RStructorError::ApiError(format!("OpenAI API error: {}", error_text)));
+            return Err(RStructorError::ApiError(format!(
+                "OpenAI API error: {}",
+                error_text
+            )));
         }
-        
+
         let completion: ChatCompletionResponse = response.json().await?;
         if completion.choices.is_empty() {
-            return Err(RStructorError::ApiError("No completion choices returned".to_string()));
+            return Err(RStructorError::ApiError(
+                "No completion choices returned".to_string(),
+            ));
         }
-        
+
         let message = &completion.choices[0].message;
-        
+
         if let Some(content) = &message.content {
             Ok(content.clone())
         } else {
-            Err(RStructorError::ApiError("No content in response".to_string()))
+            Err(RStructorError::ApiError(
+                "No content in response".to_string(),
+            ))
         }
     }
 }

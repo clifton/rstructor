@@ -14,15 +14,15 @@ impl Schema {
     pub fn new(schema: Value) -> Self {
         Self { schema }
     }
-    
+
     pub fn to_json(&self) -> &Value {
         &self.schema
     }
-    
+
     pub fn to_string(&self) -> String {
         self.schema.to_string()
     }
-    
+
     /// Create a schema builder for an object type
     pub fn builder() -> SchemaBuilder {
         SchemaBuilder::object()
@@ -33,7 +33,7 @@ impl Schema {
 pub trait SchemaType {
     /// Generate a JSON Schema representation of this type
     fn schema() -> Schema;
-    
+
     /// Optional name for the schema
     fn schema_name() -> Option<String> {
         None

@@ -11,7 +11,7 @@ pub trait LLMClient {
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
         T: LLMModel + DeserializeOwned + Send + 'static;
-    
+
     /// Raw completion without structure (returns plain text)
     async fn generate(&self, prompt: &str) -> Result<String>;
 }
