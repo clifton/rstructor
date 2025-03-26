@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Derive macros for the rstructor library"
 license = "MIT"
-repository = "https://github.com/yourusername/rstructor"
+repository = "https://github.com/yinsw/rstructor"
+authors = ["Your Name <your.email@example.com>"]
+documentation = "https://docs.rs/rstructor_derive"
 
 [lib]
 proc-macro = true

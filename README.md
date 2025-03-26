@@ -9,19 +9,18 @@ RStructor is a Rust library for defining structured data models and getting Larg
 - **✅ Validation**: Ensure LLM responses match your defined structure and types
 - **🔌 Multiple LLM Providers**: Support for OpenAI and Anthropic APIs, with an extensible backend system
 - **🔄 Async API**: Fully async API for efficient network operations
+- **🧩 Nested Structures**: Support for complex nested data structures
+- **🔍 Validation Rules**: Custom validation rules for enhanced type safety
 
-## Status: Early Development
-
-This library is in early development. The core interfaces and traits are defined, but the procedural macro for deriving `LLMModel` is not yet implemented. Stay tuned for updates!
-
-## Example (Future API)
+## Example Usage
 
 ```rust
-use rstructor::{LLMModel, OpenAIClient}; 
+use rstructor::{LLMModel, OpenAIClient, OpenAIModel}; 
 use serde::{Serialize, Deserialize};
+use std::env;
 
 // Define your data model
-#[derive(LLMModel, Serialize, Deserialize)]
+#[derive(LLMModel, Serialize, Deserialize, Debug)]
 #[llm(description = "Information about a movie", 
       title = "DetailedMovieInfo",
       examples = [
@@ -46,9 +45,26 @@ struct MovieInfo {
     rating: Option<f32>,
 }
 
+// Custom validation logic
+impl MovieInfo {
+    fn validate(&self) -> rstructor::Result<()> {
+        // Check that the rating is between 0 and 10
+        if let Some(rating) = self.rating {
+            if rating < 0.0 || rating > 10.0 {
+                return Err(rstructor::RStructorError::ValidationError(
+                    format!("Rating must be between 0 and 10, got {}", rating)
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 // Use with OpenAI
 async fn get_movie_info() -> Result<MovieInfo, Box<dyn std::error::Error>> {
-    let client = OpenAIClient::new("YOUR_API_KEY")?
+    let api_key = env::var("OPENAI_API_KEY")?;
+    
+    let client = OpenAIClient::new(api_key)?
         .model(OpenAIModel::Gpt4)
         .temperature(0.0)
         .build();
@@ -59,9 +75,81 @@ async fn get_movie_info() -> Result<MovieInfo, Box<dyn std::error::Error>> {
     println!("Title: {}", movie.title);
     println!("Director: {}", movie.director);
     println!("Year: {}", movie.year);
+    println!("Genres: {:?}", movie.genres);
+    if let Some(rating) = movie.rating {
+        println!("Rating: {:.1}", rating);
+    }
     
     Ok(movie)
 }
+```
+
+## Supported Attributes
+
+### Field-level Attributes
+- `description`: Text description of the field
+- `example`: A single example value (supports simple types, objects, and arrays)
+- `examples`: Multiple example values
+
+### Container-level Attributes
+- `description`: Text description of the struct or enum
+- `title`: Custom title for the JSON Schema (defaults to type name)
+- `examples`: Example instances (complete objects for structs, string values for enums)
+
+### Serde Integration
+- Respects `#[serde(rename_all = "...")]` for property names (camelCase, snake_case, etc.)
+
+## Custom Validation
+
+RStructor supports custom validation rules beyond simple type checking. This allows you to enforce domain-specific constraints on your data:
+
+```rust
+impl MovieInfo {
+    fn validate(&self) -> rstructor::Result<()> {
+        // Validate year is reasonable
+        if self.year < 1888 || self.year > 2030 {
+            return Err(rstructor::RStructorError::ValidationError(
+                format!("Movie year must be between 1888 and 2030, got {}", self.year)
+            ));
+        }
+        
+        // Check that rating is valid
+        if let Some(rating) = self.rating {
+            if rating < 0.0 || rating > 10.0 {
+                return Err(rstructor::RStructorError::ValidationError(
+                    format!("Rating must be between 0 and 10, got {}", rating)
+                ));
+            }
+        }
+        
+        Ok(())
+    }
+}
+```
+
+Validation is automatically applied when using `generate_struct()` to get structured data from an LLM, ensuring the output meets your requirements.
+
+## Examples
+
+See the `examples/` directory for various use cases:
+
+- `structured_movie_info.rs`: Basic example of getting movie information with validation
+- `nested_objects_example.rs`: Working with complex nested structures (recipe data)
+- `news_article_categorizer.rs`: Using enums and categorization 
+- `event_planner.rs`: User input processing for event planning
+- `weather_example.rs`: Simple model with validation demonstration
+
+## Running the Examples
+
+Set the appropriate environment variables:
+```bash
+export OPENAI_API_KEY=your_openai_key_here
+# or
+export ANTHROPIC_API_KEY=your_anthropic_key_here
+
+# Then run the examples
+cargo run --example structured_movie_info
+cargo run --example nested_objects_example
 ```
 
 ## Features & Roadmap
@@ -75,8 +163,9 @@ async fn get_movie_info() -> Result<MovieInfo, Box<dyn std::error::Error>> {
 - [x] Container-level attributes (description, title, examples)
 - [x] Serde integration (rename_all)
 - [x] Array literal support for examples
-- [x] Basic validation capabilities
-- [ ] Enhanced validation with custom validators
+- [x] Custom validation capabilities
+- [x] Support for nested structures
+- [x] Rich validation API with custom domain rules
 - [ ] Support for enums with associated data
 - [ ] Streaming responses
 - [ ] Support for more LLM providers

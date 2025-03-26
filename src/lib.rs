@@ -6,7 +6,7 @@ pub mod schema;
 // Re-export primary types that users will need
 pub use backend::LLMClient;
 pub use error::{RStructorError, Result};
-pub use model::LLMModel;
+pub use model::{LLMModel, Validatable};
 pub use schema::{Schema, SchemaType};
 
 // Re-export backend implementations when features are enabled

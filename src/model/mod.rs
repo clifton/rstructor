@@ -1,3 +1,3 @@
 mod llm_model;
 
-pub use llm_model::LLMModel;
+pub use llm_model::{LLMModel, Validatable};
