@@ -1,4 +1,4 @@
-use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel, AnthropicClient, AnthropicModel, RStructorError};
+use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel, AnthropicClient, AnthropicModel, RStructorError, SchemaType};
 use serde::{Serialize, Deserialize};
 use std::{env, io::{self, Write}};
 
@@ -8,7 +8,7 @@ struct Ingredient {
     #[llm(description = "Name of the ingredient", example = "flour")]
     name: String,
     
-    #[llm(description = "Amount of the ingredient", example = 2.5)]
+    #[llm(description = "Numeric amount of the ingredient (e.g., 2.0, 0.5, etc.)", example = 2.5)]
     amount: f32,
     
     #[llm(description = "Unit of measurement", example = "cups")]
@@ -26,20 +26,20 @@ struct Step {
 }
 
 #[derive(LLMModel, Serialize, Deserialize, Debug)]
-#[llm(description = "A cooking recipe with ingredients and instructions",
+#[llm(description = "A complete cooking recipe with ingredients and step-by-step instructions",
       examples = [
         ::serde_json::json!({
             "name": "Classic Chocolate Chip Cookies",
             "ingredients": [
                 {"name": "all-purpose flour", "amount": 2.25, "unit": "cups"},
-                {"name": "baking soda", "amount": 1, "unit": "teaspoon"},
-                {"name": "salt", "amount": 1, "unit": "teaspoon"},
-                {"name": "butter", "amount": 1, "unit": "cup"},
+                {"name": "baking soda", "amount": 1.0, "unit": "teaspoon"},
+                {"name": "salt", "amount": 1.0, "unit": "teaspoon"},
+                {"name": "butter", "amount": 1.0, "unit": "cup"},
                 {"name": "granulated sugar", "amount": 0.75, "unit": "cup"},
                 {"name": "brown sugar", "amount": 0.75, "unit": "cup"},
-                {"name": "vanilla extract", "amount": 1, "unit": "teaspoon"},
-                {"name": "eggs", "amount": 2, "unit": "large"},
-                {"name": "chocolate chips", "amount": 2, "unit": "cups"}
+                {"name": "vanilla extract", "amount": 1.0, "unit": "teaspoon"},
+                {"name": "eggs", "amount": 2.0, "unit": "large"},
+                {"name": "chocolate chips", "amount": 2.0, "unit": "cups"}
             ],
             "steps": [
                 {"number": 1, "description": "Preheat oven to 375°F (190°C)."},
@@ -136,13 +136,35 @@ async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> 
     
     // Create OpenAI client
     let client = OpenAIClient::new(api_key)?
-        .model(OpenAIModel::Gpt4) // Use GPT-4 for better recipes
-        .temperature(0.2) // Some creativity but mostly consistent
+        .model(OpenAIModel::Gpt4O) // Use GPT-4o for better recipes
+        .temperature(0.1) // Lower temperature for more consistent results
         .build();
     
-    // Generate the recipe
-    let prompt = format!("Give me a complete recipe for {}. Include all ingredients with precise measurements and detailed steps.", recipe_name);
-    client.generate_struct::<Recipe>(&prompt).await
+    // Generate the recipe with a structured prompt
+    let prompt = format!(
+        "Create a recipe for {}. Your response must be valid, structured JSON with the following format:\n\
+        {{\n\
+          \"name\": \"Recipe Name\",\n\
+          \"ingredients\": [\n\
+            {{ \"name\": \"ingredient name\", \"amount\": 2.0, \"unit\": \"cups\" }},\n\
+            {{ \"name\": \"another ingredient\", \"amount\": 1.0, \"unit\": \"tablespoon\" }}\n\
+          ],\n\
+          \"steps\": [\n\
+            {{ \"number\": 1, \"description\": \"First step instruction\" }},\n\
+            {{ \"number\": 2, \"description\": \"Second step instruction\" }}\n\
+          ]\n\
+        }}\n\n\
+        IMPORTANT:\n\
+        - Include at least 5 ingredients with proper measurements\n\
+        - All numerical amounts must be decimal numbers (like 1.0, 2.5, not integers)\n\
+        - Include at least 5 detailed steps\n\
+        - Step numbers must be sequential starting with 1\n\
+        - Return ONLY valid JSON with no additional explanation", 
+        recipe_name
+    );
+    
+    // Use the library's built-in retry functionality
+    client.generate_struct_with_retry::<Recipe>(&prompt, Some(3), Some(true)).await
 }
 
 async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recipe> {
@@ -152,13 +174,35 @@ async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recip
     
     // Create Anthropic client
     let client = AnthropicClient::new(api_key)?
-        .model(AnthropicModel::Claude3Sonnet) // Use Claude 3 Sonnet for better recipes
-        .temperature(0.2) // Some creativity but mostly consistent
+        .model(AnthropicModel::Claude35Sonnet) // Use Claude 3.5 Sonnet for better recipes
+        .temperature(0.1) // Lower temperature for more consistent results
         .build();
     
-    // Generate the recipe
-    let prompt = format!("Give me a complete recipe for {}. Include all ingredients with precise measurements and detailed steps.", recipe_name);
-    client.generate_struct::<Recipe>(&prompt).await
+    // Generate the recipe with a structured prompt
+    let prompt = format!(
+        "Create a recipe for {}. Your response must be valid, structured JSON with the following format:\n\
+        {{\n\
+          \"name\": \"Recipe Name\",\n\
+          \"ingredients\": [\n\
+            {{ \"name\": \"ingredient name\", \"amount\": 2.0, \"unit\": \"cups\" }},\n\
+            {{ \"name\": \"another ingredient\", \"amount\": 1.0, \"unit\": \"tablespoon\" }}\n\
+          ],\n\
+          \"steps\": [\n\
+            {{ \"number\": 1, \"description\": \"First step instruction\" }},\n\
+            {{ \"number\": 2, \"description\": \"Second step instruction\" }}\n\
+          ]\n\
+        }}\n\n\
+        IMPORTANT:\n\
+        - Include at least 5 ingredients with proper measurements\n\
+        - All numerical amounts must be decimal numbers (like 1.0, 2.5, not integers)\n\
+        - Include at least 5 detailed steps\n\
+        - Step numbers must be sequential starting with 1\n\
+        - Return ONLY valid JSON with no additional explanation", 
+        recipe_name
+    );
+    
+    // Use the library's built-in retry functionality
+    client.generate_struct_with_retry::<Recipe>(&prompt, Some(3), Some(true)).await
 }
 
 fn print_recipe(recipe: &Recipe) {
@@ -181,20 +225,8 @@ fn print_recipe(recipe: &Recipe) {
     println!("\nEnjoy your {}! 🍽️\n", recipe.name);
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    print!("What would you like a recipe for? ");
-    io::stdout().flush()?;
-    
-    let mut recipe_name = String::new();
-    io::stdin().read_line(&mut recipe_name)?;
-    let recipe_name = recipe_name.trim();
-    
-    if recipe_name.is_empty() {
-        println!("Please enter a recipe name.");
-        return Ok(());
-    }
-    
+// Helper function to handle recipe extraction
+async fn run_recipe_extraction(recipe_name: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("\nFetching recipe for {}...", recipe_name);
     
     // Try OpenAI first, fall back to Anthropic if OpenAI key isn't set
@@ -235,4 +267,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    print!("What would you like a recipe for? ");
+    io::stdout().flush()?;
+    
+    let mut recipe_name = String::new();
+    io::stdin().read_line(&mut recipe_name)?;
+    let recipe_name = recipe_name.trim();
+    
+    if recipe_name.is_empty() {
+        println!("No recipe name entered. Using default: chocolate chip cookies");
+        let recipe_name = "chocolate chip cookies".to_string();
+        return run_recipe_extraction(&recipe_name).await;
+    }
+    
+    run_recipe_extraction(recipe_name).await
 }

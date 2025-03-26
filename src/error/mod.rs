@@ -62,6 +62,25 @@ pub enum RStructorError {
     JsonError(#[from] serde_json::Error),
 }
 
+// Manual implementation of PartialEq for RStructorError
+// Note: HttpError and JsonError variants are considered unequal
+// because reqwest::Error and serde_json::Error don't implement PartialEq
+impl PartialEq for RStructorError {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::ApiError(a), Self::ApiError(b)) => a == b,
+            (Self::ValidationError(a), Self::ValidationError(b)) => a == b,
+            (Self::SchemaError(a), Self::SchemaError(b)) => a == b,
+            (Self::SerializationError(a), Self::SerializationError(b)) => a == b,
+            (Self::Timeout, Self::Timeout) => true,
+            // HttpError and JsonError don't implement PartialEq, so we always return false
+            (Self::HttpError(_), Self::HttpError(_)) => false,
+            (Self::JsonError(_), Self::JsonError(_)) => false,
+            _ => false,
+        }
+    }
+}
+
 /// A specialized Result type for RStructor operations.
 ///
 /// This type is used throughout the RStructor library to return either

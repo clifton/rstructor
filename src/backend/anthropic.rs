@@ -12,6 +12,7 @@ pub enum AnthropicModel {
     Claude3Haiku,
     Claude3Sonnet,
     Claude3Opus,
+    Claude35Sonnet, // Added Claude 3.5 Sonnet
 }
 
 impl AnthropicModel {
@@ -20,6 +21,7 @@ impl AnthropicModel {
             AnthropicModel::Claude3Haiku => "claude-3-haiku-20240307",
             AnthropicModel::Claude3Sonnet => "claude-3-sonnet-20240229",
             AnthropicModel::Claude3Opus => "claude-3-opus-20240229",
+            AnthropicModel::Claude35Sonnet => "claude-3-5-sonnet-20240620", // Claude 3.5 Sonnet model ID
         }
     }
 }
@@ -77,7 +79,7 @@ impl AnthropicClient {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let config = AnthropicConfig {
             api_key: api_key.into(),
-            model: AnthropicModel::Claude3Sonnet,
+            model: AnthropicModel::Claude35Sonnet, // Default to Claude 3.5 Sonnet
             temperature: 0.0,
             max_tokens: None,
         };

@@ -4,6 +4,8 @@
 - Always make sure there are relevant tests created and that they pass before finishing each task.
 - Ensure the generated rustdocs are high quality with examples.
 - Doctests should not be ignored and should always be checked.
+- Do not add logic into examples that should be library features. Make the library feature instead.
+- Always assume that test environment has valid LLM provider api keys.
 
 ## Build & Test Commands
 - Build: `cargo build`

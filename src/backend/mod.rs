@@ -1,9 +1,7 @@
-mod client;
-
-#[cfg(feature = "openai")]
+pub mod anthropic;
+pub mod client;
 pub mod openai;
 
-#[cfg(feature = "anthropic")]
-pub mod anthropic;
-
 pub use client::LLMClient;
+pub use openai::{OpenAIClient, Model as OpenAIModel};
+pub use anthropic::{AnthropicClient, AnthropicModel};

@@ -1,3 +1,13 @@
+//! Integration tests for LLM functionality.
+//!
+//! These tests require valid API keys in the environment:
+//!
+//! ```bash
+//! export OPENAI_API_KEY=your_key_here
+//! export ANTHROPIC_API_KEY=your_key_here
+//! cargo test --test llm_integration_tests
+//! ```
+
 #[cfg(test)]
 mod llm_integration_tests {
     use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel, AnthropicClient, AnthropicModel, SchemaType};
@@ -48,13 +58,12 @@ mod llm_integration_tests {
 
     // Test using OpenAI
     #[tokio::test]
-    #[ignore] // Ignored by default as it requires API keys
     async fn test_openai_generate_struct() {
         let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY env var not set");
         
         let client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
-            .model(OpenAIModel::Gpt35Turbo)
+            .model(OpenAIModel::Gpt4O)
             .temperature(0.0)
             .build();
         
@@ -73,13 +82,12 @@ mod llm_integration_tests {
     
     // Test using Anthropic
     #[tokio::test]
-    #[ignore] // Ignored by default as it requires API keys
     async fn test_anthropic_generate_struct() {
         let api_key = env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY env var not set");
         
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::Claude3Haiku) // Using smaller model for faster results
+            .model(AnthropicModel::Claude35Sonnet)
             .temperature(0.0)
             .build();
         
