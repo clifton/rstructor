@@ -1,11 +1,13 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{DataEnum, Ident, Fields, Type};
+use syn::{DataEnum, Fields, Ident, Type};
 
 use crate::container_attrs::ContainerAttributes;
 use crate::parsers::field_parser::parse_field_attributes;
 use crate::parsers::variant_parser::parse_variant_attributes;
-use crate::type_utils::{get_schema_type_from_rust_type, is_option_type, is_array_type, get_array_inner_type};
+use crate::type_utils::{
+    get_array_inner_type, get_schema_type_from_rust_type, is_array_type, is_option_type,
+};
 
 /// Generate the schema implementation for an enum
 pub fn generate_enum_schema(
@@ -114,11 +116,13 @@ fn generate_complex_enum_schema(
     // Process each variant
     for variant in &data_enum.variants {
         let variant_name = variant.ident.to_string();
-        
+
         // Get description from variant attributes if available
         let attrs = parse_variant_attributes(variant);
-        let description = attrs.description.unwrap_or_else(|| format!("Variant {}", variant_name));
-        
+        let description = attrs
+            .description
+            .unwrap_or_else(|| format!("Variant {}", variant_name));
+
         match &variant.fields {
             // For variants with no fields (simple enum variants)
             Fields::Unit => {
@@ -130,19 +134,19 @@ fn generate_complex_enum_schema(
                         "description": #description
                     })
                 });
-            },
-            
+            }
+
             // For tuple-like variants with unnamed fields e.g., Variant(Type1, Type2)
             Fields::Unnamed(fields) => {
                 let has_single_field = fields.unnamed.len() == 1;
-                
+
                 if has_single_field {
                     // Handle single unnamed field specially (more natural JSON)
                     let field = fields.unnamed.first().unwrap();
-                    
+
                     // Extract field schema based on its type
                     let field_schema = generate_field_schema(&field.ty, &None);
-                    
+
                     variant_schemas.push(quote! {
                         // Tuple variant with single field - { "variant": value }
                         ::serde_json::json!({
@@ -158,12 +162,12 @@ fn generate_complex_enum_schema(
                 } else {
                     // Multiple unnamed fields - use array format
                     let mut field_schemas = Vec::new();
-                    
+
                     for field in fields.unnamed.iter() {
                         let field_schema = generate_field_schema(&field.ty, &None);
                         field_schemas.push(field_schema);
                     }
-                    
+
                     variant_schemas.push(quote! {
                         // Tuple variant with multiple fields - { "variant": [values...] }
                         ::serde_json::json!({
@@ -184,26 +188,28 @@ fn generate_complex_enum_schema(
                         })
                     });
                 }
-            },
-            
+            }
+
             // For struct-like variants with named fields e.g., Variant { field1: Type1, field2: Type2 }
             Fields::Named(fields) => {
                 let mut prop_schemas = Vec::new();
                 let mut required_fields = Vec::new();
-                
+
                 for field in &fields.named {
                     if let Some(field_name) = &field.ident {
                         let field_name_str = field_name.to_string();
                         let field_attrs = parse_field_attributes(field);
-                        let field_desc = field_attrs.description.unwrap_or_else(|| format!("Field {}", field_name_str));
-                        
+                        let field_desc = field_attrs
+                            .description
+                            .unwrap_or_else(|| format!("Field {}", field_name_str));
+
                         let is_optional = is_option_type(&field.ty);
                         let field_schema = generate_field_schema(&field.ty, &Some(field_desc));
-                        
+
                         prop_schemas.push(quote! {
                             #field_name_str: #field_schema
                         });
-                        
+
                         if !is_optional {
                             required_fields.push(quote! {
                                 ::serde_json::Value::String(#field_name_str.to_string())
@@ -211,15 +217,15 @@ fn generate_complex_enum_schema(
                         }
                     }
                 }
-                
+
                 let required_array = if !required_fields.is_empty() {
                     quote! {
                         "required": [#(#required_fields),*],
                     }
                 } else {
-                    quote! { }
+                    quote! {}
                 };
-                
+
                 variant_schemas.push(quote! {
                     // Struct variant with named fields
                     ::serde_json::json!({
@@ -242,7 +248,7 @@ fn generate_complex_enum_schema(
             }
         }
     }
-    
+
     // Handle container attributes
     let mut container_setters = Vec::new();
 
@@ -279,7 +285,7 @@ fn generate_complex_enum_schema(
     } else {
         quote! {}
     };
-    
+
     // Generate the final schema implementation
     quote! {
         impl ::rstructor::schema::SchemaType for #name {
@@ -288,18 +294,18 @@ fn generate_complex_enum_schema(
                 let variant_schemas = vec![
                     #(#variant_schemas),*
                 ];
-                
+
                 let mut schema_obj = ::serde_json::json!({
                     "oneOf": variant_schemas,
                     "title": stringify!(#name)
                 });
-                
+
                 // Add container attributes if available
                 #container_setter
-                
+
                 ::rstructor::schema::Schema::new(schema_obj)
             }
-            
+
             fn schema_name() -> Option<String> {
                 Some(stringify!(#name).to_string())
             }
@@ -315,7 +321,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
         // For array types
         if let Some(inner_type) = get_array_inner_type(field_type) {
             let inner_schema_type = get_schema_type_from_rust_type(inner_type);
-            
+
             let desc_prop = if let Some(desc) = description {
                 quote! {
                     "description": #desc,
@@ -323,7 +329,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
             } else {
                 quote! {}
             };
-            
+
             quote! {
                 ::serde_json::json!({
                     "type": #schema_type,
@@ -342,7 +348,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
             } else {
                 quote! {}
             };
-            
+
             quote! {
                 ::serde_json::json!({
                     "type": #schema_type,
@@ -361,7 +367,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                 let last_segment = type_path.path.segments.last();
                 if let Some(_segment) = last_segment {
                     // We don't need the type name for now, but this structure is useful for future enhancements
-                    
+
                     let desc_prop = if let Some(desc) = description {
                         quote! {
                             "description": #desc,
@@ -369,19 +375,19 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                     } else {
                         quote! {}
                     };
-                    
+
                     // Use the type's schema if it implements SchemaType
                     quote! {
                         {
                             // Try to use the type's schema if available
                             if let Some(schema) = <#type_path as ::rstructor::schema::SchemaType>::schema_name() {
                                 let mut obj = <#type_path as ::rstructor::schema::SchemaType>::schema().to_json().clone();
-                                
+
                                 // Add description if provided
                                 if let ::serde_json::Value::Object(ref mut map) = obj {
                                     #desc_prop
                                 }
-                                
+
                                 obj
                             } else {
                                 // Fallback to simple object schema
@@ -401,7 +407,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                     } else {
                         quote! {}
                     };
-                    
+
                     quote! {
                         ::serde_json::json!({
                             "type": "object",
@@ -409,7 +415,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                         })
                     }
                 }
-            },
+            }
             _ => {
                 // Fallback for non-path type
                 let desc_prop = if let Some(desc) = description {
@@ -419,7 +425,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                 } else {
                     quote! {}
                 };
-                
+
                 quote! {
                     ::serde_json::json!({
                         "type": "object",
@@ -437,7 +443,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
         } else {
             quote! {}
         };
-        
+
         quote! {
             ::serde_json::json!({
                 "type": #schema_type,

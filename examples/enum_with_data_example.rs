@@ -33,7 +33,16 @@ fn main() {
 
     // Print serialized representations
     println!("\nSerialized UserStatus instances:");
-    println!("Online: {}", serde_json::to_string_pretty(&online_status).unwrap());
-    println!("Away: {}", serde_json::to_string_pretty(&away_status).unwrap());
-    println!("Busy: {}", serde_json::to_string_pretty(&busy_status).unwrap());
+    println!(
+        "Online: {}",
+        serde_json::to_string_pretty(&online_status).unwrap()
+    );
+    println!(
+        "Away: {}",
+        serde_json::to_string_pretty(&away_status).unwrap()
+    );
+    println!(
+        "Busy: {}",
+        serde_json::to_string_pretty(&busy_status).unwrap()
+    );
 }

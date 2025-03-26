@@ -35,10 +35,10 @@ mod error_tests {
     fn test_from_json_error() {
         // Create a JSON error
         let json_err = serde_json::from_value::<String>(json!(42)).unwrap_err();
-        
+
         // Convert to RStructorError
         let err: RStructorError = json_err.into();
-        
+
         // Check error type and message
         match err {
             RStructorError::JsonError(_) => {
@@ -55,9 +55,10 @@ mod error_tests {
         // Test Ok case
         let ok_result: Result<i32> = Ok(42);
         assert_eq!(ok_result, Ok(42));
-        
+
         // Test Error case
-        let err_result: Result<i32> = Err(RStructorError::ValidationError("test error".to_string()));
+        let err_result: Result<i32> =
+            Err(RStructorError::ValidationError("test error".to_string()));
         assert!(err_result.is_err());
     }
 }

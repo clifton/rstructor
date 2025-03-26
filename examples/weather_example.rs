@@ -1,4 +1,4 @@
-use rstructor::{LLMModel, SchemaType, RStructorError};
+use rstructor::{LLMModel, RStructorError, SchemaType};
 use serde::{Deserialize, Serialize};
 
 #[derive(LLMModel, Serialize, Deserialize)]
@@ -19,18 +19,19 @@ impl WeatherInfo {
         // Validate city name isn't empty
         if self.city.trim().is_empty() {
             return Err(RStructorError::ValidationError(
-                "City name cannot be empty".to_string()
+                "City name cannot be empty".to_string(),
             ));
         }
-        
+
         // Validate temperature is within a reasonable range
         // Reasonable range for Earth temperatures in Celsius
         if self.temperature < -100.0 || self.temperature > 70.0 {
-            return Err(RStructorError::ValidationError(
-                format!("Temperature must be between -100°C and 70°C, got {}°C", self.temperature)
-            ));
+            return Err(RStructorError::ValidationError(format!(
+                "Temperature must be between -100°C and 70°C, got {}°C",
+                self.temperature
+            )));
         }
-        
+
         Ok(())
     }
 }
@@ -74,9 +75,9 @@ async fn main() -> rstructor::Result<()> {
     // Try with environment variable for API key
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
         println!("\nAPI key found! Trying an actual weather query with OpenAI...");
-        
-        use rstructor::{OpenAIClient, OpenAIModel, LLMClient};
-        
+
+        use rstructor::{LLMClient, OpenAIClient, OpenAIModel};
+
         // Create an OpenAI client
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt35Turbo)
@@ -95,17 +96,19 @@ async fn main() -> rstructor::Result<()> {
                 if let Some(desc) = weather.description {
                     println!("Description: {}", desc);
                 }
-                
+
                 // Weather comes back validated!
-                println!("\nNote: The data has already been validated by the generate_struct method!");
-            },
+                println!(
+                    "\nNote: The data has already been validated by the generate_struct method!"
+                );
+            }
             Err(e) => println!("Error getting weather from OpenAI: {}", e),
         }
     } else {
         println!("\nNo OPENAI_API_KEY found in environment variables.");
         println!("To test with a real API call, set this variable and run again.");
     }
-    
+
     // Print the sample instance
     println!("\nSample Weather Info:");
     println!("{}", serde_json::to_string_pretty(&valid_weather).unwrap());

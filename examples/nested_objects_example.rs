@@ -1,57 +1,52 @@
-use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel, AnthropicClient, AnthropicModel, RStructorError};
-use serde::{Serialize, Deserialize};
+use rstructor::{
+    AnthropicClient, AnthropicModel, LLMClient, LLMModel, OpenAIClient, OpenAIModel, RStructorError,
+};
+use serde::{Deserialize, Serialize};
 use std::env;
 
 // Define a nested data model for a recipe
 #[derive(LLMModel, Serialize, Deserialize, Debug)]
 #[llm(description = "A cooking ingredient with amount and unit")]
 struct Ingredient {
-    #[llm(description = "Name of the ingredient", 
-          example = "flour")]
+    #[llm(description = "Name of the ingredient", example = "flour")]
     name: String,
-    
-    #[llm(description = "Amount of the ingredient", 
-          example = 2.5)]
+
+    #[llm(description = "Amount of the ingredient", example = 2.5)]
     amount: f32,
-    
-    #[llm(description = "Unit of measurement", 
-          example = "cups")]
+
+    #[llm(description = "Unit of measurement", example = "cups")]
     unit: String,
 }
 
 #[derive(LLMModel, Serialize, Deserialize, Debug)]
 #[llm(description = "A step in the recipe instructions")]
 struct Step {
-    #[llm(description = "Order number of this step", 
-          example = 1)]
+    #[llm(description = "Order number of this step", example = 1)]
     number: u16,
-    
-    #[llm(description = "Description of this step", 
-          example = "Mix the flour and sugar together")]
+
+    #[llm(
+        description = "Description of this step",
+        example = "Mix the flour and sugar together"
+    )]
     description: String,
-    
-    #[llm(description = "Estimated time for this step in minutes", 
-          example = 5)]
+
+    #[llm(description = "Estimated time for this step in minutes", example = 5)]
     time_minutes: Option<u16>,
 }
 
 #[derive(LLMModel, Serialize, Deserialize, Debug)]
 #[llm(description = "Nutritional information per serving")]
 struct Nutrition {
-    #[llm(description = "Calories per serving", 
-          example = 350)]
+    #[llm(description = "Calories per serving", example = 350)]
     calories: u16,
-    
-    #[llm(description = "Protein in grams", 
-          example = 7.5)]
+
+    #[llm(description = "Protein in grams", example = 7.5)]
     protein_g: f32,
-    
-    #[llm(description = "Carbohydrates in grams", 
-          example = 45.0)]
+
+    #[llm(description = "Carbohydrates in grams", example = 45.0)]
     carbs_g: f32,
-    
-    #[llm(description = "Fat in grams", 
-          example = 15.2)]
+
+    #[llm(description = "Fat in grams", example = 15.2)]
     fat_g: f32,
 }
 
@@ -84,36 +79,33 @@ struct Nutrition {
         })
       ])]
 struct Recipe {
-    #[llm(description = "Name of the recipe", 
-          example = "Banana Bread")]
+    #[llm(description = "Name of the recipe", example = "Banana Bread")]
     name: String,
-    
-    #[llm(description = "Short description of the recipe", 
-          example = "Delicious homemade banana bread with walnuts")]
+
+    #[llm(
+        description = "Short description of the recipe",
+        example = "Delicious homemade banana bread with walnuts"
+    )]
     description: String,
-    
-    #[llm(description = "Preparation time in minutes", 
-          example = 20)]
+
+    #[llm(description = "Preparation time in minutes", example = 20)]
     prep_time_minutes: u16,
-    
-    #[llm(description = "Cooking time in minutes", 
-          example = 60)]
+
+    #[llm(description = "Cooking time in minutes", example = 60)]
     cook_time_minutes: u16,
-    
-    #[llm(description = "Number of servings this recipe makes", 
-          example = 8)]
+
+    #[llm(description = "Number of servings this recipe makes", example = 8)]
     servings: u8,
-    
-    #[llm(description = "Recipe difficulty level", 
-          example = "Medium")]
+
+    #[llm(description = "Recipe difficulty level", example = "Medium")]
     difficulty: String,
-    
+
     #[llm(description = "List of ingredients needed")]
     ingredients: Vec<Ingredient>,
-    
+
     #[llm(description = "Step-by-step cooking instructions")]
     steps: Vec<Step>,
-    
+
     #[llm(description = "Nutritional information per serving")]
     nutrition: Nutrition,
 }
@@ -125,36 +117,37 @@ impl Recipe {
         // Check that we have at least one ingredient
         if self.ingredients.is_empty() {
             return Err(RStructorError::ValidationError(
-                "Recipe must have at least one ingredient".to_string()
+                "Recipe must have at least one ingredient".to_string(),
             ));
         }
-        
+
         // Check that we have at least one step
         if self.steps.is_empty() {
             return Err(RStructorError::ValidationError(
-                "Recipe must have at least one step".to_string()
+                "Recipe must have at least one step".to_string(),
             ));
         }
-        
+
         // Check that steps are numbered correctly (1-based, sequential)
         for (i, step) in self.steps.iter().enumerate() {
             if step.number != (i + 1) as u16 {
-                return Err(RStructorError::ValidationError(
-                    format!("Step numbers must be sequential, expected {} but got {}", 
-                            i + 1, step.number)
-                ));
+                return Err(RStructorError::ValidationError(format!(
+                    "Step numbers must be sequential, expected {} but got {}",
+                    i + 1,
+                    step.number
+                )));
             }
         }
-        
+
         // Check that difficulty is one of the expected values
         let valid_difficulties = vec!["Easy", "Medium", "Hard"];
         if !valid_difficulties.contains(&self.difficulty.as_str()) {
-            return Err(RStructorError::ValidationError(
-                format!("Difficulty must be one of {:?}, got {}", 
-                        valid_difficulties, self.difficulty)
-            ));
+            return Err(RStructorError::ValidationError(format!(
+                "Difficulty must be one of {:?}, got {}",
+                valid_difficulties, self.difficulty
+            )));
         }
-        
+
         Ok(())
     }
 }
@@ -163,39 +156,37 @@ impl Recipe {
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // User prompt requesting a recipe
     let prompt = "Create a recipe for chocolate chip cookies";
-    
+
     // Try using either OpenAI or Anthropic based on available API keys
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         println!("Using OpenAI to generate recipe...");
-        
+
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt4) // More capable model for complex nested structures
             .temperature(0.2)
             .build();
-        
+
         let recipe: Recipe = client.generate_struct(prompt).await?;
-        
+
         // Print the generated recipe
         print_recipe(&recipe);
-        
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("Using Anthropic to generate recipe...");
-        
+
         let client = AnthropicClient::new(api_key)?
             .model(AnthropicModel::Claude3Sonnet) // Using more capable model for complex structure
             .temperature(0.2)
             .build();
-        
+
         let recipe: Recipe = client.generate_struct(prompt).await?;
-        
+
         // Print the generated recipe
         print_recipe(&recipe);
-        
     } else {
         println!("No API keys found in environment variables.");
         println!("Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY to run this example.");
     }
-    
+
     Ok(())
 }
 
@@ -203,17 +194,20 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 fn print_recipe(recipe: &Recipe) {
     println!("\n===== {} =====", recipe.name);
     println!("{}\n", recipe.description);
-    
+
     println!("Prep Time: {} minutes", recipe.prep_time_minutes);
     println!("Cook Time: {} minutes", recipe.cook_time_minutes);
     println!("Servings: {}", recipe.servings);
     println!("Difficulty: {}\n", recipe.difficulty);
-    
+
     println!("--- Ingredients ---");
     for ingredient in &recipe.ingredients {
-        println!("• {} {} {}", ingredient.amount, ingredient.unit, ingredient.name);
+        println!(
+            "• {} {} {}",
+            ingredient.amount, ingredient.unit, ingredient.name
+        );
     }
-    
+
     println!("\n--- Instructions ---");
     for step in &recipe.steps {
         let time_info = if let Some(time) = step.time_minutes {
@@ -221,10 +215,10 @@ fn print_recipe(recipe: &Recipe) {
         } else {
             String::new()
         };
-        
+
         println!("{}. {}{}", step.number, step.description, time_info);
     }
-    
+
     println!("\n--- Nutrition (per serving) ---");
     println!("Calories: {}", recipe.nutrition.calories);
     println!("Protein: {}g", recipe.nutrition.protein_g);

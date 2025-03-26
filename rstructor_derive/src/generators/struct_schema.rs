@@ -4,7 +4,9 @@ use syn::{DataStruct, Fields, Ident};
 
 use crate::container_attrs::ContainerAttributes;
 use crate::parsers::field_parser::parse_field_attributes;
-use crate::type_utils::{get_schema_type_from_rust_type, is_option_type, is_array_type, get_array_inner_type};
+use crate::type_utils::{
+    get_array_inner_type, get_schema_type_from_rust_type, is_array_type, is_option_type,
+};
 
 /// Generate the schema implementation for a struct
 pub fn generate_struct_schema(
@@ -81,7 +83,7 @@ pub fn generate_struct_schema(
                             // Create property for this array field
                             let mut props = ::serde_json::Map::new();
                             props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-                            
+
                             // Add items schema
                             let mut items_schema = ::serde_json::Map::new();
                             items_schema.insert("type".to_string(), ::serde_json::Value::String(#inner_schema_type.to_string()));
@@ -93,7 +95,7 @@ pub fn generate_struct_schema(
                             // Create property for this array field (fallback)
                             let mut props = ::serde_json::Map::new();
                             props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-                            
+
                             // Add default items schema
                             let mut items_schema = ::serde_json::Map::new();
                             items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));

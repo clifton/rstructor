@@ -5,7 +5,7 @@ pub struct VariantAttributes {
     pub description: Option<String>,
 }
 
-/// Parse a single enum variant's llm attributes 
+/// Parse a single enum variant's llm attributes
 pub fn parse_variant_attributes(variant: &Variant) -> VariantAttributes {
     let mut description = None;
 
@@ -24,7 +24,5 @@ pub fn parse_variant_attributes(variant: &Variant) -> VariantAttributes {
         }
     }
 
-    VariantAttributes {
-        description,
-    }
+    VariantAttributes { description }
 }

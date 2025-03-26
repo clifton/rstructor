@@ -98,7 +98,7 @@ impl OpenAIClient {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let config = OpenAIConfig {
             api_key: api_key.into(),
-            model: Model::Gpt4O,  // Default to GPT-4o
+            model: Model::Gpt4O, // Default to GPT-4o
             temperature: 0.0,
             max_tokens: None,
         };

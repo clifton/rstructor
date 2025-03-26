@@ -3,7 +3,7 @@ use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::time::sleep;
 
-use crate::error::{Result, RStructorError};
+use crate::error::{RStructorError, Result};
 use crate::model::LLMModel;
 
 /// LLMClient trait defines the interface for all LLM API clients.
@@ -94,7 +94,7 @@ pub trait LLMClient {
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
         T: LLMModel + DeserializeOwned + Send + 'static;
-        
+
     /// Generate a structured object with automatic retry for validation errors.
     ///
     /// Similar to `generate_struct`, but will automatically retry if validation fails,
@@ -144,15 +144,20 @@ pub trait LLMClient {
     /// # Ok(())
     /// # }
     /// ```
-    async fn generate_struct_with_retry<T>(&self, prompt: &str, max_retries: Option<usize>, include_errors: Option<bool>) -> Result<T>
+    async fn generate_struct_with_retry<T>(
+        &self,
+        prompt: &str,
+        max_retries: Option<usize>,
+        include_errors: Option<bool>,
+    ) -> Result<T>
     where
-        T: LLMModel + DeserializeOwned + Send + 'static {
-        
+        T: LLMModel + DeserializeOwned + Send + 'static,
+    {
         let max_attempts = max_retries.unwrap_or(3) + 1; // +1 for initial attempt
         let include_errors = include_errors.unwrap_or(true);
         let mut validation_errors: Option<String> = None;
         let mut current_prompt = prompt.to_string();
-        
+
         for attempt in 0..max_attempts {
             // Add validation errors to the prompt if available and enabled
             if attempt > 0 && include_errors && validation_errors.is_some() {
@@ -163,7 +168,7 @@ pub trait LLMClient {
                 );
                 current_prompt = error_prompt;
             }
-            
+
             // Attempt to generate structured data
             match self.generate_struct::<T>(&current_prompt).await {
                 Ok(result) => return Ok(result),
@@ -178,13 +183,13 @@ pub trait LLMClient {
                             continue;
                         }
                     }
-                    
+
                     // For non-validation errors or last attempt, return the error
                     return Err(err);
                 }
             }
         }
-        
+
         // This should never be reached due to the returns in the loop
         unreachable!()
     }
