@@ -65,7 +65,7 @@ mod llm_integration_tests {
         assert_eq!(movie.title, "Inception");
         assert_eq!(movie.year, 2010);
         assert_eq!(movie.director, "Christopher Nolan");
-        assert!(movie.actors.len() > 0);
+        assert!(!movie.actors.is_empty());
         assert!(movie.plot.len() > 10);
         
         println!("OpenAI response: {:#?}", movie);
@@ -90,7 +90,7 @@ mod llm_integration_tests {
         assert_eq!(movie.title, "Inception");
         assert_eq!(movie.year, 2010);
         assert_eq!(movie.director, "Christopher Nolan");
-        assert!(movie.actors.len() > 0);
+        assert!(!movie.actors.is_empty());
         assert!(movie.plot.len() > 10);
         
         println!("Anthropic response: {:#?}", movie);

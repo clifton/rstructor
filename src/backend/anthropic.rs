@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::backend::LLMClient;
 use crate::error::{RStructorError, Result};

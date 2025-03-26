@@ -118,7 +118,7 @@ mod integration_tests {
         // Check examples
         assert_eq!(props["string_field"]["example"], "Hello World");
         assert_eq!(props["int_field"]["example"], 42);
-        assert_eq!(props["float_field"]["example"], 3.14);
+        assert_eq!(props["float_field"]["example"], std::f64::consts::PI);
         assert_eq!(props["bool_field"]["example"], true);
 
         // Check required fields

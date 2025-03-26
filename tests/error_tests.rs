@@ -40,11 +40,13 @@ mod error_tests {
         let err: RStructorError = json_err.into();
         
         // Check error type and message
-        if let RStructorError::JsonError(_) = err {
-            // Success - correct error type
-            assert!(true);
-        } else {
-            panic!("Expected JsonError, got {:?}", err);
+        match err {
+            RStructorError::JsonError(_) => {
+                // Success - correct error type was created
+            }
+            other => {
+                panic!("Expected JsonError, got {:?}", other);
+            }
         }
     }
 
@@ -52,7 +54,7 @@ mod error_tests {
     fn test_result_type() {
         // Test Ok case
         let ok_result: Result<i32> = Ok(42);
-        assert_eq!(ok_result.unwrap(), 42);
+        assert_eq!(ok_result, Ok(42));
         
         // Test Error case
         let err_result: Result<i32> = Err(RStructorError::ValidationError("test error".to_string()));
