@@ -17,7 +17,7 @@ use crate::schema::SchemaType;
 ///
 /// To add custom validation:
 ///
-/// ```rust
+/// ```
 /// use rstructor::{LLMModel, RStructorError};
 /// use serde::{Serialize, Deserialize};
 ///
@@ -52,8 +52,17 @@ use crate::schema::SchemaType;
 ///
 /// # Example: Using with LLM clients
 ///
-/// ```rust
-/// use rstructor::{LLMClient, OpenAIClient, OpenAIModel};
+/// ```no_run
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// use rstructor::{LLMClient, OpenAIClient, OpenAIModel, LLMModel};
+/// use serde::{Serialize, Deserialize};
+///
+/// // Define a product model
+/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// struct ProductInfo {
+///     name: String,
+///     price: f64,
+/// }
 ///
 /// // Create a client
 /// let client = OpenAIClient::new("your-api-key")?
@@ -61,7 +70,9 @@ use crate::schema::SchemaType;
 ///     .build();
 ///
 /// // Get structured data with automatic validation
-/// let product: Product = client.generate_struct("Describe a laptop").await?;
+/// let product = client.generate_struct::<ProductInfo>("Describe a laptop").await?;
+/// # Ok(())
+/// # }
 /// ```
 pub trait LLMModel: SchemaType + DeserializeOwned + Serialize {
     /// Optional validation logic beyond type checking
@@ -72,14 +83,26 @@ pub trait LLMModel: SchemaType + DeserializeOwned + Serialize {
     ///
     /// # Example
     ///
-    /// ```rust
-    /// fn validate(&self) -> rstructor::Result<()> {
-    ///     if self.price < 0.0 {
-    ///         return Err(rstructor::RStructorError::ValidationError(
-    ///             format!("Price must be positive, got {}", self.price)
-    ///         ));
+    /// ```
+    /// # use rstructor::{LLMModel, RStructorError};
+    /// # use serde::{Serialize, Deserialize};
+    /// #
+    /// # #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    /// # struct Product {
+    /// #     name: String,
+    /// #     price: f64,
+    /// # }
+    /// #
+    /// impl Product {
+    ///     fn validate(&self) -> rstructor::Result<()> {
+    ///         // Price must be positive
+    ///         if self.price < 0.0 {
+    ///             return Err(RStructorError::ValidationError(
+    ///                 format!("Price must be positive, got {}", self.price)
+    ///             ));
+    ///         }
+    ///         Ok(())
     ///     }
-    ///     Ok(())
     /// }
     /// ```
     fn validate(&self) -> Result<()> {
