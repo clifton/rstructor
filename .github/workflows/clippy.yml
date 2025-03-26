@@ -27,6 +27,9 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git
           cache-on-failure: true
+          
+      - name: Install Clippy
+        run: rustup component add clippy
 
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
