@@ -1,0 +1,20 @@
+[package]
+name = "rstructor_derive"
+version = "0.1.0"
+edition = "2024"
+description = "Derive macros for the rstructor library"
+license = "MIT"
+repository = "https://github.com/yourusername/rstructor"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+
+[dev-dependencies]
+rstructor = { path = ".." }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
