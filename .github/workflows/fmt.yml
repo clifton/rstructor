@@ -24,5 +24,9 @@ jobs:
       - name: Install rustfmt
         run: rustup component add rustfmt
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      - name: Format code
+        run: cargo fmt --all
+      
+      - name: Check for uncommitted changes
+        run: |
+          git diff --exit-code || (echo "Formatting changes detected. Please run 'cargo fmt' locally and commit the changes." && exit 1)
