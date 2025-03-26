@@ -52,9 +52,7 @@ struct CompletionRequest {
     model: String,
     messages: Vec<Message>,
     temperature: f32,
-    max_tokens: Option<u32>,
-    #[serde(rename = "anthropic_version")]
-    version: String,
+    max_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,7 +103,8 @@ impl AnthropicClient {
 
     /// Set the maximum tokens to generate
     pub fn max_tokens(mut self, max: u32) -> Self {
-        self.config.max_tokens = Some(max);
+        // Ensure max_tokens is at least 1 to avoid API errors
+        self.config.max_tokens = Some(max.max(1));
         self
     }
 
@@ -127,7 +126,7 @@ impl LLMClient for AnthropicClient {
         // Create a prompt that includes the schema
         let schema_str = schema.to_string();
         let structured_prompt = format!(
-            "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nProvide your answer in JSON format only. No explanations or additional text.\n\nUser query: {}",
+            "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n\nUser query: {}",
             schema_str, prompt
         );
 
@@ -139,8 +138,7 @@ impl LLMClient for AnthropicClient {
                 content: structured_prompt,
             }],
             temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
-            version: "2023-06-01".to_string(),
+            max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
         };
 
         // Send the request to Anthropic
@@ -193,8 +191,7 @@ impl LLMClient for AnthropicClient {
                 content: prompt.to_string(),
             }],
             temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
-            version: "2023-06-01".to_string(),
+            max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
         };
 
         // Send the request to Anthropic

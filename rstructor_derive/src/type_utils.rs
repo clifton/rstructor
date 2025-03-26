@@ -180,3 +180,31 @@ pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
     }
     "object" // Default
 }
+
+/// Get the inner type of an array type like Vec<T>
+pub fn get_array_inner_type(ty: &Type) -> Option<&Type> {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.first() {
+            let type_name = segment.ident.to_string();
+            if matches!(type_name.as_str(), "Vec" | "Array" | "HashSet" | "BTreeSet") {
+                if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return Some(inner_ty);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check if a type is an array type (Vec, Array, etc.)
+pub fn is_array_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.first() {
+            let type_name = segment.ident.to_string();
+            return matches!(type_name.as_str(), "Vec" | "Array" | "HashSet" | "BTreeSet");
+        }
+    }
+    false
+}

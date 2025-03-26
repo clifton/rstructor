@@ -4,7 +4,7 @@ use syn::{DataStruct, Fields, Ident};
 
 use crate::container_attrs::ContainerAttributes;
 use crate::parsers::field_parser::parse_field_attributes;
-use crate::type_utils::{get_schema_type_from_rust_type, is_option_type};
+use crate::type_utils::{get_schema_type_from_rust_type, is_option_type, is_array_type, get_array_inner_type};
 
 /// Generate the schema implementation for a struct
 pub fn generate_struct_schema(
@@ -73,10 +73,40 @@ pub fn generate_struct_schema(
                 let schema_type = get_schema_type_from_rust_type(&field.ty);
 
                 // Create field property
-                let field_prop = quote! {
-                    // Create property for this field
-                    let mut props = ::serde_json::Map::new();
-                    props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
+                let field_prop = if is_array_type(&field.ty) {
+                    // For array types, we need to add the 'items' property
+                    if let Some(inner_type) = get_array_inner_type(&field.ty) {
+                        let inner_schema_type = get_schema_type_from_rust_type(inner_type);
+                        quote! {
+                            // Create property for this array field
+                            let mut props = ::serde_json::Map::new();
+                            props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
+                            
+                            // Add items schema
+                            let mut items_schema = ::serde_json::Map::new();
+                            items_schema.insert("type".to_string(), ::serde_json::Value::String(#inner_schema_type.to_string()));
+                            props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
+                        }
+                    } else {
+                        // Fallback for array without detectable item type
+                        quote! {
+                            // Create property for this array field (fallback)
+                            let mut props = ::serde_json::Map::new();
+                            props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
+                            
+                            // Add default items schema
+                            let mut items_schema = ::serde_json::Map::new();
+                            items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                            props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
+                        }
+                    }
+                } else {
+                    // Regular non-array type
+                    quote! {
+                        // Create property for this field
+                        let mut props = ::serde_json::Map::new();
+                        props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
+                    }
                 };
                 property_setters.push(field_prop);
 
