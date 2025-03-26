@@ -1,0 +1,25 @@
+name: Format
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "cmt-fmt"
+          cache-on-failure: true
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check

@@ -3,6 +3,8 @@
 <p align="center">
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024"/>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"/>
+  <img src="https://github.com/username/rstructor/actions/workflows/test.yml/badge.svg" alt="Tests Status"/>
+  <img src="https://github.com/username/rstructor/actions/workflows/clippy.yml/badge.svg" alt="Clippy Status"/>
 </p>
 
 RStructor is a Rust library for extracting structured data from Large Language Models (LLMs) with built-in validation. Define your schemas as Rust structs/enums, and RStructor will handle the rest—generating JSON Schemas, communicating with LLMs, parsing responses, and validating the results.
