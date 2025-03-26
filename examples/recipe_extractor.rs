@@ -1,4 +1,4 @@
-use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel, AnthropicClient, AnthropicModel, RStructorError, SchemaType};
+use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel, AnthropicClient, AnthropicModel, RStructorError};
 use serde::{Serialize, Deserialize};
 use std::{env, io::{self, Write}};
 
@@ -67,6 +67,7 @@ struct Recipe {
 
 // Add custom validation
 impl Recipe {
+    #[allow(dead_code)]
     fn validate(&self) -> rstructor::Result<()> {
         // Recipe must have a name
         if self.name.trim().is_empty() {

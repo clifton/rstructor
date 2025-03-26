@@ -44,6 +44,7 @@ struct Movie {
 // Manually provide the validate method with custom validation logic
 impl Movie {
     // Custom validation method
+    #[allow(dead_code)]
     fn validate(&self) -> rstructor::Result<()> {
         // Check that the rating is between 0 and 10
         if self.rating < 0.0 || self.rating > 10.0 {

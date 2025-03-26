@@ -64,6 +64,7 @@ struct ContentBlock {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ResponseMessage {
     role: String,
     content: Vec<ContentBlock>,

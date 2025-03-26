@@ -120,6 +120,7 @@ struct Recipe {
 
 // Custom validation implementation
 impl Recipe {
+    #[allow(dead_code)]
     fn validate(&self) -> rstructor::Result<()> {
         // Check that we have at least one ingredient
         if self.ingredients.is_empty() {

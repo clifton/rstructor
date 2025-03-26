@@ -37,6 +37,7 @@ mod llm_integration_tests {
     
     // Custom validation implementation
     impl Movie {
+        #[allow(dead_code)]
         fn validate(&self) -> rstructor::Result<()> {
             // Validate year is reasonable
             if self.year < 1888 || self.year > 2030 {

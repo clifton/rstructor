@@ -67,12 +67,14 @@ struct ChatCompletionRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct FunctionCall {
     name: String,
     arguments: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ResponseMessage {
     role: String,
     content: Option<String>,
@@ -80,6 +82,7 @@ struct ResponseMessage {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ChatCompletionChoice {
     message: ResponseMessage,
     finish_reason: String,

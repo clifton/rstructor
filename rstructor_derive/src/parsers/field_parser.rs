@@ -41,7 +41,7 @@ pub fn parse_field_attributes(field: &Field) -> FieldAttributes {
                     // First, try to parse as an array literal for array types
                     if let TypeCategory::Array = get_type_category(base_type) {
                         // Try to parse as an array literal
-                        if let Some(array_tokens) = parse_array_literal(&value) {
+                        if let Some(array_tokens) = parse_array_literal(value) {
                             example_value = Some(quote! {
                                 ::serde_json::Value::Array(vec![#(#array_tokens),*])
                             });
@@ -151,7 +151,7 @@ pub fn parse_field_attributes(field: &Field) -> FieldAttributes {
                     // First, try to parse as an array literal
                     let value = meta.value()?;
                     
-                    if let Some(array_tokens) = parse_array_literal(&value) {
+                    if let Some(array_tokens) = parse_array_literal(value) {
                         // Use the parsed array tokens directly
                         examples_array = array_tokens;
                         return Ok(());

@@ -30,7 +30,8 @@ impl ContainerAttributes {
         }
     }
 
-    /// Returns true if there are no attributes set
+    /// Returns true if there are no attributes set - currently unused but kept for future use
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.description.is_none()
             && self.title.is_none()

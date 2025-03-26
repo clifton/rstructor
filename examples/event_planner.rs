@@ -177,6 +177,7 @@ struct EventPlan {
 
 // Custom validation implementation
 impl EventPlan {
+    #[allow(dead_code)]
     fn validate(&self) -> rstructor::Result<()> {
         // Validate date format
         if NaiveDate::parse_from_str(&self.date, "%Y-%m-%d").is_err() {

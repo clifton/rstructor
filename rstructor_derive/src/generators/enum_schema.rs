@@ -139,8 +139,6 @@ fn generate_complex_enum_schema(
                 if has_single_field {
                     // Handle single unnamed field specially (more natural JSON)
                     let field = fields.unnamed.first().unwrap();
-                    let field_type = get_schema_type_from_rust_type(&field.ty);
-                    let is_opt = is_option_type(&field.ty);
                     
                     // Extract field schema based on its type
                     let field_schema = generate_field_schema(&field.ty, &None);
@@ -161,7 +159,7 @@ fn generate_complex_enum_schema(
                     // Multiple unnamed fields - use array format
                     let mut field_schemas = Vec::new();
                     
-                    for (i, field) in fields.unnamed.iter().enumerate() {
+                    for field in fields.unnamed.iter() {
                         let field_schema = generate_field_schema(&field.ty, &None);
                         field_schemas.push(field_schema);
                     }
@@ -361,8 +359,8 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
         match field_type {
             Type::Path(type_path) => {
                 let last_segment = type_path.path.segments.last();
-                if let Some(segment) = last_segment {
-                    let type_name = &segment.ident;
+                if let Some(_segment) = last_segment {
+                    // We don't need the type name for now, but this structure is useful for future enhancements
                     
                     let desc_prop = if let Some(desc) = description {
                         quote! {
