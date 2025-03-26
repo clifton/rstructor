@@ -6,10 +6,10 @@ struct WeatherInfo {
     #[llm(description = "City name to get weather for")]
     city: String,
     
-    #[llm(description = "Current temperature in Celsius", examples = "22.5")]
+    #[llm(description = "Current temperature in Celsius", example = 22.5)]
     temperature: f32,
     
-    #[llm(description = "Weather description", optional)]
+    #[llm(description = "Weather description")]
     description: Option<String>,
 }
 

@@ -15,16 +15,16 @@ struct MovieInfo {
     #[llm(description = "Title of the movie")]
     title: String,
     
-    #[llm(description = "Name of the director", examples = "Christopher Nolan")]
+    #[llm(description = "Name of the director", example = "Christopher Nolan")]
     director: String,
     
-    #[llm(description = "Year the movie was released", examples = "2010")]
+    #[llm(description = "Year the movie was released", example = 2010)]
     year: u16,
     
-    #[llm(description = "Genres of the movie", examples = r#"["Action", "Sci-Fi"]"#)]
+    #[llm(description = "Genres of the movie", example = ["Action", "Sci-Fi", "Adventure"])]
     genres: Vec<String>,
     
-    #[llm(description = "IMDB rating from 0.0 to 10.0", examples = "8.8", optional)]
+    #[llm(description = "IMDB rating from 0.0 to 10.0", examples = [7.5, 8.8, 9.2])]
     rating: Option<f32>,
     
     #[llm(description = "List of main cast members")]

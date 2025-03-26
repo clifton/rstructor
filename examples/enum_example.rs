@@ -23,7 +23,7 @@ struct TextAnalysis {
     #[llm(description = "The detected sentiment of the text")]
     sentiment: Sentiment,
     
-    #[llm(description = "Confidence score from 0.0 to 1.0", examples = "0.92")]
+    #[llm(description = "Confidence score from 0.0 to 1.0", example = "0.92")]
     confidence: f32,
 }
 

@@ -30,7 +30,7 @@ impl SchemaType for WeatherInfo {
                 json!({
                     "type": "number",
                     "description": "Current temperature in Celsius",
-                    "examples": 22.5
+                    "example": 22.5
                 }),
                 true
             )
