@@ -6,7 +6,8 @@ use std::env;
 
 // Define an enum for article categories
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "Category for a news article",
+#[serde(rename_all = "PascalCase")]
+#[llm(description = "Category for a news article. Must be one of the enum values: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.",
       examples = ["Politics", "Technology", "Business", "Sports", "Entertainment"])]
 enum ArticleCategory {
     Politics,
@@ -81,7 +82,7 @@ struct ArticleAnalysis {
     )]
     title: String,
 
-    #[llm(description = "Category the article belongs to")]
+    #[llm(description = "Category the article belongs to. Must be one of: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.")]
     category: ArticleCategory,
 
     #[llm(

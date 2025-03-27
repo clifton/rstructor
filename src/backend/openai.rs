@@ -146,7 +146,7 @@ impl LLMClient for OpenAIClient {
         // Create function definition with the schema
         let function = FunctionDef {
             name: schema_name.clone(),
-            description: "Output in the specified format".to_string(),
+            description: "Output in the specified format. Pay special attention to enum fields which must use one of the exact values specified in the 'enum' array.".to_string(),
             parameters: schema.to_json().clone(),
         };
 
