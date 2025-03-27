@@ -4,7 +4,7 @@ use serde::de::DeserializeOwned;
 use crate::error::Result;
 use crate::schema::SchemaType;
 
-/// The `LLMModel` trait combines JSON schema generation, serialization, and validation.
+/// The `Instructor` trait combines JSON schema generation, serialization, and validation.
 ///
 /// This trait is automatically implemented for any type that implements the required traits
 /// (SchemaType, DeserializeOwned, and Serialize), but you can also provide a custom
@@ -18,10 +18,10 @@ use crate::schema::SchemaType;
 /// To add custom validation:
 ///
 /// ```
-/// use rstructor::{LLMModel, RStructorError};
+/// use rstructor::{Instructor, RStructorError};
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize, Debug)]
 /// struct Product {
 ///     name: String,
 ///     price: f64,
@@ -54,11 +54,11 @@ use crate::schema::SchemaType;
 ///
 /// ```no_run
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// use rstructor::{LLMClient, OpenAIClient, OpenAIModel, LLMModel};
+/// use rstructor::{LLMClient, OpenAIClient, OpenAIModel, Instructor};
 /// use serde::{Serialize, Deserialize};
 ///
 /// // Define a product model
-/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize, Debug)]
 /// struct ProductInfo {
 ///     name: String,
 ///     price: f64,
@@ -74,7 +74,7 @@ use crate::schema::SchemaType;
 /// # Ok(())
 /// # }
 /// ```
-pub trait LLMModel: SchemaType + DeserializeOwned + Serialize {
+pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
     /// Optional validation logic beyond type checking
     ///
     /// This method is called automatically by `generate_struct` to validate
@@ -84,10 +84,10 @@ pub trait LLMModel: SchemaType + DeserializeOwned + Serialize {
     /// # Example
     ///
     /// ```
-    /// # use rstructor::{LLMModel, RStructorError};
+    /// # use rstructor::{Instructor, RStructorError};
     /// # use serde::{Serialize, Deserialize};
     /// #
-    /// # #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    /// # #[derive(Instructor, Serialize, Deserialize, Debug)]
     /// # struct Product {
     /// #     name: String,
     /// #     price: f64,
@@ -110,8 +110,8 @@ pub trait LLMModel: SchemaType + DeserializeOwned + Serialize {
     }
 }
 
-/// Implement LLMModel for any type that implements the required traits
-impl<T: SchemaType + DeserializeOwned + Serialize> LLMModel for T {}
+/// Implement Instructor for any type that implements the required traits
+impl<T: SchemaType + DeserializeOwned + Serialize> Instructor for T {}
 
 /// Helper trait to mark a type as implementing custom validation.
 ///

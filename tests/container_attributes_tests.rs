@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod container_attributes_tests {
-    use rstructor::{LLMModel, SchemaType};
+    use rstructor::{Instructor, SchemaType};
     use serde::{Deserialize, Serialize};
 
     // Test struct with description
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "This is a struct description")]
     struct StructWithDescription {
         #[llm(description = "Field description")]
@@ -15,14 +15,14 @@ mod container_attributes_tests {
     }
 
     // Test struct with title
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(title = "CustomTitle")]
     struct StructWithTitle {
         field: String,
     }
 
     // Test struct with examples
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(examples = [
         ::serde_json::json!({"name": "John", "age": 30}),
         ::serde_json::json!({"name": "Jane", "age": 25})
@@ -33,7 +33,7 @@ mod container_attributes_tests {
     }
 
     // Test struct with multiple container attributes
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(
         description = "A person with their details",
         title = "PersonDetails",
@@ -49,7 +49,7 @@ mod container_attributes_tests {
     }
 
     // Test struct with serde rename_all
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct StructWithRenameAll {
         first_name: String,
@@ -58,7 +58,7 @@ mod container_attributes_tests {
     }
 
     // Test enum with description
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "This is an enum description")]
     enum EnumWithDescription {
         Option1,
@@ -67,7 +67,7 @@ mod container_attributes_tests {
     }
 
     // Test enum with title
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(title = "CustomEnumTitle")]
     enum EnumWithTitle {
         Value1,
@@ -75,7 +75,7 @@ mod container_attributes_tests {
     }
 
     // Test enum with examples
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(examples = ["Value1", "Value2"])]
     enum EnumWithExamples {
         Value1,
@@ -84,7 +84,7 @@ mod container_attributes_tests {
     }
 
     // Test enum with multiple attributes
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(
         description = "A status enumeration",
         title = "StatusEnum",
@@ -97,13 +97,13 @@ mod container_attributes_tests {
     }
 
     // Struct without attributes
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct StructWithoutAttributes {
         field: String,
     }
 
     // Enum without attributes
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     enum EnumWithoutAttributes {
         Value1,
         Value2,

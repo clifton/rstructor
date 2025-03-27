@@ -1,11 +1,12 @@
 use rstructor::{
-    AnthropicClient, AnthropicModel, LLMClient, LLMModel, OpenAIClient, OpenAIModel, RStructorError,
+    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
+    RStructorError,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
 
 // Define a nested data model for a recipe
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "A cooking ingredient with amount and unit")]
 struct Ingredient {
     #[llm(description = "Name of the ingredient", example = "flour")]
@@ -18,7 +19,7 @@ struct Ingredient {
     unit: String,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "A step in the recipe instructions")]
 struct Step {
     #[llm(description = "Order number of this step", example = 1)]
@@ -34,7 +35,7 @@ struct Step {
     time_minutes: Option<u16>,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Nutritional information per serving")]
 struct Nutrition {
     #[llm(description = "Calories per serving", example = 350)]
@@ -50,7 +51,7 @@ struct Nutrition {
     fat_g: f32,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "A cooking recipe with ingredients and instructions",
       examples = [
         ::serde_json::json!({

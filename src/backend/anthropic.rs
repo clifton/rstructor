@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::LLMClient;
 use crate::error::{RStructorError, Result};
-use crate::model::LLMModel;
+use crate::model::Instructor;
 
 /// Anthropic models available for completion
 #[derive(Debug, Clone)]
@@ -120,7 +120,7 @@ impl AnthropicClient {
 impl LLMClient for AnthropicClient {
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
-        T: LLMModel + DeserializeOwned + Send + 'static,
+        T: Instructor + DeserializeOwned + Send + 'static,
     {
         // Get the schema for type T
         let schema = T::schema();

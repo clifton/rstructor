@@ -1,7 +1,7 @@
 /*!
  Procedural macros for the rstructor library.
 
- This crate provides the derive macro for implementing LLMModel and SchemaType
+ This crate provides the derive macro for implementing Instructor and SchemaType
  traits from the rstructor library. It automatically generates JSON Schema
  representations of Rust types.
 */
@@ -14,7 +14,7 @@ use container_attrs::ContainerAttributes;
 use proc_macro::TokenStream;
 use syn::{Data, DeriveInput, parse_macro_input};
 
-/// Derive macro for implementing LLMModel and SchemaType
+/// Derive macro for implementing Instructor and SchemaType
 ///
 /// This macro automatically implements the SchemaType trait for a struct or enum,
 /// generating a JSON Schema representation based on the Rust type.
@@ -24,10 +24,10 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// ## Field-level attributes
 ///
 /// ```
-/// use rstructor::LLMModel;
+/// use rstructor::Instructor;
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize, Debug)]
 /// struct Person {
 ///     #[llm(description = "Full name of the person")]
 ///     name: String,
@@ -45,10 +45,10 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// You can add additional information to the struct or enum itself:
 ///
 /// ```
-/// use rstructor::LLMModel;
+/// use rstructor::Instructor;
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize, Debug)]
 /// #[llm(description = "Represents a person with their basic information",
 ///       title = "PersonDetail",
 ///       examples = [
@@ -63,7 +63,7 @@ use syn::{Data, DeriveInput, parse_macro_input};
 ///     age: u32,
 /// }
 ///
-/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize, Debug)]
 /// #[llm(description = "Represents a person's role in an organization")]
 /// #[serde(rename_all = "camelCase")]
 /// struct Employee {
@@ -72,7 +72,7 @@ use syn::{Data, DeriveInput, parse_macro_input};
 ///     employee_id: u32,
 /// }
 ///
-/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize, Debug)]
 /// #[llm(description = "Represents a person's role in an organization",
 ///       examples = ["Manager", "Director"])]
 /// enum Role {
@@ -94,8 +94,8 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// - Respects `#[serde(rename_all = "...")]` for transforming property names
 ///   - Supported values: "lowercase", "UPPERCASE", "camelCase", "PascalCase", "snake_case"
 ///   - Example: With `#[serde(rename_all = "camelCase")]`, a field `user_id` becomes `userId` in the schema
-#[proc_macro_derive(LLMModel, attributes(llm))]
-pub fn derive_llm_model(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(Instructor, attributes(llm))]
+pub fn derive_instructor(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -111,7 +111,7 @@ pub fn derive_llm_model(input: TokenStream) -> TokenStream {
         Data::Enum(data_enum) => {
             generators::generate_enum_schema(name, data_enum, &container_attrs).into()
         }
-        _ => panic!("LLMModel can only be derived for structs and enums"),
+        _ => panic!("Instructor can only be derived for structs and enums"),
     }
 }
 

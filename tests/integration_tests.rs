@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod integration_tests {
-    use rstructor::{LLMModel, SchemaType};
+    use rstructor::{Instructor, SchemaType};
     use serde::{Deserialize, Serialize};
 
     // Simple struct with basic types
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct BasicTypes {
         #[llm(description = "A string field", example = "Hello World")]
         string_field: String,
@@ -23,7 +23,7 @@ mod integration_tests {
     }
 
     // Struct with array literals
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct ArrayLiterals {
         #[llm(description = "String array", example = ["red", "green", "blue"])]
         string_array: Vec<String>,
@@ -39,7 +39,7 @@ mod integration_tests {
     }
 
     // Struct with multiple examples
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct MultipleExamples {
         #[llm(description = "String field with examples", 
               examples = ["Example 1", "Example 2", "Example 3"])]
@@ -55,7 +55,7 @@ mod integration_tests {
     }
 
     // Nested struct
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct Address {
         #[llm(description = "Street address", example = "123 Main St")]
         street: String,
@@ -67,7 +67,7 @@ mod integration_tests {
         zip: String,
     }
 
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct Person {
         #[llm(description = "Person's name", example = "John Doe")]
         name: String,
@@ -84,7 +84,7 @@ mod integration_tests {
     }
 
     // Simple enum
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     enum Color {
         Red,
         Green,

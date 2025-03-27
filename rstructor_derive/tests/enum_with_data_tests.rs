@@ -1,9 +1,9 @@
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // Simple enum with primitive associated data
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 enum UserStatus {
     #[llm(description = "The user is online")]
     Online,

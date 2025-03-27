@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod schema_validation_tests {
-    use rstructor::{LLMModel, SchemaType};
+    use rstructor::{Instructor, SchemaType};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
     // Test model for validation
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct User {
         #[llm(description = "User's full name", example = "John Doe")]
         name: String,

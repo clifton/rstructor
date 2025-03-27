@@ -1,9 +1,11 @@
-use rstructor::{AnthropicClient, AnthropicModel, LLMClient, LLMModel, OpenAIClient, OpenAIModel};
+use rstructor::{
+    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
+};
 use serde::{Deserialize, Serialize};
 use std::env;
 
 // Define an enum for article categories
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Category for a news article",
       examples = ["Politics", "Technology", "Business", "Sports", "Entertainment"])]
 enum ArticleCategory {
@@ -21,7 +23,7 @@ enum ArticleCategory {
 }
 
 // Define entities mentioned in the article
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "An entity mentioned in the article")]
 struct Entity {
     #[llm(description = "Name of the entity", example = "Microsoft")]
@@ -56,7 +58,7 @@ impl Entity {
 }
 
 // Define the structure for article analysis
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Analysis of a news article",
       examples = [
         ::serde_json::json!({

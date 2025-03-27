@@ -160,7 +160,7 @@ pub fn generate_struct_schema(
                 }
             }
         }
-        _ => panic!("LLMModel can only be derived for structs with named fields"),
+        _ => panic!("Instructor can only be derived for structs with named fields"),
     }
 
     // Handle container attributes

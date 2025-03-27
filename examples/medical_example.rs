@@ -1,7 +1,7 @@
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct Symptoms {
     #[llm(description = "A general scientific and objective description of the symptoms")]
     description: String,
@@ -32,7 +32,7 @@ struct Symptoms {
     pace: u8,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct MedicalHistory {
     #[llm(
         description = "Known pathology or previously diagnosed condition",
@@ -53,7 +53,7 @@ struct MedicalHistory {
     alleviate_with_rest: bool,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct RiskFactors {
     #[llm(
         description = "Whether the condition appeared spontaneously",
@@ -78,7 +78,7 @@ struct RiskFactors {
     family_history: String,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct DifferentialDiagnosis {
     #[llm(description = "Name of the possible disease", 
           examples = ["Myocardial infarction", "Angina pectoris", "Aortic dissection"])]
@@ -89,14 +89,14 @@ struct DifferentialDiagnosis {
     probability: f32,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[serde(rename_all = "lowercase")]
 enum Sex {
     M,
     F,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct PatientInfo {
     #[llm(description = "Patient's biological sex")]
     sex: Sex,
@@ -111,7 +111,7 @@ struct PatientInfo {
     geographical_region: String,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct PatientData {
     #[llm(description = "Basic patient demographic information")]
     patient_info: PatientInfo,

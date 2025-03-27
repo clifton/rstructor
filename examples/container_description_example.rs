@@ -1,8 +1,8 @@
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 
 // Define a struct with a container-level description
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Represents a book in a library catalog")]
 struct Book {
     #[llm(description = "Unique identifier for the book")]
@@ -26,7 +26,7 @@ struct Book {
 }
 
 // Define an enum with a container-level description
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Represents the status of a book in the library")]
 enum BookStatus {
     Available,

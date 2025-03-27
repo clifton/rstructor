@@ -1,5 +1,5 @@
 use rstructor::{
-    AnthropicClient, AnthropicModel, LLMModel, OpenAIClient, OpenAIModel, RStructorError,
+    AnthropicClient, AnthropicModel, Instructor, OpenAIClient, OpenAIModel, RStructorError,
 };
 type Result<T> = rstructor::Result<T>;
 use chrono::{NaiveDate, NaiveTime};
@@ -8,7 +8,7 @@ use std::{env, io::stdin};
 
 // Define data structures for event planning
 
-#[derive(LLMModel, Serialize, Deserialize, Debug, Clone)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Represents a contact person")]
 struct Contact {
     #[llm(description = "Name of the contact person", example = "John Smith")]
@@ -24,7 +24,7 @@ struct Contact {
     role: Option<String>,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug, Clone)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Represents a location")]
 struct Location {
     #[llm(
@@ -55,7 +55,7 @@ struct Location {
     instructions: Option<String>,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug, Clone)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Represents a scheduled activity within an event")]
 struct Activity {
     #[llm(
@@ -83,7 +83,7 @@ struct Activity {
     location: Option<String>,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug, Clone)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Information about an event to be organized",
       examples = [
         ::serde_json::json!({

@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod validation_tests {
-    use rstructor::{LLMModel, RStructorError};
+    use rstructor::{Instructor, RStructorError};
     use serde::{Deserialize, Serialize};
 
     // Test model with validation
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "A product in an inventory")]
     struct Product {
         #[llm(description = "Product name", example = "Laptop")]

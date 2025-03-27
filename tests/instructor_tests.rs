@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod llm_model_tests {
-    use rstructor::{LLMModel, RStructorError, Schema, SchemaType};
+    use rstructor::{Instructor, RStructorError, Schema, SchemaType};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
-    // Simple struct for testing the LLMModel trait
+    // Simple struct for testing the Instructor trait
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestModel {
         name: String,
@@ -59,7 +59,7 @@ mod llm_model_tests {
 
     #[test]
     fn test_llm_model_default_validate() {
-        // The default implementation of LLMModel::validate should return Ok(())
+        // The default implementation of Instructor::validate should return Ok(())
         // This test confirms the default behavior using a type that doesn't override validate
 
         // Create a simple struct that just inherits the default validate implementation

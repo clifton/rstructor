@@ -9,12 +9,12 @@
 
 #[cfg(test)]
 mod anthropic_validation_tests {
-    use rstructor::{AnthropicClient, AnthropicModel, LLMClient, LLMModel, RStructorError};
+    use rstructor::{AnthropicClient, AnthropicModel, Instructor, LLMClient, RStructorError};
     use serde::{Deserialize, Serialize};
     use std::env;
 
     // Define a data model with validation rules
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "Information about a city's weather")]
     struct WeatherInfo {
         #[llm(description = "Name of the city")]

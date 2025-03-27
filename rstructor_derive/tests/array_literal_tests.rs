@@ -1,9 +1,9 @@
 // Integration tests for array literal syntax in the derive macro
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 
 // Test struct with various array literal syntaxes
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct ArrayLiteralTests {
     // String array with array literal syntax
     #[llm(description = "Array of strings", example = ["apple", "banana", "cherry"])]

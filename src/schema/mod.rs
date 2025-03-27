@@ -136,19 +136,19 @@ impl Schema {
 /// With the derive macro (typically how you'd use it):
 ///
 /// ```no_run
-/// use rstructor::LLMModel;
+/// use rstructor::Instructor;
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(LLMModel, Serialize, Deserialize)]
+/// #[derive(Instructor, Serialize, Deserialize)]
 /// struct Person {
 ///     #[llm(description = "Person's name")]
 ///     name: String,
-///     
+///
 ///     #[llm(description = "Person's age")]
 ///     age: u32,
 /// }
 ///
-/// // SchemaType is implemented by the LLMModel derive macro
+/// // SchemaType is implemented by the Instructor derive macro
 /// // (This would work in real code, but doctest doesn't have access to the macro)
 /// // let schema = Person::schema();
 /// // let json = schema.to_json();

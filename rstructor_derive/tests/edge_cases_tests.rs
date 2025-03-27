@@ -1,9 +1,9 @@
 // Tests for edge cases in the derive macro
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 
 // Test struct with empty attributes
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct EmptyAttributes {
     // Field with no attributes
     field_no_attrs: String,
@@ -17,14 +17,14 @@ struct EmptyAttributes {
 }
 
 // Struct with only one field
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct SingleField {
     #[llm(description = "The only field")]
     only_field: String,
 }
 
 // Struct with unusual but valid field names
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct UnusualFieldNames {
     #[llm(description = "Field with underscores")]
     field_with_underscores: String,
@@ -38,7 +38,7 @@ struct UnusualFieldNames {
 }
 
 // Test numeric edge cases
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct NumericEdgeCases {
     #[llm(description = "Large integer", example = 2147483647)]
     large_int: i32,
