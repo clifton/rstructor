@@ -172,8 +172,8 @@ impl Schema {
         schema_json
     }
 
-    #[allow(clippy::inherent_to_string)]
-    pub fn to_string(&self) -> String {
+    // Format the schema as a pretty-printed JSON string
+    pub fn to_pretty_json(&self) -> String {
         // Get the schema with array enhancements
         let schema_json = self.to_json();
         serde_json::to_string_pretty(&schema_json).unwrap_or_else(|_| self.schema.to_string())
@@ -188,7 +188,7 @@ impl Schema {
 // Display implementation for Schema
 impl Display for Schema {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self.to_pretty_json())
     }
 }
 

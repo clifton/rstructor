@@ -76,11 +76,7 @@ pub fn generate_struct_schema(
 
                 // For custom types, check if they're enums by looking at the type name
                 let type_name = if let Type::Path(type_path) = &field.ty {
-                    if let Some(segment) = type_path.path.segments.first() {
-                        Some(segment.ident.to_string())
-                    } else {
-                        None
-                    }
+                    type_path.path.segments.first().map(|segment| segment.ident.to_string())
                 } else {
                     None
                 };
@@ -90,7 +86,7 @@ pub fn generate_struct_schema(
                     // Check if it starts with uppercase letter and is a custom type
                     // This is a heuristic since we can't directly check at compile time
                     let first_char = name.chars().next();
-                    first_char.map_or(false, |c| c.is_uppercase())
+                    first_char.is_some_and(|c| c.is_uppercase())
                         && schema_type == "object"
                         && !is_array_type(&field.ty)
                 } else {
@@ -115,11 +111,7 @@ pub fn generate_struct_schema(
 
                         // Check if the inner type might be an enum or custom type
                         let inner_type_name = if let Type::Path(type_path) = inner_type {
-                            if let Some(segment) = type_path.path.segments.first() {
-                                Some(segment.ident.to_string())
-                            } else {
-                                None
-                            }
+                            type_path.path.segments.first().map(|segment| segment.ident.to_string())
                         } else {
                             None
                         };
@@ -128,7 +120,7 @@ pub fn generate_struct_schema(
                         let items_tokens = if let Some(type_name) = &inner_type_name {
                             // Check if type name starts with uppercase (likely custom type)
                             let first_char = type_name.chars().next();
-                            let is_uppercase = first_char.map_or(false, |c| c.is_uppercase());
+                            let is_uppercase = first_char.is_some_and(|c| c.is_uppercase());
 
                             // Check if this could be an enum
                             let is_likely_enum = is_uppercase &&
