@@ -8,15 +8,7 @@ repository = "https://github.com/clifton/rstructor"
 authors = ["Clifton King <cliftonk@gmail.com>"]
 readme = "README.md"
 documentation = "https://docs.rs/rstructor"
-keywords = [
-  "llm",
-  "openai",
-  "anthropic",
-  "validation",
-  "json-schema",
-  "pydantic",
-  "instructor",
-]
+keywords = ["llm", "openai", "anthropic", "pydantic", "instructor"]
 categories = ["api-bindings", "asynchronous", "llm", "instructor"]
 
 [dependencies]
@@ -44,3 +36,4 @@ derive = ["rstructor_derive"]
 
 [workspace]
 members = ["rstructor_derive"]
+
