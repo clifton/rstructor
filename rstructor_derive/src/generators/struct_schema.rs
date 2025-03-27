@@ -76,7 +76,11 @@ pub fn generate_struct_schema(
 
                 // For custom types, check if they're enums by looking at the type name
                 let type_name = if let Type::Path(type_path) = &field.ty {
-                    type_path.path.segments.first().map(|segment| segment.ident.to_string())
+                    type_path
+                        .path
+                        .segments
+                        .first()
+                        .map(|segment| segment.ident.to_string())
                 } else {
                     None
                 };
@@ -111,7 +115,11 @@ pub fn generate_struct_schema(
 
                         // Check if the inner type might be an enum or custom type
                         let inner_type_name = if let Type::Path(type_path) = inner_type {
-                            type_path.path.segments.first().map(|segment| segment.ident.to_string())
+                            type_path
+                                .path
+                                .segments
+                                .first()
+                                .map(|segment| segment.ident.to_string())
                         } else {
                             None
                         };
