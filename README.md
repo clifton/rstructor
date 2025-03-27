@@ -290,6 +290,62 @@ When serialized to JSON, these enum variants with data become tagged unions:
 }
 ```
 
+### Working with Custom Types (Dates, UUIDs, etc.)
+
+RStructor provides the `CustomTypeSchema` trait to handle types that don't have direct JSON representations:
+
+```rust
+use rstructor::{Instructor, schema::CustomTypeSchema};
+use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use uuid::Uuid;
+
+// Implement CustomTypeSchema for chrono::DateTime<Utc>
+impl CustomTypeSchema for DateTime<Utc> {
+    fn schema_type() -> &'static str {
+        "string"
+    }
+    
+    fn schema_format() -> Option<&'static str> {
+        Some("date-time")
+    }
+    
+    fn schema_description() -> Option<String> {
+        Some("ISO-8601 formatted date and time".to_string())
+    }
+}
+
+// Implement CustomTypeSchema for UUID
+impl CustomTypeSchema for Uuid {
+    fn schema_type() -> &'static str {
+        "string"
+    }
+    
+    fn schema_format() -> Option<&'static str> {
+        Some("uuid")
+    }
+}
+
+// Use these custom types in structs
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Event {
+    #[llm(description = "Unique identifier for the event")]
+    id: Uuid,
+    
+    #[llm(description = "Name of the event")]
+    name: String,
+    
+    #[llm(description = "When the event starts")]
+    start_time: DateTime<Utc>,
+    
+    #[llm(description = "When the event ends (optional)")]
+    end_time: Option<DateTime<Utc>>,
+}
+```
+
+The macro will automatically detect these custom types and generate the appropriate JSON Schema with format specifications that help LLMs produce correctly formatted values.
+
 ### Configuring Different LLM Providers
 
 Choose between different providers:
@@ -349,6 +405,32 @@ pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
 
 Override the `validate` method to add custom validation logic.
 
+### CustomTypeSchema Trait
+
+The `CustomTypeSchema` trait allows you to define JSON Schema representations for types that don't have direct JSON equivalents, like dates and UUIDs:
+
+```rust
+pub trait CustomTypeSchema {
+    fn schema_type() -> &'static str;
+    
+    fn schema_format() -> Option<&'static str> {
+        None
+    }
+    
+    fn schema_description() -> Option<String> {
+        None
+    }
+    
+    fn schema_additional_properties() -> Option<Value> {
+        None
+    }
+    
+    fn json_schema() -> Value;
+}
+```
+
+Implement this trait for custom types like `DateTime<Utc>` or `Uuid` to control their JSON Schema representation.
+
 ### LLMClient Trait
 
 The `LLMClient` trait defines the interface for all LLM providers:
@@ -400,6 +482,7 @@ See the `examples/` directory for complete, working examples:
 - `enum_with_data_example.rs`: Working with enums that have associated data (tagged unions)
 - `event_planner.rs`: Interactive event planning with user input
 - `weather_example.rs`: Simple model with validation demonstration
+- `custom_type_example.rs`: Using custom types like dates and UUIDs with JSON Schema format support
 
 ## ▶️ Running the Examples
 
@@ -425,6 +508,7 @@ cargo run --example news_article_categorizer
 - [x] Support for nested structures
 - [x] Rich validation API with custom domain rules
 - [x] Support for enums with associated data (tagged unions)
+- [x] Support for custom types (dates, UUIDs, etc.)
 - [ ] Streaming responses
 - [ ] Support for additional LLM providers
 - [ ] Integration with web frameworks (Axum, Actix)

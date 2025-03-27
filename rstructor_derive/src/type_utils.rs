@@ -165,6 +165,12 @@ pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
                 "f32" | "f64" => return "number",
                 "Vec" | "Array" | "HashSet" | "BTreeSet" => return "array",
                 "HashMap" | "BTreeMap" => return "object",
+                // Recognize common date types directly
+                "DateTime" | "NaiveDateTime" | "NaiveDate" | "Date" | "Utc" | "Local" => {
+                    return "string";
+                }
+                // Recognize UUID type
+                "Uuid" | "uuid::Uuid" => return "string",
                 "Option" => {
                     // For Option<T>, we need to look at the inner type
                     if let PathArguments::AngleBracketed(args) = &segment.arguments {

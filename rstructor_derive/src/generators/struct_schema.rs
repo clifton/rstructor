@@ -85,17 +85,40 @@ pub fn generate_struct_schema(
                     None
                 };
 
-                // Special handling for enums used as fields
-                let is_likely_enum = if let Some(name) = &type_name {
-                    // Check if it starts with uppercase letter and is a custom type
-                    // This is a heuristic since we can't directly check at compile time
-                    let first_char = name.chars().next();
-                    first_char.is_some_and(|c| c.is_uppercase())
-                        && schema_type == "object"
-                        && !is_array_type(&field.ty)
-                } else {
-                    false
-                };
+                // Special handling for enums and custom types used as fields
+                let (is_likely_enum, is_date_type, is_uuid_type, is_custom_type) =
+                    if let Some(name) = &type_name {
+                        // Check for special types
+                        let is_date = name == "DateTime"
+                            || name == "NaiveDateTime"
+                            || name == "NaiveDate"
+                            || name == "Date"
+                            || name.contains("Date")
+                            || name.contains("Time");
+                        let is_uuid = name == "Uuid";
+
+                        // Check if this could be a custom type implementing CustomTypeSchema
+                        // Heuristic: Custom types often have "meaningful" names like CustomDate, EmailAddress, etc.
+                        let is_custom = name.contains("Date")
+                            || name.contains("Time")
+                            || name.contains("Email")
+                            || name.contains("Uuid")
+                            || name.contains("Phone")
+                            || name.contains("Custom");
+
+                        // Check if it's likely an enum (starts with uppercase, is an object, not an array)
+                        let first_char = name.chars().next();
+                        let is_enum = first_char.is_some_and(|c| c.is_uppercase())
+                            && schema_type == "object"
+                            && !is_array_type(&field.ty)
+                            && !is_date
+                            && !is_uuid
+                            && !is_custom;
+
+                        (is_enum, is_date, is_uuid, is_custom)
+                    } else {
+                        (false, false, false, false)
+                    };
 
                 // Create field property
                 let field_prop = if is_likely_enum {
@@ -106,6 +129,50 @@ pub fn generate_struct_schema(
                         // Use string type for enums
                         props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
                         // We'll add the enum description separately since we need to handle field attributes
+                    }
+                } else if is_custom_type {
+                    // For custom types implementing CustomTypeSchema
+                    let type_name_val = if let Some(name) = &type_name {
+                        name.clone()
+                    } else {
+                        "CustomType".to_string()
+                    };
+
+                    quote! {
+                        // Create property for this custom field
+                        let mut props = ::serde_json::Map::new();
+                        props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+
+                        // Add some defaults that will be overridden by the field attributes if provided
+                        props.insert("description".to_string(),
+                                    ::serde_json::Value::String(format!("A custom {} value", #type_name_val)));
+                    }
+                } else if is_date_type {
+                    // For date types
+                    quote! {
+                        // Create property for this date field
+                        let mut props = ::serde_json::Map::new();
+                        props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                        props.insert("format".to_string(), ::serde_json::Value::String("date-time".to_string()));
+                        props.insert("description".to_string(),
+                                    ::serde_json::Value::String("ISO-8601 formatted date and time".to_string()));
+                    }
+                } else if is_uuid_type {
+                    // For UUID types
+                    quote! {
+                        // Create property for this UUID field
+                        let mut props = ::serde_json::Map::new();
+                        props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                        props.insert("format".to_string(), ::serde_json::Value::String("uuid".to_string()));
+                        props.insert("description".to_string(),
+                                    ::serde_json::Value::String("UUID identifier string".to_string()));
+                    }
+                } else if type_name.is_some() {
+                    // Default handling for other custom types
+                    quote! {
+                        // Create property for this field
+                        let mut props = ::serde_json::Map::new();
+                        props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
                     }
                 } else if is_array_type(&field.ty) {
                     // For array types, we need to add the 'items' property
@@ -151,6 +218,42 @@ pub fn generate_struct_schema(
                                     items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
                                     items_schema.insert("description".to_string(),
                                         ::serde_json::Value::String(format!("Must be one of the allowed values for {}", #type_name_str)));
+                                    props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
+                                }
+                            } else if type_name == "DateTime"
+                                || type_name == "NaiveDateTime"
+                                || type_name == "NaiveDate"
+                                || type_name == "Date"
+                            {
+                                // Handle array of dates
+                                quote! {
+                                    // Create property for this array field with date items
+                                    let mut props = ::serde_json::Map::new();
+                                    props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
+
+                                    // Add items schema for dates
+                                    let mut items_schema = ::serde_json::Map::new();
+                                    items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                                    items_schema.insert("format".to_string(), ::serde_json::Value::String("date-time".to_string()));
+                                    items_schema.insert("description".to_string(),
+                                        ::serde_json::Value::String("ISO-8601 formatted date and time".to_string()));
+
+                                    props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
+                                }
+                            } else if type_name == "Uuid" {
+                                // Handle array of UUIDs
+                                quote! {
+                                    // Create property for this array field with UUID items
+                                    let mut props = ::serde_json::Map::new();
+                                    props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
+
+                                    // Add items schema for UUIDs
+                                    let mut items_schema = ::serde_json::Map::new();
+                                    items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                                    items_schema.insert("format".to_string(), ::serde_json::Value::String("uuid".to_string()));
+                                    items_schema.insert("description".to_string(),
+                                        ::serde_json::Value::String("UUID identifier string".to_string()));
+
                                     props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
                                 }
                             } else if is_uppercase && inner_schema_type == "object" {
@@ -239,6 +342,11 @@ pub fn generate_struct_schema(
                         quote! {
                             props.insert("description".to_string(),
                                 ::serde_json::Value::String(format!("{} (Must be one of the allowed enum values for {})", #desc, #type_name_str)));
+                        }
+                    } else if is_custom_type {
+                        // For custom types, just use the description as is (CustomTypeSchema will be used)
+                        quote! {
+                            props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
                         }
                     } else {
                         quote! {
