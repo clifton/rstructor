@@ -1,5 +1,7 @@
 mod builder;
+mod custom_type;
 pub use builder::SchemaBuilder;
+pub use custom_type::CustomTypeSchema;
 
 use serde_json::Value;
 use std::fmt::{Display, Formatter, Result as FmtResult};
@@ -93,6 +95,16 @@ impl Schema {
                         if let Some(Value::String(prop_type)) = prop.get("type") {
                             if prop_type == "array" {
                                 // Check if it has items
+                                // If items property is missing, add a default one for string type
+                                if !prop.contains_key("items") {
+                                    let mut default_items = serde_json::Map::new();
+                                    default_items.insert(
+                                        "type".to_string(),
+                                        Value::String("string".to_string()),
+                                    );
+                                    prop.insert("items".to_string(), Value::Object(default_items));
+                                }
+
                                 if let Some(Value::Object(items)) = prop.get_mut("items") {
                                     // Check if the items are objects
                                     if let Some(Value::String(items_type)) = items.get("type") {

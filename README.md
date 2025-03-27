@@ -290,6 +290,101 @@ When serialized to JSON, these enum variants with data become tagged unions:
 }
 ```
 
+### Working with Custom Types (Dates, UUIDs, etc.)
+
+RStructor provides the `CustomTypeSchema` trait to handle types that don't have direct JSON representations but need specific schema formats. This is particularly useful for:
+
+- Date/time types (e.g., `chrono::DateTime`)
+- UUIDs (e.g., `uuid::Uuid`)
+- Email addresses
+- URLs
+- Custom domain-specific types
+
+#### Basic Implementation
+
+```rust
+use rstructor::{Instructor, schema::CustomTypeSchema};
+use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Utc};
+use serde_json::json;
+use uuid::Uuid;
+
+// Implement CustomTypeSchema for chrono::DateTime<Utc>
+impl CustomTypeSchema for DateTime<Utc> {
+    fn schema_type() -> &'static str {
+        "string"
+    }
+    
+    fn schema_format() -> Option<&'static str> {
+        Some("date-time")
+    }
+    
+    fn schema_description() -> Option<String> {
+        Some("ISO-8601 formatted date and time".to_string())
+    }
+}
+
+// Implement CustomTypeSchema for UUID
+impl CustomTypeSchema for Uuid {
+    fn schema_type() -> &'static str {
+        "string"
+    }
+    
+    fn schema_format() -> Option<&'static str> {
+        Some("uuid")
+    }
+}
+```
+
+#### Usage in Structs
+
+Once implemented, these custom types can be used directly in your structs:
+
+```rust
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Event {
+    #[llm(description = "Unique identifier for the event")]
+    id: Uuid,
+    
+    #[llm(description = "Name of the event")]
+    name: String,
+    
+    #[llm(description = "When the event starts")]
+    start_time: DateTime<Utc>,
+    
+    #[llm(description = "When the event ends (optional)")]
+    end_time: Option<DateTime<Utc>>,
+    
+    #[llm(description = "Recurring event dates")]
+    recurring_dates: Vec<DateTime<Utc>>, // Even works with arrays!
+}
+```
+
+#### Advanced Customization
+
+You can add additional schema properties for more complex validation:
+
+```rust
+impl CustomTypeSchema for EmailAddress {
+    fn schema_type() -> &'static str {
+        "string"
+    }
+    
+    fn schema_format() -> Option<&'static str> {
+        Some("email")
+    }
+    
+    fn schema_additional_properties() -> Option<Value> {
+        Some(json!({
+            "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+            "examples": ["user@example.com", "contact@company.org"]
+        }))
+    }
+}
+```
+
+The macro automatically detects these custom types and generates appropriate JSON Schema with format specifications that guide LLMs to produce correctly formatted values. The library includes built-in recognition of common date and UUID types, but you can implement the trait for any custom type.
+
 ### Configuring Different LLM Providers
 
 Choose between different providers:
@@ -349,6 +444,74 @@ pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
 
 Override the `validate` method to add custom validation logic.
 
+### CustomTypeSchema Trait
+
+The `CustomTypeSchema` trait allows you to define JSON Schema representations for types that don't have direct JSON equivalents, like dates and UUIDs:
+
+```rust
+pub trait CustomTypeSchema {
+    /// Returns the JSON Schema type for this custom type
+    ///
+    /// This is typically "string" for dates, UUIDs, etc.
+    fn schema_type() -> &'static str;
+    
+    /// Returns the JSON Schema format for this custom type
+    ///
+    /// Common formats include "date-time", "uuid", "email", etc.
+    fn schema_format() -> Option<&'static str> {
+        None
+    }
+    
+    /// Returns a description of this custom type for documentation
+    fn schema_description() -> Option<String> {
+        None
+    }
+    
+    /// Returns any additional JSON Schema properties for this type
+    ///
+    /// This can include patterns, examples, minimum/maximum values, etc.
+    fn schema_additional_properties() -> Option<Value> {
+        None
+    }
+    
+    /// Generate a complete JSON Schema object for this type
+    fn json_schema() -> Value {
+        // Default implementation that combines all properties
+        // (You don't normally need to override this)
+        let mut schema = json!({
+            "type": Self::schema_type(),
+        });
+        
+        // Add format if present
+        if let Some(format) = Self::schema_format() {
+            schema.as_object_mut().unwrap()
+                .insert("format".to_string(), Value::String(format.to_string()));
+        }
+        
+        // Add description if present
+        if let Some(description) = Self::schema_description() {
+            schema.as_object_mut().unwrap()
+                .insert("description".to_string(), Value::String(description));
+        }
+        
+        // Add any additional properties
+        if let Some(additional) = Self::schema_additional_properties() {
+            // Merge additional properties into the schema
+            if let Some(additional_obj) = additional.as_object() {
+                for (key, value) in additional_obj {
+                    schema.as_object_mut().unwrap()
+                        .insert(key.clone(), value.clone());
+                }
+            }
+        }
+        
+        schema
+    }
+}
+```
+
+Implement this trait for custom types like `DateTime<Utc>` or `Uuid` to control their JSON Schema representation. Most implementations only need to specify `schema_type()` and `schema_format()`, with the remaining methods providing additional schema customization when needed.
+
 ### LLMClient Trait
 
 The `LLMClient` trait defines the interface for all LLM providers:
@@ -400,6 +563,7 @@ See the `examples/` directory for complete, working examples:
 - `enum_with_data_example.rs`: Working with enums that have associated data (tagged unions)
 - `event_planner.rs`: Interactive event planning with user input
 - `weather_example.rs`: Simple model with validation demonstration
+- `custom_type_example.rs`: Using custom types like dates and UUIDs with JSON Schema format support
 
 ## ▶️ Running the Examples
 
@@ -425,6 +589,7 @@ cargo run --example news_article_categorizer
 - [x] Support for nested structures
 - [x] Rich validation API with custom domain rules
 - [x] Support for enums with associated data (tagged unions)
+- [x] Support for custom types (dates, UUIDs, etc.)
 - [ ] Streaming responses
 - [ ] Support for additional LLM providers
 - [ ] Integration with web frameworks (Axum, Actix)
