@@ -98,7 +98,10 @@ impl Schema {
                                 // If items property is missing, add a default one for string type
                                 if !prop.contains_key("items") {
                                     let mut default_items = serde_json::Map::new();
-                                    default_items.insert("type".to_string(), Value::String("string".to_string()));
+                                    default_items.insert(
+                                        "type".to_string(),
+                                        Value::String("string".to_string()),
+                                    );
                                     prop.insert("items".to_string(), Value::Object(default_items));
                                 }
 
