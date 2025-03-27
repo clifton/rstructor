@@ -1,8 +1,8 @@
 mod builder;
 pub use builder::SchemaBuilder;
 
-use std::fmt::{Display, Formatter, Result as FmtResult};
 use serde_json::Value;
+use std::fmt::{Display, Formatter, Result as FmtResult};
 
 /// Schema is a representation of a JSON Schema that describes the structure
 /// an LLM should return.
@@ -69,18 +69,20 @@ impl Schema {
         Self { schema }
     }
 
-    pub fn to_json(&self) -> &Value {
-        // Return a reference to the original schema without enhancements
-        // This maintains backward compatibility with existing code
+    /// Return a reference to the raw unenhanced schema
+    ///
+    /// This method exists for backward compatibility with code expecting a reference.
+    /// Most internal code should use to_enhanced_json() instead.
+    pub fn original_schema(&self) -> &Value {
         &self.schema
     }
-    
-    /// Returns an enhanced version of the schema with improved array field descriptions
+
+    /// Get the JSON representation of this schema with improved array field descriptions
     /// and additional properties for better LLM guidance
-    pub fn to_enhanced_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         // Clone the schema for manipulation
         let mut schema_json = self.schema.clone();
-        
+
         // Find any array properties with object items and enhance their descriptions
         if let Value::Object(obj) = &mut schema_json {
             if let Some(Value::Object(props)) = obj.get_mut("properties") {
@@ -96,10 +98,12 @@ impl Schema {
                                     if let Some(Value::String(items_type)) = items.get("type") {
                                         if items_type == "object" {
                                             // Add a more explicit description to make sure models understand
-                                            let description = items.get("description")
+                                            let description = items
+                                                .get("description")
                                                 .and_then(|d| d.as_str())
-                                                .unwrap_or("").to_string();
-                                                
+                                                .unwrap_or("")
+                                                .to_string();
+
                                             // Create a more informative description without specific examples
                                             let improved_desc = if description.is_empty() {
                                                 "Must be an array of objects. Each object must include all required fields.".to_string()
@@ -109,28 +113,52 @@ impl Schema {
                                                     description
                                                 )
                                             };
-                                            items.insert("description".to_string(), Value::String(improved_desc));
-                                            
+                                            items.insert(
+                                                "description".to_string(),
+                                                Value::String(improved_desc),
+                                            );
+
                                             // For object arrays, add generic properties information for better validation
                                             let mut properties = serde_json::Map::new();
-                                            
+
                                             // Add universal properties that most objects have
                                             let mut name_prop = serde_json::Map::new();
-                                            name_prop.insert("type".to_string(), Value::String("string".to_string()));
-                                            properties.insert("name".to_string(), Value::Object(name_prop));
-                                            
+                                            name_prop.insert(
+                                                "type".to_string(),
+                                                Value::String("string".to_string()),
+                                            );
+                                            properties.insert(
+                                                "name".to_string(),
+                                                Value::Object(name_prop),
+                                            );
+
                                             // Add other common properties
                                             let mut type_prop = serde_json::Map::new();
-                                            type_prop.insert("type".to_string(), Value::String("string".to_string()));
-                                            properties.insert("entity_type".to_string(), Value::Object(type_prop));
-                                            
+                                            type_prop.insert(
+                                                "type".to_string(),
+                                                Value::String("string".to_string()),
+                                            );
+                                            properties.insert(
+                                                "entity_type".to_string(),
+                                                Value::Object(type_prop),
+                                            );
+
                                             // Add relevance property for Entity objects
                                             let mut relevance_prop = serde_json::Map::new();
-                                            relevance_prop.insert("type".to_string(), Value::String("integer".to_string()));
-                                            properties.insert("relevance".to_string(), Value::Object(relevance_prop));
-                                            
+                                            relevance_prop.insert(
+                                                "type".to_string(),
+                                                Value::String("integer".to_string()),
+                                            );
+                                            properties.insert(
+                                                "relevance".to_string(),
+                                                Value::Object(relevance_prop),
+                                            );
+
                                             // Insert properties to show the structure expected
-                                            items.insert("properties".to_string(), Value::Object(properties));
+                                            items.insert(
+                                                "properties".to_string(),
+                                                Value::Object(properties),
+                                            );
                                         }
                                     }
                                 }
@@ -140,14 +168,14 @@ impl Schema {
                 }
             }
         }
-        
+
         schema_json
     }
 
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
-        // Get the enhanced schema for string representation
-        let schema_json = self.to_enhanced_json();
+        // Get the schema with array enhancements
+        let schema_json = self.to_json();
         serde_json::to_string_pretty(&schema_json).unwrap_or_else(|_| self.schema.to_string())
     }
 

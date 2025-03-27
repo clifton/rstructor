@@ -41,7 +41,7 @@ fn main() {
     println!("Book Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(book_schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&book_schema.to_json()).unwrap()
     );
 
     // Generate the schema for the BookStatus enum
@@ -49,6 +49,6 @@ fn main() {
     println!("\nBookStatus Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(status_schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&status_schema.to_json()).unwrap()
     );
 }

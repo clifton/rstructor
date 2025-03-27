@@ -147,7 +147,7 @@ impl LLMClient for OpenAIClient {
         let function = FunctionDef {
             name: schema_name.clone(),
             description: "Output in the specified format. IMPORTANT: 1) Include ALL required fields. 2) For enum fields, use EXACTLY one of the values allowed in the description. 3) Include all nested objects with ALL their required fields. 4) For arrays of objects, always provide complete objects with all required fields - never arrays of strings. 5) Include multiple items (2-3) in each array.".to_string(),
-            parameters: schema.to_enhanced_json(),
+            parameters: schema.to_json(),
         };
 
         // Build the request

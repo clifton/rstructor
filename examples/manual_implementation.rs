@@ -57,7 +57,7 @@ fn main() {
     println!("Weather Info Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&schema.to_json()).unwrap()
     );
 
     // Create a sample instance

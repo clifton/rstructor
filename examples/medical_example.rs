@@ -143,7 +143,7 @@ fn main() {
     println!("Medical Diagnostic Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&schema.to_json()).unwrap()
     );
 
     // Create a sample patient case

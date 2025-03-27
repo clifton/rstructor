@@ -34,7 +34,7 @@ fn main() {
     println!("Sentiment Enum Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(sentiment_schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&sentiment_schema.to_json()).unwrap()
     );
 
     // Get the schema for the struct with enum field
@@ -43,7 +43,7 @@ fn main() {
     println!("\nTextAnalysis Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(analysis_schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&analysis_schema.to_json()).unwrap()
     );
 
     // Sample instance

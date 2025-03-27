@@ -23,7 +23,7 @@ fn main() {
     println!("UserStatus Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(user_status_schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&user_status_schema.to_json()).unwrap()
     );
 
     // Example instances

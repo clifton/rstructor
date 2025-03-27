@@ -249,7 +249,9 @@ async fn process_event_request(
     );
 
     // Use retry with up to 5 attempts if validation fails
-    client.generate_struct_with_retry::<EventPlan>(&prompt, Some(5), Some(true)).await
+    client
+        .generate_struct_with_retry::<EventPlan>(&prompt, Some(5), Some(true))
+        .await
 }
 
 #[tokio::main]

@@ -38,7 +38,7 @@ fn main() {
     println!("Movie Info Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&schema.to_json()).unwrap()
     );
 
     // Sample movie instance
