@@ -162,7 +162,7 @@ pub trait LLMClient {
             // Add validation errors to the prompt if available and enabled
             if attempt > 0 && include_errors && validation_errors.is_some() {
                 let error_prompt = format!(
-                    "{}\n\nYour previous response contained validation errors. Please provide a complete, valid JSON response that includes all required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix these issues and return a complete valid JSON object. For enum fields, use EXACTLY one of the allowed values from the schema.",
+                    "{}\n\nYour previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nMake sure to include all required fields exactly as specified in the schema, including nested objects and arrays. For enum fields, use EXACTLY one of the allowed values.",
                     prompt,
                     validation_errors.as_ref().unwrap()
                 );
