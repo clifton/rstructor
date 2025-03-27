@@ -240,7 +240,7 @@ impl EventPlan {
 }
 
 async fn process_event_request(
-    client: &impl rstructor::LLMClient,
+    client: &(impl rstructor::LLMClient + std::marker::Sync),
     description: &str,
 ) -> Result<EventPlan> {
     let prompt = format!(
@@ -248,7 +248,8 @@ async fn process_event_request(
         description
     );
 
-    client.generate_struct::<EventPlan>(&prompt).await
+    // Use retry with up to 3 attempts if validation fails
+    client.generate_struct_with_retry::<EventPlan>(&prompt, Some(3), Some(true)).await
 }
 
 #[tokio::main]

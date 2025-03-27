@@ -124,7 +124,7 @@ async fn analyze_article(
             .build();
 
         let prompt = format!("Analyze the following news article:\n\n{}", article_text);
-        Ok(client.generate_struct::<ArticleAnalysis>(&prompt).await?)
+        Ok(client.generate_struct_with_retry::<ArticleAnalysis>(&prompt, Some(3), Some(true)).await?)
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("Using Anthropic for article analysis...");
 
@@ -134,7 +134,7 @@ async fn analyze_article(
             .build();
 
         let prompt = format!("Analyze the following news article:\n\n{}", article_text);
-        Ok(client.generate_struct::<ArticleAnalysis>(&prompt).await?)
+        Ok(client.generate_struct_with_retry::<ArticleAnalysis>(&prompt, Some(3), Some(true)).await?)
     } else {
         Err("No API keys found. Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY.".into())
     }

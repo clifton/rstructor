@@ -167,7 +167,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .temperature(0.2)
             .build();
 
-        let recipe: Recipe = client.generate_struct(prompt).await?;
+        let recipe: Recipe = client.generate_struct_with_retry(prompt, Some(3), Some(true)).await?;
 
         // Print the generated recipe
         print_recipe(&recipe);
@@ -179,7 +179,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             .temperature(0.2)
             .build();
 
-        let recipe: Recipe = client.generate_struct(prompt).await?;
+        let recipe: Recipe = client.generate_struct_with_retry(prompt, Some(3), Some(true)).await?;
 
         // Print the generated recipe
         print_recipe(&recipe);

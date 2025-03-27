@@ -88,8 +88,8 @@ async fn main() -> rstructor::Result<()> {
         let prompt = "What's the weather like in Paris right now?";
         println!("Prompt: {}", prompt);
 
-        // Call the LLM to get a structured output
-        match client.generate_struct::<WeatherInfo>(prompt).await {
+        // Call the LLM to get a structured output with retry
+        match client.generate_struct_with_retry::<WeatherInfo>(prompt, Some(3), Some(true)).await {
             Ok(weather) => {
                 println!("\nReceived weather info from OpenAI:");
                 println!("Weather for {}: {} °C", weather.city, weather.temperature);

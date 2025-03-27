@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .temperature(0.0)
             .build();
 
-        match client.generate_struct::<Movie>(prompt).await {
+        match client.generate_struct_with_retry::<Movie>(prompt, Some(3), Some(true)).await {
             Ok(movie) => {
                 println!("\nOpenAI Response:");
                 println!("Title: {}", movie.title);
@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .temperature(0.0)
             .build();
 
-        match client.generate_struct::<Movie>(prompt).await {
+        match client.generate_struct_with_retry::<Movie>(prompt, Some(3), Some(true)).await {
             Ok(movie) => {
                 println!("\nAnthropic Response:");
                 println!("Title: {}", movie.title);
