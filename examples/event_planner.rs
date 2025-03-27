@@ -244,12 +244,12 @@ async fn process_event_request(
     description: &str,
 ) -> Result<EventPlan> {
     let prompt = format!(
-        "Based on the following description, create a detailed event plan:\n\n{}",
+        "Based on the following description, create a detailed event plan. IMPORTANT: Make sure to include location, contact, and activities fields as required.\n\nLocation should have name, address, and city. Contact should have name and either email or phone. Activities should be a list with start and end times.\n\n{}",
         description
     );
 
-    // Use retry with up to 3 attempts if validation fails
-    client.generate_struct_with_retry::<EventPlan>(&prompt, Some(3), Some(true)).await
+    // Use retry with up to 5 attempts if validation fails
+    client.generate_struct_with_retry::<EventPlan>(&prompt, Some(5), Some(true)).await
 }
 
 #[tokio::main]
@@ -293,7 +293,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),
-            Err(e) => println!("Error: {}", e),
+            Err(e) => {
+                println!("Error: {}", e);
+                if let rstructor::RStructorError::ValidationError(msg) = &e {
+                    println!("\nValidation error details: {}", msg);
+                }
+            }
         }
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("\nProcessing your request with Anthropic...\n");
@@ -305,7 +310,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),
-            Err(e) => println!("Error: {}", e),
+            Err(e) => {
+                println!("Error: {}", e);
+                if let rstructor::RStructorError::ValidationError(msg) = &e {
+                    println!("\nValidation error details: {}", msg);
+                }
+            }
         }
     } else {
         println!("\nNo API keys found in environment variables.");

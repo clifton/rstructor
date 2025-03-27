@@ -195,7 +195,10 @@ impl LLMClient for OpenAIClient {
         if let Some(function_call) = &message.function_call {
             // Parse the arguments JSON string into our target type
             let result: T = serde_json::from_str(&function_call.arguments).map_err(|e| {
-                RStructorError::ValidationError(format!("Failed to parse response: {}", e))
+                RStructorError::ValidationError(format!(
+                    "Failed to parse response: {}\nPartial JSON: {}",
+                    e, &function_call.arguments
+                ))
             })?;
 
             // Apply any custom validation
@@ -208,8 +211,8 @@ impl LLMClient for OpenAIClient {
                 // Try to extract JSON from the content (assuming the model might have returned JSON directly)
                 let result: T = serde_json::from_str(content).map_err(|e| {
                     RStructorError::ValidationError(format!(
-                        "Failed to parse response content: {}",
-                        e
+                        "Failed to parse response content: {}\nPartial JSON: {}",
+                        e, content
                     ))
                 })?;
 

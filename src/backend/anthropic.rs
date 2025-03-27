@@ -175,7 +175,10 @@ impl LLMClient for AnthropicClient {
 
         // Try to parse the content as JSON
         let result: T = serde_json::from_str(content).map_err(|e| {
-            RStructorError::ValidationError(format!("Failed to parse response as JSON: {}", e))
+            RStructorError::ValidationError(format!(
+                "Failed to parse response as JSON: {}\nPartial JSON: {}",
+                e, content
+            ))
         })?;
 
         // Apply any custom validation

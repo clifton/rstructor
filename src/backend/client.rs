@@ -162,7 +162,7 @@ pub trait LLMClient {
             // Add validation errors to the prompt if available and enabled
             if attempt > 0 && include_errors && validation_errors.is_some() {
                 let error_prompt = format!(
-                    "{}\n\nYour previous response contained validation errors. Please fix the following issues:\n{}",
+                    "{}\n\nYour previous response contained validation errors. Please provide a complete, valid JSON response that includes all required fields.\n\nError details:\n{}\n\nPlease fix these issues and return a complete valid JSON object.",
                     prompt,
                     validation_errors.as_ref().unwrap()
                 );
