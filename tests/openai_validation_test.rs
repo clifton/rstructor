@@ -9,12 +9,12 @@
 
 #[cfg(test)]
 mod openai_validation_tests {
-    use rstructor::{LLMClient, LLMModel, OpenAIClient, OpenAIModel, RStructorError};
+    use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel, RStructorError};
     use serde::{Deserialize, Serialize};
     use std::env;
 
     // Define a data model with validation rules
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "Information about a recipe")]
     struct RecipeInfo {
         #[llm(description = "Name of the recipe")]

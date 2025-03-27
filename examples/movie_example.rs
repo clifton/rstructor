@@ -1,7 +1,7 @@
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct Person {
     #[llm(description = "Full name of the person")]
     name: String,
@@ -10,7 +10,7 @@ struct Person {
     role: Option<String>,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct MovieInfo {
     #[llm(description = "Title of the movie")]
     title: String,
@@ -38,7 +38,7 @@ fn main() {
     println!("Movie Info Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&schema.to_json()).unwrap()
     );
 
     // Sample movie instance

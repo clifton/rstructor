@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::time::sleep;
 
 use crate::error::{RStructorError, Result};
-use crate::model::LLMModel;
+use crate::model::Instructor;
 
 /// LLMClient trait defines the interface for all LLM API clients.
 ///
@@ -22,11 +22,11 @@ use crate::model::LLMModel;
 ///
 /// ```no_run
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// use rstructor::{LLMClient, LLMModel, OpenAIClient, OpenAIModel};
+/// use rstructor::{LLMClient, Instructor, OpenAIClient, OpenAIModel};
 /// use serde::{Serialize, Deserialize};
 ///
 /// // Define your data model
-/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize, Debug)]
 /// struct Movie {
 ///     title: String,
 ///     director: String,
@@ -54,11 +54,11 @@ use crate::model::LLMModel;
 ///
 /// ```no_run
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// use rstructor::{LLMClient, LLMModel, AnthropicClient, AnthropicModel};
+/// use rstructor::{LLMClient, Instructor, AnthropicClient, AnthropicModel};
 /// use serde::{Serialize, Deserialize};
 ///
 /// // Define your data model
-/// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize, Debug)]
 /// struct MovieReview {
 ///     movie_title: String,
 ///     rating: f32,
@@ -86,14 +86,14 @@ pub trait LLMClient {
     /// Generate a structured object of type T from a prompt.
     ///
     /// This method takes a text prompt and returns a structured object
-    /// of type T, where T implements the `LLMModel` trait. The LLM is guided
+    /// of type T, where T implements the `Instructor` trait. The LLM is guided
     /// to produce output that conforms to the JSON schema defined by T.
     ///
     /// If the returned data doesn't match the expected schema or fails validation,
     /// an error is returned.
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
-        T: LLMModel + DeserializeOwned + Send + 'static;
+        T: Instructor + DeserializeOwned + Send + 'static;
 
     /// Generate a structured object with automatic retry for validation errors.
     ///
@@ -111,10 +111,10 @@ pub trait LLMClient {
     ///
     /// ```no_run
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// use rstructor::{LLMClient, OpenAIClient, OpenAIModel, LLMModel};
+    /// use rstructor::{LLMClient, OpenAIClient, OpenAIModel, Instructor};
     /// use serde::{Serialize, Deserialize};
     ///
-    /// #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    /// #[derive(Instructor, Serialize, Deserialize, Debug)]
     /// struct Recipe {
     ///     name: String,
     ///     ingredients: Vec<String>,
@@ -151,7 +151,7 @@ pub trait LLMClient {
         include_errors: Option<bool>,
     ) -> Result<T>
     where
-        T: LLMModel + DeserializeOwned + Send + 'static,
+        T: Instructor + DeserializeOwned + Send + 'static,
     {
         let max_attempts = max_retries.unwrap_or(3) + 1; // +1 for initial attempt
         let include_errors = include_errors.unwrap_or(true);
@@ -162,7 +162,7 @@ pub trait LLMClient {
             // Add validation errors to the prompt if available and enabled
             if attempt > 0 && include_errors && validation_errors.is_some() {
                 let error_prompt = format!(
-                    "{}\n\nYour previous response contained validation errors. Please fix the following issues:\n{}",
+                    "{}\n\nYour previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
                     prompt,
                     validation_errors.as_ref().unwrap()
                 );

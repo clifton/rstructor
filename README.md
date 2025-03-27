@@ -39,22 +39,22 @@ tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 Here's a simple example of extracting structured information about a movie from an LLM:
 
 ```rust
-use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel};
+use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
 use serde::{Serialize, Deserialize};
 use std::env;
 
 // Define your data model
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct Movie {
     #[llm(description = "Title of the movie")]
     title: String,
-    
+
     #[llm(description = "Director of the movie")]
     director: String,
-    
+
     #[llm(description = "Year the movie was released", example = 2010)]
     year: u16,
-    
+
     #[llm(description = "Brief plot summary")]
     plot: String,
 }
@@ -63,22 +63,22 @@ struct Movie {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get API key from environment
     let api_key = env::var("OPENAI_API_KEY")?;
-    
+
     // Create an OpenAI client
     let client = OpenAIClient::new(api_key)?
         .model(OpenAIModel::Gpt35Turbo)
         .temperature(0.0)
         .build();
-    
+
     // Generate structured information with a simple prompt
     let movie: Movie = client.generate_struct("Tell me about the movie Inception").await?;
-    
+
     // Use the structured data
     println!("Title: {}", movie.title);
     println!("Director: {}", movie.director);
     println!("Year: {}", movie.year);
     println!("Plot: {}", movie.plot);
-    
+
     Ok(())
 }
 ```
@@ -90,18 +90,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Add custom validation rules to enforce business logic beyond type checking:
 
 ```rust
-use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel, RStructorError, Result};
+use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel, RStructorError, Result};
 use serde::{Serialize, Deserialize};
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Information about a movie")]
 struct Movie {
     #[llm(description = "Title of the movie")]
     title: String,
-    
+
     #[llm(description = "Year the movie was released", example = 2010)]
     year: u16,
-    
+
     #[llm(description = "IMDB rating out of 10", example = 8.5)]
     rating: f32,
 }
@@ -115,21 +115,21 @@ impl Movie {
                 "Movie title cannot be empty".to_string()
             ));
         }
-        
+
         // Year must be in a reasonable range
         if self.year < 1888 || self.year > 2030 {
             return Err(RStructorError::ValidationError(
                 format!("Movie year must be between 1888 and 2030, got {}", self.year)
             ));
         }
-        
+
         // Rating must be between 0 and 10
         if self.rating < 0.0 || self.rating > 10.0 {
             return Err(RStructorError::ValidationError(
                 format!("Rating must be between 0 and 10, got {}", self.rating)
             ));
         }
-        
+
         Ok(())
     }
 }
@@ -140,41 +140,41 @@ impl Movie {
 RStructor supports complex nested data structures:
 
 ```rust
-use rstructor::{LLMModel, LLMClient, OpenAIClient, OpenAIModel};
+use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
 use serde::{Serialize, Deserialize};
 
 // Define a nested data model for a recipe
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct Ingredient {
     #[llm(description = "Name of the ingredient", example = "flour")]
     name: String,
-    
+
     #[llm(description = "Amount of the ingredient", example = 2.5)]
     amount: f32,
-    
+
     #[llm(description = "Unit of measurement", example = "cups")]
     unit: String,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct Step {
     #[llm(description = "Order number of this step", example = 1)]
     number: u16,
-    
-    #[llm(description = "Description of this step", 
+
+    #[llm(description = "Description of this step",
           example = "Mix the flour and sugar together")]
     description: String,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "A cooking recipe with ingredients and instructions")]
 struct Recipe {
     #[llm(description = "Name of the recipe", example = "Chocolate Chip Cookies")]
     name: String,
-    
+
     #[llm(description = "List of ingredients needed")]
     ingredients: Vec<Ingredient>,
-    
+
     #[llm(description = "Step-by-step cooking instructions")]
     steps: Vec<Step>,
 }
@@ -192,32 +192,32 @@ RStructor supports both simple enums and enums with associated data.
 Use enums for categorical data:
 
 ```rust
-use rstructor::{LLMModel, LLMClient, AnthropicClient, AnthropicModel};
+use rstructor::{Instructor, LLMClient, AnthropicClient, AnthropicModel};
 use serde::{Serialize, Deserialize};
 
 // Define an enum for sentiment analysis
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "The sentiment of a text")]
 enum Sentiment {
     #[llm(description = "Positive or favorable sentiment")]
     Positive,
-    
+
     #[llm(description = "Negative or unfavorable sentiment")]
     Negative,
-    
+
     #[llm(description = "Neither clearly positive nor negative")]
     Neutral,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct SentimentAnalysis {
     #[llm(description = "The text to analyze")]
     text: String,
-    
+
     #[llm(description = "The detected sentiment of the text")]
     sentiment: Sentiment,
-    
-    #[llm(description = "Confidence score between 0.0 and 1.0", 
+
+    #[llm(description = "Confidence score between 0.0 and 1.0",
           example = 0.85)]
     confidence: f32,
 }
@@ -231,11 +231,11 @@ struct SentimentAnalysis {
 RStructor also supports more complex enums with associated data:
 
 ```rust
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 
 // Enum with different types of associated data
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 enum UserStatus {
     #[llm(description = "The user is online")]
     Online,
@@ -251,13 +251,13 @@ enum UserStatus {
 }
 
 // Using struct variants for more complex associated data
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 enum PaymentMethod {
     #[llm(description = "Payment with credit card")]
     Card {
         #[llm(description = "Credit card number")]
         number: String,
-        
+
         #[llm(description = "Expiration date in MM/YY format")]
         expiry: String,
     },
@@ -315,7 +315,7 @@ let anthropic_client = AnthropicClient::new(anthropic_api_key)?
 Add metadata and examples at the container level:
 
 ```rust
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Detailed information about a movie",
       title = "MovieDetails",
       examples = [
@@ -335,12 +335,12 @@ struct Movie {
 
 ## 📚 API Reference
 
-### LLMModel Trait
+### Instructor Trait
 
-The `LLMModel` trait is the core of RStructor. It's implemented automatically via the derive macro and provides schema generation and validation:
+The `Instructor` trait is the core of RStructor. It's implemented automatically via the derive macro and provides schema generation and validation:
 
 ```rust
-pub trait LLMModel: SchemaType + DeserializeOwned + Serialize {
+pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
     fn validate(&self) -> Result<()> {
         Ok(())
     }
@@ -358,7 +358,7 @@ The `LLMClient` trait defines the interface for all LLM providers:
 pub trait LLMClient {
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
-        T: LLMModel + DeserializeOwned + Send + 'static;
+        T: Instructor + DeserializeOwned + Send + 'static;
 
     async fn generate(&self, prompt: &str) -> Result<String>;
 }
@@ -419,7 +419,7 @@ cargo run --example news_article_categorizer
 - [x] Core traits and interfaces
 - [x] OpenAI backend implementation
 - [x] Anthropic backend implementation
-- [x] Procedural macro for deriving `LLMModel`
+- [x] Procedural macro for deriving `Instructor`
 - [x] Schema generation functionality
 - [x] Custom validation capabilities
 - [x] Support for nested structures

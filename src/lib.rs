@@ -6,7 +6,7 @@ pub mod schema;
 // Re-export primary types that users will need
 pub use backend::LLMClient;
 pub use error::{RStructorError, Result};
-pub use model::{LLMModel, Validatable};
+pub use model::{Instructor, Validatable};
 pub use schema::{Schema, SchemaType};
 
 // Re-export backend implementations when features are enabled
@@ -18,7 +18,7 @@ pub use backend::anthropic::{AnthropicClient, AnthropicModel};
 
 // Re-export derive macro when the "derive" feature is enabled
 #[cfg(feature = "derive")]
-pub use rstructor_derive::LLMModel;
+pub use rstructor_derive::Instructor;
 
 // Version 0.1.0: This library provides structured outputs from LLMs
 // with automatic JSON Schema generation, validation, and pluggable backends.

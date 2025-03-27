@@ -1,10 +1,13 @@
-use rstructor::{AnthropicClient, AnthropicModel, LLMClient, LLMModel, OpenAIClient, OpenAIModel};
+use rstructor::{
+    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel, SchemaType,
+};
 use serde::{Deserialize, Serialize};
 use std::env;
 
 // Define an enum for article categories
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
-#[llm(description = "Category for a news article",
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "PascalCase")]
+#[llm(description = "Category for a news article. Must be one of the enum values: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.",
       examples = ["Politics", "Technology", "Business", "Sports", "Entertainment"])]
 enum ArticleCategory {
     Politics,
@@ -21,7 +24,7 @@ enum ArticleCategory {
 }
 
 // Define entities mentioned in the article
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "An entity mentioned in the article")]
 struct Entity {
     #[llm(description = "Name of the entity", example = "Microsoft")]
@@ -56,7 +59,7 @@ impl Entity {
 }
 
 // Define the structure for article analysis
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Analysis of a news article",
       examples = [
         ::serde_json::json!({
@@ -79,7 +82,9 @@ struct ArticleAnalysis {
     )]
     title: String,
 
-    #[llm(description = "Category the article belongs to")]
+    #[llm(
+        description = "Category the article belongs to. Must be one of: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other."
+    )]
     category: ArticleCategory,
 
     #[llm(
@@ -121,8 +126,14 @@ async fn analyze_article(
             .temperature(0.0)
             .build();
 
-        let prompt = format!("Analyze the following news article:\n\n{}", article_text);
-        Ok(client.generate_struct::<ArticleAnalysis>(&prompt).await?)
+        let prompt = format!(
+            "Analyze the following news article completely according to the schema:\n\n{}",
+            article_text
+        );
+        // Use more retries (5) to give it a better chance with complex validation
+        Ok(client
+            .generate_struct_with_retry::<ArticleAnalysis>(&prompt, Some(5), Some(true))
+            .await?)
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("Using Anthropic for article analysis...");
 
@@ -131,8 +142,14 @@ async fn analyze_article(
             .temperature(0.0)
             .build();
 
-        let prompt = format!("Analyze the following news article:\n\n{}", article_text);
-        Ok(client.generate_struct::<ArticleAnalysis>(&prompt).await?)
+        let prompt = format!(
+            "Analyze the following news article completely according to the schema:\n\n{}",
+            article_text
+        );
+        // Use more retries (5) to give it a better chance with complex validation
+        Ok(client
+            .generate_struct_with_retry::<ArticleAnalysis>(&prompt, Some(5), Some(true))
+            .await?)
     } else {
         Err("No API keys found. Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY.".into())
     }
@@ -140,6 +157,27 @@ async fn analyze_article(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Debug: Print the schema for ArticleAnalysis
+    let schema = ArticleAnalysis::schema();
+    println!("Schema: {}", schema); // This now uses our Display implementation with enhanced descriptions
+
+    // Debug: Print the schema for Entity
+    let entity_schema = Entity::schema();
+    println!("\nEntity Schema: {}", entity_schema);
+
+    // Let's check specifically what the entities field looks like
+    let schema_json = schema.to_json();
+    if let Some(properties) = schema_json.get("properties") {
+        if let Some(entities_prop) = properties.get("entities") {
+            println!("\nEntities property description:");
+            if let Some(items) = entities_prop.get("items") {
+                if let Some(desc) = items.get("description") {
+                    println!("Items description: {}", desc);
+                }
+            }
+        }
+    }
+
     // Sample article text
     let article = r#"
     TECH GIANT UNVEILS REVOLUTIONARY AI CHIP AMID COMPETITION CONCERNS

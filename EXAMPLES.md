@@ -8,14 +8,14 @@ You can add attributes to the entire struct or enum:
 
 ```rust
 // Add a description to a struct
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Represents a person with their basic information")]
 struct Person {
     // Fields...
 }
 
 // Add a description to an enum
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Represents a person's role in an organization")]
 enum Role {
     Employee,
@@ -92,7 +92,7 @@ mixed_data: Vec<serde_json::Value>,
 
 ```rust
 // For complex objects, use JSON object syntax
-#[llm(description = "The user's address", 
+#[llm(description = "The user's address",
       example = "{\"street\": \"123 Main St\", \"city\": \"New York\", \"zip\": \"10001\"}")]
 address: Address,
 ```
@@ -117,7 +117,7 @@ RStructor supports both simple enums and enums with associated data.
 #### Simple Enums
 
 ```rust
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Sentiment of the text analysis")]
 enum Sentiment {
     #[llm(description = "The text is positive in tone")]
@@ -134,7 +134,7 @@ enum Sentiment {
 #### Enums with Simple Associated Data
 
 ```rust
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 enum UserStatus {
     #[llm(description = "The user is online")]
     Online,
@@ -169,7 +169,7 @@ struct PaymentCard {
 }
 
 // Enum with various types of associated data
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 enum PaymentMethod {
     #[llm(description = "Payment made with a credit or debit card")]
     Card(PaymentCard),

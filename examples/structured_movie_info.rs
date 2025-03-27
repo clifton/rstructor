@@ -1,9 +1,11 @@
-use rstructor::{AnthropicClient, AnthropicModel, LLMClient, LLMModel, OpenAIClient, OpenAIModel};
+use rstructor::{
+    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
+};
 use serde::{Deserialize, Serialize};
 use std::env;
 
 // Define our data model
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Detailed information about a movie",
       title = "MovieDetails",
       examples = [
@@ -29,7 +31,7 @@ struct Movie {
     #[llm(description = "Year the movie was released", example = 2010)]
     release_year: u16,
 
-    #[llm(description = "List of genres for the movie", 
+    #[llm(description = "List of genres for the movie",
           example = ["Drama", "Thriller"])]
     genre: Vec<String>,
 
@@ -84,7 +86,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .temperature(0.0)
             .build();
 
-        match client.generate_struct::<Movie>(prompt).await {
+        match client
+            .generate_struct_with_retry::<Movie>(prompt, Some(3), Some(true))
+            .await
+        {
             Ok(movie) => {
                 println!("\nOpenAI Response:");
                 println!("Title: {}", movie.title);
@@ -109,7 +114,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .temperature(0.0)
             .build();
 
-        match client.generate_struct::<Movie>(prompt).await {
+        match client
+            .generate_struct_with_retry::<Movie>(prompt, Some(3), Some(true))
+            .await
+        {
             Ok(movie) => {
                 println!("\nAnthropic Response:");
                 println!("Title: {}", movie.title);

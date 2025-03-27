@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod schema_validation_tests {
-    use rstructor::{LLMModel, SchemaType};
+    use rstructor::{Instructor, SchemaType};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
 
     // Test model for validation
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct User {
         #[llm(description = "User's full name", example = "John Doe")]
         name: String,
@@ -102,7 +102,7 @@ mod schema_validation_tests {
         });
 
         // Validation should pass for valid instance
-        assert!(validate_against_schema(schema_json, &valid_instance));
+        assert!(validate_against_schema(&schema_json, &valid_instance));
     }
 
     #[test]
@@ -119,7 +119,7 @@ mod schema_validation_tests {
         });
 
         // Validation should fail
-        assert!(!validate_against_schema(schema_json, &missing_required));
+        assert!(!validate_against_schema(&schema_json, &missing_required));
     }
 
     #[test]
@@ -137,7 +137,7 @@ mod schema_validation_tests {
         });
 
         // Validation should fail
-        assert!(!validate_against_schema(schema_json, &type_mismatch));
+        assert!(!validate_against_schema(&schema_json, &type_mismatch));
     }
 
     #[test]
@@ -156,6 +156,6 @@ mod schema_validation_tests {
         });
 
         // Validation should pass with optional field
-        assert!(validate_against_schema(schema_json, &with_optional));
+        assert!(validate_against_schema(&schema_json, &with_optional));
     }
 }

@@ -1,5 +1,5 @@
 use rstructor::{
-    AnthropicClient, AnthropicModel, LLMModel, OpenAIClient, OpenAIModel, RStructorError,
+    AnthropicClient, AnthropicModel, Instructor, OpenAIClient, OpenAIModel, RStructorError,
 };
 type Result<T> = rstructor::Result<T>;
 use chrono::{NaiveDate, NaiveTime};
@@ -8,7 +8,7 @@ use std::{env, io::stdin};
 
 // Define data structures for event planning
 
-#[derive(LLMModel, Serialize, Deserialize, Debug, Clone)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Represents a contact person")]
 struct Contact {
     #[llm(description = "Name of the contact person", example = "John Smith")]
@@ -24,7 +24,7 @@ struct Contact {
     role: Option<String>,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug, Clone)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Represents a location")]
 struct Location {
     #[llm(
@@ -55,7 +55,7 @@ struct Location {
     instructions: Option<String>,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug, Clone)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Represents a scheduled activity within an event")]
 struct Activity {
     #[llm(
@@ -83,7 +83,7 @@ struct Activity {
     location: Option<String>,
 }
 
-#[derive(LLMModel, Serialize, Deserialize, Debug, Clone)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Information about an event to be organized",
       examples = [
         ::serde_json::json!({
@@ -240,15 +240,18 @@ impl EventPlan {
 }
 
 async fn process_event_request(
-    client: &impl rstructor::LLMClient,
+    client: &(impl rstructor::LLMClient + std::marker::Sync),
     description: &str,
 ) -> Result<EventPlan> {
     let prompt = format!(
-        "Based on the following description, create a detailed event plan:\n\n{}",
+        "Based on the following description, create a detailed event plan. IMPORTANT: Make sure to include location, contact, and activities fields as required.\n\nLocation should have name, address, and city. Contact should have name and either email or phone. Activities should be a list with start and end times.\n\n{}",
         description
     );
 
-    client.generate_struct::<EventPlan>(&prompt).await
+    // Use retry with up to 5 attempts if validation fails
+    client
+        .generate_struct_with_retry::<EventPlan>(&prompt, Some(5), Some(true))
+        .await
 }
 
 #[tokio::main]
@@ -292,7 +295,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),
-            Err(e) => println!("Error: {}", e),
+            Err(e) => {
+                println!("Error: {}", e);
+                if let rstructor::RStructorError::ValidationError(msg) = &e {
+                    println!("\nValidation error details: {}", msg);
+                }
+            }
         }
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("\nProcessing your request with Anthropic...\n");
@@ -304,7 +312,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),
-            Err(e) => println!("Error: {}", e),
+            Err(e) => {
+                println!("Error: {}", e);
+                if let rstructor::RStructorError::ValidationError(msg) = &e {
+                    println!("\nValidation error details: {}", msg);
+                }
+            }
         }
     } else {
         println!("\nNo API keys found in environment variables.");

@@ -1,8 +1,8 @@
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 
 // Simple enum
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 enum Sentiment {
     #[llm(description = "The text is positive in tone")]
     Positive,
@@ -15,7 +15,7 @@ enum Sentiment {
 }
 
 // Struct with enum field
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 struct TextAnalysis {
     #[llm(description = "The input text that was analyzed")]
     text: String,
@@ -34,7 +34,7 @@ fn main() {
     println!("Sentiment Enum Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(sentiment_schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&sentiment_schema.to_json()).unwrap()
     );
 
     // Get the schema for the struct with enum field
@@ -43,7 +43,7 @@ fn main() {
     println!("\nTextAnalysis Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(analysis_schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&analysis_schema.to_json()).unwrap()
     );
 
     // Sample instance

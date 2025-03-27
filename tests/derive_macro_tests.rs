@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod derive_macro_tests {
-    use rstructor::{LLMModel, SchemaType};
+    use rstructor::{Instructor, SchemaType};
     use serde::{Deserialize, Serialize};
 
     // Test string formatting from examples
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct FormatExamples {
         // String with quotes and special characters
         #[llm(
@@ -26,7 +26,7 @@ mod derive_macro_tests {
     }
 
     // Test attribute combinations
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct AttributeCombinations {
         // Field with only description
         #[llm(description = "Field with only description")]
@@ -53,7 +53,7 @@ mod derive_macro_tests {
     }
 
     // Test backwards compatibility with string-based array syntax
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct BackwardsCompatibility {
         // Using the old string-based array syntax with single quotes
         #[llm(

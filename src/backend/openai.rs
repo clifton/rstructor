@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::backend::LLMClient;
 use crate::error::{RStructorError, Result};
-use crate::model::LLMModel;
+use crate::model::Instructor;
 
 /// OpenAI models available for completion
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,7 +137,7 @@ impl OpenAIClient {
 impl LLMClient for OpenAIClient {
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
-        T: LLMModel + DeserializeOwned + Send + 'static,
+        T: Instructor + DeserializeOwned + Send + 'static,
     {
         // Get the schema for type T
         let schema = T::schema();
@@ -146,8 +146,8 @@ impl LLMClient for OpenAIClient {
         // Create function definition with the schema
         let function = FunctionDef {
             name: schema_name.clone(),
-            description: "Output in the specified format".to_string(),
-            parameters: schema.to_json().clone(),
+            description: "Output in the specified format. IMPORTANT: 1) Include ALL required fields. 2) For enum fields, use EXACTLY one of the values allowed in the description. 3) Include all nested objects with ALL their required fields. 4) For arrays of objects, always provide complete objects with all required fields - never arrays of strings. 5) Include multiple items (2-3) in each array.".to_string(),
+            parameters: schema.to_json(),
         };
 
         // Build the request
@@ -195,7 +195,10 @@ impl LLMClient for OpenAIClient {
         if let Some(function_call) = &message.function_call {
             // Parse the arguments JSON string into our target type
             let result: T = serde_json::from_str(&function_call.arguments).map_err(|e| {
-                RStructorError::ValidationError(format!("Failed to parse response: {}", e))
+                RStructorError::ValidationError(format!(
+                    "Failed to parse response: {}\nPartial JSON: {}",
+                    e, &function_call.arguments
+                ))
             })?;
 
             // Apply any custom validation
@@ -208,8 +211,8 @@ impl LLMClient for OpenAIClient {
                 // Try to extract JSON from the content (assuming the model might have returned JSON directly)
                 let result: T = serde_json::from_str(content).map_err(|e| {
                     RStructorError::ValidationError(format!(
-                        "Failed to parse response content: {}",
-                        e
+                        "Failed to parse response content: {}\nPartial JSON: {}",
+                        e, content
                     ))
                 })?;
 

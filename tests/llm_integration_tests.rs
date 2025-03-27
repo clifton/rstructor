@@ -11,13 +11,14 @@
 #[cfg(test)]
 mod llm_integration_tests {
     use rstructor::{
-        AnthropicClient, AnthropicModel, LLMClient, LLMModel, OpenAIClient, OpenAIModel, SchemaType,
+        AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
+        SchemaType,
     };
     use serde::{Deserialize, Serialize};
     use std::env;
 
     // Simple model for testing
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "Information about a movie")]
     struct Movie {
         #[llm(description = "Title of the movie")]

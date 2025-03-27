@@ -1,8 +1,8 @@
-use rstructor::{LLMModel, SchemaType};
+use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
 
 // Simple enum with primitive associated data
-#[derive(LLMModel, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug)]
 enum UserStatus {
     #[llm(description = "The user is online")]
     Online,
@@ -23,7 +23,7 @@ fn main() {
     println!("UserStatus Schema:");
     println!(
         "{}",
-        serde_json::to_string_pretty(user_status_schema.to_json()).unwrap()
+        serde_json::to_string_pretty(&user_status_schema.to_json()).unwrap()
     );
 
     // Example instances

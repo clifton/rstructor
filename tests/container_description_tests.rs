@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod container_description_tests {
-    use rstructor::{LLMModel, SchemaType};
+    use rstructor::{Instructor, SchemaType};
     use serde::{Deserialize, Serialize};
 
     /// A test struct with a container-level description
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "This is a struct description")]
     struct StructWithDescription {
         #[llm(description = "Field description")]
@@ -15,7 +15,7 @@ mod container_description_tests {
     }
 
     /// A test enum with a container-level description
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "This is an enum description")]
     enum EnumWithDescription {
         Option1,
@@ -24,14 +24,14 @@ mod container_description_tests {
     }
 
     // Struct without a description
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     struct StructWithoutDescription {
         #[llm(description = "Field description")]
         field: String,
     }
 
     // Enum without a description
-    #[derive(LLMModel, Serialize, Deserialize, Debug)]
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
     enum EnumWithoutDescription {
         Value1,
         Value2,

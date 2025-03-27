@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::LLMClient;
 use crate::error::{RStructorError, Result};
-use crate::model::LLMModel;
+use crate::model::Instructor;
 
 /// Anthropic models available for completion
 #[derive(Debug, Clone)]
@@ -120,7 +120,7 @@ impl AnthropicClient {
 impl LLMClient for AnthropicClient {
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
-        T: LLMModel + DeserializeOwned + Send + 'static,
+        T: Instructor + DeserializeOwned + Send + 'static,
     {
         // Get the schema for type T
         let schema = T::schema();
@@ -128,7 +128,7 @@ impl LLMClient for AnthropicClient {
         // Create a prompt that includes the schema
         let schema_str = schema.to_string();
         let structured_prompt = format!(
-            "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n\nUser query: {}",
+            "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
             schema_str, prompt
         );
 
@@ -175,7 +175,10 @@ impl LLMClient for AnthropicClient {
 
         // Try to parse the content as JSON
         let result: T = serde_json::from_str(content).map_err(|e| {
-            RStructorError::ValidationError(format!("Failed to parse response as JSON: {}", e))
+            RStructorError::ValidationError(format!(
+                "Failed to parse response as JSON: {}\nPartial JSON: {}",
+                e, content
+            ))
         })?;
 
         // Apply any custom validation

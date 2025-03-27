@@ -1,3 +1,3 @@
-mod llm_model;
+mod instructor;
 
-pub use llm_model::{LLMModel, Validatable};
+pub use instructor::{Instructor, Validatable};
