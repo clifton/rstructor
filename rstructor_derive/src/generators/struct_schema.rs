@@ -73,9 +73,41 @@ pub fn generate_struct_schema(
 
                 // Get schema type
                 let schema_type = get_schema_type_from_rust_type(&field.ty);
+                
+                // For custom types, check if they're enums by looking at the type name
+                let type_name = if let Type::Path(type_path) = &field.ty {
+                    if let Some(segment) = type_path.path.segments.first() {
+                        Some(segment.ident.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                // Special handling for enums used as fields
+                let is_likely_enum = if let Some(name) = &type_name {
+                    // Check if it starts with uppercase letter and is a custom type
+                    // This is a heuristic since we can't directly check at compile time
+                    let first_char = name.chars().next();
+                    first_char.map_or(false, |c| c.is_uppercase()) && 
+                    schema_type == "object" && 
+                    !is_array_type(&field.ty)
+                } else {
+                    false
+                };
 
                 // Create field property
-                let field_prop = if is_array_type(&field.ty) {
+                let field_prop = if is_likely_enum {
+                    // For likely enum types, use String type with a reference to using enum values
+                    quote! {
+                        // Create property for this enum field
+                        let mut props = ::serde_json::Map::new();
+                        // Use string type for enums
+                        props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                        // We'll add the enum description separately since we need to handle field attributes
+                    }
+                } else if is_array_type(&field.ty) {
                     // For array types, we need to add the 'items' property
                     if let Some(inner_type) = get_array_inner_type(&field.ty) {
                         let inner_schema_type = get_schema_type_from_rust_type(inner_type);
@@ -114,8 +146,25 @@ pub fn generate_struct_schema(
 
                 // Add description if available
                 if let Some(desc) = attrs.description {
+                    let desc_prop = if is_likely_enum {
+                        // For enum fields, enhance the description to include enum information
+                        let type_name_str = type_name.clone().unwrap_or_else(|| "".to_string());
+                        quote! {
+                            props.insert("description".to_string(), 
+                                ::serde_json::Value::String(format!("{} (Must be one of the allowed enum values for {})", #desc, #type_name_str)));
+                        }
+                    } else {
+                        quote! {
+                            props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
+                        }
+                    };
+                    property_setters.push(desc_prop);
+                } else if is_likely_enum {
+                    // If no description but it's an enum, add a note about using enum values
+                    let type_name_str = type_name.clone().unwrap_or_else(|| "".to_string());
                     let desc_prop = quote! {
-                        props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
+                        props.insert("description".to_string(), 
+                            ::serde_json::Value::String(format!("Must be one of the allowed enum values for {}", #type_name_str)));
                     };
                     property_setters.push(desc_prop);
                 }

@@ -1,11 +1,11 @@
 use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
+    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel, SchemaType,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
 
 // Define an enum for article categories
-#[derive(Instructor, Serialize, Deserialize, Debug)]
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "PascalCase")]
 #[llm(description = "Category for a news article. Must be one of the enum values: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.",
       examples = ["Politics", "Technology", "Business", "Sports", "Entertainment"])]
@@ -143,6 +143,10 @@ async fn analyze_article(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Debug: Print the schema for ArticleAnalysis
+    let schema = ArticleAnalysis::schema();
+    println!("Schema: {}", serde_json::to_string_pretty(&schema.to_json()).unwrap());
+
     // Sample article text
     let article = r#"
     TECH GIANT UNVEILS REVOLUTIONARY AI CHIP AMID COMPETITION CONCERNS
