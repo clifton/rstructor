@@ -20,8 +20,11 @@ fn test_schema_creation() {
 
     let schema = Schema::new(schema_json.clone());
 
-    assert_eq!(schema.to_json(), &schema_json);
-    assert_eq!(schema.to_string(), schema_json.to_string());
+    assert_eq!(*schema.to_json(), schema_json);
+    // Compare the raw schema and the JSON values directly
+    let schema_str1 = serde_json::to_string(&schema_json).unwrap();
+    let schema_str2 = serde_json::to_string(schema.to_json()).unwrap();
+    assert_eq!(schema_str1, schema_str2);
 }
 
 #[test]

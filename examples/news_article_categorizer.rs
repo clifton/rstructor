@@ -124,8 +124,9 @@ async fn analyze_article(
             .temperature(0.0)
             .build();
 
-        let prompt = format!("Analyze the following news article:\n\n{}", article_text);
-        Ok(client.generate_struct_with_retry::<ArticleAnalysis>(&prompt, Some(3), Some(true)).await?)
+        let prompt = format!("Analyze the following news article completely according to the schema:\n\n{}", article_text);
+        // Use more retries (5) to give it a better chance with complex validation
+        Ok(client.generate_struct_with_retry::<ArticleAnalysis>(&prompt, Some(5), Some(true)).await?)
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("Using Anthropic for article analysis...");
 
@@ -134,8 +135,9 @@ async fn analyze_article(
             .temperature(0.0)
             .build();
 
-        let prompt = format!("Analyze the following news article:\n\n{}", article_text);
-        Ok(client.generate_struct_with_retry::<ArticleAnalysis>(&prompt, Some(3), Some(true)).await?)
+        let prompt = format!("Analyze the following news article completely according to the schema:\n\n{}", article_text);
+        // Use more retries (5) to give it a better chance with complex validation
+        Ok(client.generate_struct_with_retry::<ArticleAnalysis>(&prompt, Some(5), Some(true)).await?)
     } else {
         Err("No API keys found. Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY.".into())
     }
@@ -145,7 +147,24 @@ async fn analyze_article(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Debug: Print the schema for ArticleAnalysis
     let schema = ArticleAnalysis::schema();
-    println!("Schema: {}", serde_json::to_string_pretty(&schema.to_json()).unwrap());
+    println!("Schema: {}", schema);  // This now uses our Display implementation with enhanced descriptions
+    
+    // Debug: Print the schema for Entity
+    let entity_schema = Entity::schema();
+    println!("\nEntity Schema: {}", entity_schema);
+    
+    // Let's check specifically what the entities field looks like
+    let schema_json = schema.to_json(); 
+    if let Some(properties) = schema_json.get("properties") {
+        if let Some(entities_prop) = properties.get("entities") {
+            println!("\nEntities property description:");
+            if let Some(items) = entities_prop.get("items") {
+                if let Some(desc) = items.get("description") {
+                    println!("Items description: {}", desc);
+                }
+            }
+        }
+    }
 
     // Sample article text
     let article = r#"

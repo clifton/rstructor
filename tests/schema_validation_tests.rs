@@ -102,7 +102,7 @@ mod schema_validation_tests {
         });
 
         // Validation should pass for valid instance
-        assert!(validate_against_schema(schema_json, &valid_instance));
+        assert!(validate_against_schema(&schema_json, &valid_instance));
     }
 
     #[test]
@@ -119,7 +119,7 @@ mod schema_validation_tests {
         });
 
         // Validation should fail
-        assert!(!validate_against_schema(schema_json, &missing_required));
+        assert!(!validate_against_schema(&schema_json, &missing_required));
     }
 
     #[test]
@@ -137,7 +137,7 @@ mod schema_validation_tests {
         });
 
         // Validation should fail
-        assert!(!validate_against_schema(schema_json, &type_mismatch));
+        assert!(!validate_against_schema(&schema_json, &type_mismatch));
     }
 
     #[test]
@@ -156,6 +156,6 @@ mod schema_validation_tests {
         });
 
         // Validation should pass with optional field
-        assert!(validate_against_schema(schema_json, &with_optional));
+        assert!(validate_against_schema(&schema_json, &with_optional));
     }
 }
