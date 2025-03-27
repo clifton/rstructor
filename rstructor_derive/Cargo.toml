@@ -1,12 +1,18 @@
 [package]
 name = "rstructor_derive"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 description = "Derive macros for the rstructor library"
 license = "MIT"
-repository = "https://github.com/yinsw/rstructor"
-authors = ["Your Name <your.email@example.com>"]
+repository = "https://github.com/clifton/rstructor"
+authors = ["Clifton King <cliftonk@gmail.com>"]
 documentation = "https://docs.rs/rstructor_derive"
+keywords = ["llm", "derive", "macros", "json-schema", "validation"]
+categories = [
+  "api-bindings",
+  "development-tools::procedural-macro-helpers",
+  "parsing",
+]
 
 [lib]
 proc-macro = true
