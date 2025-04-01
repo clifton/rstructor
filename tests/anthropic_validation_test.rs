@@ -62,8 +62,36 @@ mod anthropic_validation_tests {
     // Test validation catching an invalid temperature
     #[tokio::test]
     async fn test_anthropic_validation_fails_with_extreme_temperature() {
-        // For this test, we'll get a valid weather response but then manually create one with invalid temperature
-        let api_key = env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY env var not set");
+        // For this test, we really just need to validate manually, but we'll
+        // skip full API validation if no API key is available
+        let api_key = match env::var("ANTHROPIC_API_KEY") {
+            Ok(key) => key,
+            Err(_) => {
+                println!("Skipping Anthropic API test (no API key found)");
+                // Just test the validation logic directly
+                let invalid_weather = WeatherInfo {
+                    city: "Temperature Test City".to_string(),
+                    temperature: 999.0, // Way outside the valid range
+                    condition: "Extreme Heat".to_string(),
+                    humidity: 50, // Valid humidity
+                };
+
+                let validation_result = invalid_weather.validate();
+                assert!(
+                    validation_result.is_err(),
+                    "Validation should fail with extreme temperature"
+                );
+
+                if let Err(RStructorError::ValidationError(msg)) = validation_result {
+                    assert!(
+                        msg.contains("Temperature") || msg.contains("temperature"),
+                        "Error should mention temperature: {}",
+                        msg
+                    );
+                }
+                return;
+            }
+        };
 
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
@@ -74,6 +102,34 @@ mod anthropic_validation_tests {
         // First get a valid weather response
         let prompt = "What is the current weather in New York City?";
         let valid_result = client.generate_struct::<WeatherInfo>(prompt).await;
+
+        // Skip the test if we have API issues
+        if let Err(RStructorError::ApiError(_)) = &valid_result {
+            println!("Skipping due to API error: {:?}", valid_result);
+
+            // Still test the validation directly
+            let invalid_weather = WeatherInfo {
+                city: "Temperature Test City".to_string(),
+                temperature: 999.0, // Way outside the valid range
+                condition: "Extreme Heat".to_string(),
+                humidity: 50, // Valid humidity
+            };
+
+            let validation_result = invalid_weather.validate();
+            assert!(
+                validation_result.is_err(),
+                "Validation should fail with extreme temperature"
+            );
+
+            if let Err(RStructorError::ValidationError(msg)) = validation_result {
+                assert!(
+                    msg.contains("Temperature") || msg.contains("temperature"),
+                    "Error should mention temperature: {}",
+                    msg
+                );
+            }
+            return;
+        }
 
         // Make sure we can get a valid response
         assert!(
@@ -149,7 +205,25 @@ mod anthropic_validation_tests {
     #[tokio::test]
     async fn test_anthropic_validation_succeeds_with_valid_data() {
         // This test demonstrates successful validation with reasonable data
-        let api_key = env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY env var not set");
+        let api_key = match env::var("ANTHROPIC_API_KEY") {
+            Ok(key) => key,
+            Err(_) => {
+                println!("Skipping Anthropic API test (no API key found)");
+                // Create a valid weather object to test validation directly
+                let valid_weather = WeatherInfo {
+                    city: "Paris".to_string(),
+                    temperature: 22.5,
+                    condition: "Sunny".to_string(),
+                    humidity: 65,
+                };
+
+                assert!(
+                    valid_weather.validate().is_ok(),
+                    "Valid weather data should pass validation"
+                );
+                return;
+            }
+        };
 
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
@@ -162,6 +236,25 @@ mod anthropic_validation_tests {
 
         // Should succeed validation
         let result = client.generate_struct::<WeatherInfo>(prompt).await;
+
+        // If we get API errors, skip the test but still test validation directly
+        if let Err(RStructorError::ApiError(_)) = &result {
+            println!("Skipping due to API error: {:?}", result);
+
+            // Create a valid weather object to test validation directly
+            let valid_weather = WeatherInfo {
+                city: "Paris".to_string(),
+                temperature: 22.5,
+                condition: "Sunny".to_string(),
+                humidity: 65,
+            };
+
+            assert!(
+                valid_weather.validate().is_ok(),
+                "Valid weather data should pass validation"
+            );
+            return;
+        }
 
         // Validation should pass
         assert!(result.is_ok(), "Validation failed: {:?}", result.err());
