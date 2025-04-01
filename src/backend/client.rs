@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
@@ -144,6 +145,16 @@ pub trait LLMClient {
     /// # Ok(())
     /// # }
     /// ```
+    #[instrument(
+        name = "generate_struct_with_retry",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            max_retries,
+            include_errors,
+            prompt_len = prompt.len()
+        )
+    )]
     async fn generate_struct_with_retry<T>(
         &self,
         prompt: &str,
@@ -158,9 +169,21 @@ pub trait LLMClient {
         let mut validation_errors: Option<String> = None;
         let mut current_prompt = prompt.to_string();
 
+        trace!(
+            "Starting structured generation with retry: max_attempts={}, include_errors={}",
+            max_attempts,
+            include_errors
+        );
+
         for attempt in 0..max_attempts {
             // Add validation errors to the prompt if available and enabled
             if attempt > 0 && include_errors && validation_errors.is_some() {
+                debug!(
+                    attempt,
+                    error = validation_errors.as_ref().unwrap(),
+                    "Retrying with validation error feedback"
+                );
+                
                 let error_prompt = format!(
                     "{}\n\nYour previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
                     prompt,
@@ -169,19 +192,56 @@ pub trait LLMClient {
                 current_prompt = error_prompt;
             }
 
+            // Log attempt information
+            info!(
+                attempt = attempt + 1,
+                total_attempts = max_attempts,
+                "Generation attempt"
+            );
+
             // Attempt to generate structured data
             match self.generate_struct::<T>(&current_prompt).await {
-                Ok(result) => return Ok(result),
+                Ok(result) => {
+                    if attempt > 0 {
+                        // If we succeeded after retries
+                        info!(
+                            attempts_used = attempt + 1,
+                            "Successfully generated after {} retries", 
+                            attempt
+                        );
+                    } else {
+                        debug!("Successfully generated on first attempt");
+                    }
+                    return Ok(result);
+                },
                 Err(err) => {
                     // Only retry for validation errors
                     if let RStructorError::ValidationError(msg) = &err {
                         if attempt < max_attempts - 1 {
+                            warn!(
+                                attempt = attempt + 1,
+                                error = msg,
+                                "Validation error in generation attempt"
+                            );
                             // Store error for next attempt
                             validation_errors = Some(msg.clone());
                             // Wait briefly before retrying
                             sleep(Duration::from_millis(500)).await;
                             continue;
+                        } else {
+                            // Last attempt failed
+                            error!(
+                                attempts = max_attempts,
+                                error = msg,
+                                "Failed after maximum retry attempts with validation errors"
+                            );
                         }
+                    } else {
+                        // For non-validation errors
+                        error!(
+                            error = ?err,
+                            "Non-validation error occurred during generation"
+                        );
                     }
 
                     // For non-validation errors or last attempt, return the error

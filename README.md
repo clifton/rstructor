@@ -552,6 +552,28 @@ Available features:
 - `openai`: Include the OpenAI client
 - `anthropic`: Include the Anthropic client
 - `derive`: Include the derive macro (enabled by default)
+- `logging`: Enable tracing integration with default subscriber
+
+## 📊 Logging and Tracing
+
+RStructor includes structured logging via the `tracing` crate:
+
+```rust
+use rstructor::logging::{init_logging, LogLevel};
+
+// Initialize with desired level
+init_logging(LogLevel::Debug);
+
+// Or use filter strings for granular control
+// init_logging_with_filter("rstructor=info,rstructor::backend=trace");
+```
+
+Override with environment variables:
+```bash
+RSTRUCTOR_LOG=debug cargo run
+```
+
+Validation errors, retries, and API interactions are thoroughly logged at appropriate levels.
 
 ## 📋 Examples
 
@@ -564,6 +586,7 @@ See the `examples/` directory for complete, working examples:
 - `event_planner.rs`: Interactive event planning with user input
 - `weather_example.rs`: Simple model with validation demonstration
 - `custom_type_example.rs`: Using custom types like dates and UUIDs with JSON Schema format support
+- `logging_example.rs`: Demonstrates tracing integration with custom log levels
 
 ## ▶️ Running the Examples
 
@@ -590,6 +613,7 @@ cargo run --example news_article_categorizer
 - [x] Rich validation API with custom domain rules
 - [x] Support for enums with associated data (tagged unions)
 - [x] Support for custom types (dates, UUIDs, etc.)
+- [x] Structured logging and tracing
 - [ ] Streaming responses
 - [ ] Support for additional LLM providers
 - [ ] Integration with web frameworks (Axum, Actix)
