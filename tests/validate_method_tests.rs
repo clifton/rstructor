@@ -95,7 +95,7 @@ mod test_validation_works {
 }
 
 mod test_simple_type {
-    use rstructor::{Instructor, RStructorError};
+    use rstructor::Instructor;
     use serde::{Deserialize, Serialize};
 
     // Type without a validate method
