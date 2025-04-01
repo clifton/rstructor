@@ -27,11 +27,57 @@ struct DayForecast {
     temperature: f32,
 
     #[llm(description = "Weather conditions", example = "Sunny")]
-    #[serde(alias = "weather")]
+    #[serde(alias = "weather", deserialize_with = "deserialize_conditions")]
     conditions: String,
 }
 
-// Add validation for the weather forecast
+// Custom deserializer to handle both string and array of strings
+fn deserialize_conditions<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Create a visitor that can handle both string and array
+    struct StringOrVec;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrVec {
+        type Value = String;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("string or array of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(value.to_string())
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(value)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            // Get first string from the array
+            if let Some(value) = seq.next_element::<String>()? {
+                Ok(value)
+            } else {
+                Ok(String::new())
+            }
+        }
+    }
+
+    deserializer.deserialize_any(StringOrVec)
+}
+
+// Implement custom validation directly on the WeatherForecast struct
+// The Instructor derive macro will call this method
 impl WeatherForecast {
     fn validate(&self) -> rstructor::Result<()> {
         // Check that location is not empty
@@ -79,6 +125,36 @@ impl WeatherForecast {
                     "Weather conditions cannot be empty".to_string(),
                 ));
             }
+        }
+
+        Ok(())
+    }
+}
+
+// Implement validation for DayForecast
+// This will be called by the derived Instructor implementation
+impl DayForecast {
+    fn validate(&self) -> rstructor::Result<()> {
+        // Check that day is not empty
+        if self.day.trim().is_empty() {
+            return Err(rstructor::RStructorError::ValidationError(
+                "Day cannot be empty".to_string(),
+            ));
+        }
+
+        // Check temperature is in reasonable range
+        if self.temperature < -100.0 || self.temperature > 70.0 {
+            return Err(rstructor::RStructorError::ValidationError(format!(
+                "Forecast temperature must be between -100 and 70°C, got {}",
+                self.temperature
+            )));
+        }
+
+        // Check that conditions is not empty
+        if self.conditions.trim().is_empty() {
+            return Err(rstructor::RStructorError::ValidationError(
+                "Weather conditions cannot be empty".to_string(),
+            ));
         }
 
         Ok(())

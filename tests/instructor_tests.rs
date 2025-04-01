@@ -38,6 +38,13 @@ mod llm_model_tests {
         }
     }
 
+    // Manually implement Instructor for TestModel to call its validate method
+    impl Instructor for TestModel {
+        fn validate(&self) -> rstructor::Result<()> {
+            self.validate()
+        }
+    }
+
     // Custom validation implementation
     impl TestModel {
         fn validate(&self) -> rstructor::Result<()> {
@@ -71,6 +78,13 @@ mod llm_model_tests {
         impl SchemaType for SimpleModel {
             fn schema() -> Schema {
                 Schema::new(json!({"type": "object"}))
+            }
+        }
+
+        // Also implement Instructor for SimpleModel
+        impl Instructor for SimpleModel {
+            fn validate(&self) -> rstructor::Result<()> {
+                Ok(())
             }
         }
 

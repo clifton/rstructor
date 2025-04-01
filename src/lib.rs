@@ -43,7 +43,7 @@
 /// }
 /// ```
 mod backend;
-mod error;
+pub mod error;
 #[cfg(feature = "logging")]
 pub mod logging;
 pub mod model;

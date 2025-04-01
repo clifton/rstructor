@@ -28,7 +28,8 @@ use crate::schema::SchemaType;
 ///     quantity: u32,
 /// }
 ///
-/// // Add a custom validate implementation
+/// // Recommended approach: Add validation directly to the struct
+/// // The #[derive(Instructor)] macro handles calling this method
 /// impl Product {
 ///     fn validate(&self) -> rstructor::Result<()> {
 ///         // Price must be positive
@@ -93,6 +94,8 @@ pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
     /// #     price: f64,
     /// # }
     /// #
+    /// // Just implement validate directly on the struct
+    /// // No need to manually implement the Instructor trait
     /// impl Product {
     ///     fn validate(&self) -> rstructor::Result<()> {
     ///         // Price must be positive
@@ -110,8 +113,9 @@ pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
     }
 }
 
-/// Implement Instructor for any type that implements the required traits
-impl<T: SchemaType + DeserializeOwned + Serialize> Instructor for T {}
+// The blanket implementation is removed
+// Instead, the derive macro will handle implementing Instructor for each type
+// This avoids the conflicting implementation errors
 
 /// Helper trait to mark a type as implementing custom validation.
 ///

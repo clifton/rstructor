@@ -45,7 +45,6 @@ struct Entity {
 
 // Custom validation for Entity
 impl Entity {
-    #[allow(dead_code)]
     fn validate(&self) -> rstructor::Result<()> {
         // Check that relevance is within the expected range (1-10)
         if self.relevance < 1 || self.relevance > 10 {
