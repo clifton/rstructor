@@ -83,7 +83,7 @@ impl AnthropicClient {
         let api_key = api_key.into();
         info!("Creating new Anthropic client");
         trace!("API key length: {}", api_key.len());
-        
+
         let config = AnthropicConfig {
             api_key,
             model: AnthropicModel::Claude35Sonnet, // Default to Claude 3.5 Sonnet
@@ -164,7 +164,7 @@ impl LLMClient for AnthropicClient {
         T: Instructor + DeserializeOwned + Send + 'static,
     {
         info!("Generating structured response with Anthropic");
-        
+
         // Get the schema for type T
         let schema = T::schema();
         trace!(
@@ -241,12 +241,17 @@ impl LLMClient for AnthropicClient {
             .map(|block| &block.text)
         {
             Some(text) => {
-                debug!(content_len = text.len(), "Successfully extracted text content from response");
+                debug!(
+                    content_len = text.len(),
+                    "Successfully extracted text content from response"
+                );
                 text
-            },
+            }
             None => {
                 error!("No text content in Anthropic response");
-                return Err(RStructorError::ApiError("No text content in response".to_string()));
+                return Err(RStructorError::ApiError(
+                    "No text content in response".to_string(),
+                ));
             }
         };
 
@@ -289,7 +294,7 @@ impl LLMClient for AnthropicClient {
     )]
     async fn generate(&self, prompt: &str) -> Result<String> {
         info!("Generating raw text response with Anthropic");
-        
+
         // Build the request
         debug!("Building Anthropic API request for text generation");
         let request = CompletionRequest {
@@ -360,7 +365,10 @@ impl LLMClient for AnthropicClient {
             ));
         }
 
-        debug!(content_len = content.len(), "Successfully extracted text content");
+        debug!(
+            content_len = content.len(),
+            "Successfully extracted text content"
+        );
         Ok(content)
     }
 }

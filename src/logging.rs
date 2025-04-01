@@ -4,7 +4,7 @@
 //! through the `tracing` crate.
 
 use tracing::Level;
-use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Log levels supported by RStructor.
 ///
@@ -65,11 +65,10 @@ impl LogLevel {
 /// This will take precedence over the level passed to `init_logging()`.
 pub fn init_logging(level: LogLevel) {
     // Check if RSTRUCTOR_LOG environment variable is set
-    let env_filter = EnvFilter::try_from_env("RSTRUCTOR_LOG")
-        .unwrap_or_else(|_| {
-            // If not set, use the provided level
-            EnvFilter::new(format!("rstructor={}", level.to_tracing_level()))
-        });
+    let env_filter = EnvFilter::try_from_env("RSTRUCTOR_LOG").unwrap_or_else(|_| {
+        // If not set, use the provided level
+        EnvFilter::new(format!("rstructor={}", level.to_tracing_level()))
+    });
 
     // Create a subscriber with a custom filter and formatter
     tracing_subscriber::registry()
@@ -104,5 +103,8 @@ pub fn init_logging_with_filter(filter: &str) {
         .with(env_filter)
         .init();
 
-    tracing::info!("RStructor logging initialized with custom filter: {}", filter);
+    tracing::info!(
+        "RStructor logging initialized with custom filter: {}",
+        filter
+    );
 }

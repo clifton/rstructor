@@ -44,18 +44,18 @@
 /// ```
 mod backend;
 mod error;
-pub mod schema;
-pub mod model;
 #[cfg(feature = "logging")]
 pub mod logging;
+pub mod model;
+pub mod schema;
 
 // Re-exports for convenience
 pub use error::{RStructorError, Result};
-pub use schema::{SchemaBuilder, CustomTypeSchema, SchemaType, Schema};
 pub use model::Instructor;
+pub use schema::{CustomTypeSchema, Schema, SchemaBuilder, SchemaType};
 
 #[cfg(feature = "openai")]
-pub use backend::openai::{OpenAIClient, Model as OpenAIModel};
+pub use backend::openai::{Model as OpenAIModel, OpenAIClient};
 
 #[cfg(feature = "anthropic")]
 pub use backend::anthropic::{AnthropicClient, AnthropicModel};

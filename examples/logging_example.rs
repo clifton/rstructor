@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
 use rstructor::{
-    AnthropicClient, AnthropicModel, LLMClient, Instructor,
-    logging::{init_logging, LogLevel},
+    AnthropicClient, AnthropicModel, Instructor, LLMClient,
+    logging::{LogLevel, init_logging},
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 struct WeatherForecast {
@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate a structured forecast
     let prompt = "What's the weather forecast for Tokyo for the next 3 days?";
-    
+
     // This line will be logged with spans and info
     let forecast: WeatherForecast = client
         .generate_struct_with_retry(prompt, Some(2), Some(true))
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n\nGenerated forecast for {}", forecast.location);
     println!("Current temperature: {}°C", forecast.current_temperature);
     println!("\nUpcoming forecast:");
-    
+
     for day in forecast.forecast {
         println!("- {}: {}°C, {}", day.day, day.temperature, day.conditions);
     }

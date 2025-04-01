@@ -74,10 +74,7 @@ mod llm_integration_tests {
         };
 
         let client = match OpenAIClient::new(api_key) {
-            Ok(client) => client
-                .model(OpenAIModel::Gpt4O)
-                .temperature(0.0)
-                .build(),
+            Ok(client) => client.model(OpenAIModel::Gpt4O).temperature(0.0).build(),
             Err(e) => {
                 println!("Skipping test: Failed to create OpenAI client: {:?}", e);
                 return;
@@ -86,13 +83,13 @@ mod llm_integration_tests {
 
         let prompt = "Provide information about the movie Inception";
         let movie_result = client.generate_struct::<Movie>(prompt).await;
-        
+
         // Handle API errors gracefully
         if let Err(e) = &movie_result {
             println!("Skipping test due to API error: {:?}", e);
             return;
         }
-        
+
         // Only validate when we have a successful response
         let movie = movie_result.expect("Failed to get movie info");
 
@@ -131,19 +128,19 @@ mod llm_integration_tests {
 
         let prompt = "Provide information about the movie Inception";
         let movie_result = client.generate_struct::<Movie>(prompt).await;
-        
+
         // Handle API errors gracefully
         if let Err(e) = &movie_result {
             println!("Skipping test due to API error: {:?}", e);
             return;
         }
-        
+
         // Only validate when we have a successful response
         let movie = movie_result.expect("Failed to get movie info");
 
         // Validate response
         assert_eq!(movie.title, "Inception");
-        assert_eq!(movie.year, 2010); 
+        assert_eq!(movie.year, 2010);
         assert_eq!(movie.director, "Christopher Nolan");
         assert!(!movie.actors.is_empty());
         assert!(movie.plot.len() > 10);

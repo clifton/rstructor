@@ -75,10 +75,13 @@ mod anthropic_validation_tests {
                     condition: "Extreme Heat".to_string(),
                     humidity: 50, // Valid humidity
                 };
-                
+
                 let validation_result = invalid_weather.validate();
-                assert!(validation_result.is_err(), "Validation should fail with extreme temperature");
-                
+                assert!(
+                    validation_result.is_err(),
+                    "Validation should fail with extreme temperature"
+                );
+
                 if let Err(RStructorError::ValidationError(msg)) = validation_result {
                     assert!(
                         msg.contains("Temperature") || msg.contains("temperature"),
@@ -103,7 +106,7 @@ mod anthropic_validation_tests {
         // Skip the test if we have API issues
         if let Err(RStructorError::ApiError(_)) = &valid_result {
             println!("Skipping due to API error: {:?}", valid_result);
-            
+
             // Still test the validation directly
             let invalid_weather = WeatherInfo {
                 city: "Temperature Test City".to_string(),
@@ -111,10 +114,13 @@ mod anthropic_validation_tests {
                 condition: "Extreme Heat".to_string(),
                 humidity: 50, // Valid humidity
             };
-            
+
             let validation_result = invalid_weather.validate();
-            assert!(validation_result.is_err(), "Validation should fail with extreme temperature");
-            
+            assert!(
+                validation_result.is_err(),
+                "Validation should fail with extreme temperature"
+            );
+
             if let Err(RStructorError::ValidationError(msg)) = validation_result {
                 assert!(
                     msg.contains("Temperature") || msg.contains("temperature"),
@@ -124,7 +130,7 @@ mod anthropic_validation_tests {
             }
             return;
         }
-        
+
         // Make sure we can get a valid response
         assert!(
             valid_result.is_ok(),
@@ -210,8 +216,11 @@ mod anthropic_validation_tests {
                     condition: "Sunny".to_string(),
                     humidity: 65,
                 };
-                
-                assert!(valid_weather.validate().is_ok(), "Valid weather data should pass validation");
+
+                assert!(
+                    valid_weather.validate().is_ok(),
+                    "Valid weather data should pass validation"
+                );
                 return;
             }
         };
@@ -231,7 +240,7 @@ mod anthropic_validation_tests {
         // If we get API errors, skip the test but still test validation directly
         if let Err(RStructorError::ApiError(_)) = &result {
             println!("Skipping due to API error: {:?}", result);
-            
+
             // Create a valid weather object to test validation directly
             let valid_weather = WeatherInfo {
                 city: "Paris".to_string(),
@@ -239,8 +248,11 @@ mod anthropic_validation_tests {
                 condition: "Sunny".to_string(),
                 humidity: 65,
             };
-            
-            assert!(valid_weather.validate().is_ok(), "Valid weather data should pass validation");
+
+            assert!(
+                valid_weather.validate().is_ok(),
+                "Valid weather data should pass validation"
+            );
             return;
         }
 

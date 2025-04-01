@@ -101,7 +101,7 @@ impl OpenAIClient {
         let api_key = api_key.into();
         info!("Creating new OpenAI client");
         trace!("API key length: {}", api_key.len());
-        
+
         let config = OpenAIConfig {
             api_key,
             model: Model::Gpt4O, // Default to GPT-4o
@@ -127,7 +127,11 @@ impl OpenAIClient {
     /// Set the temperature (0.0 to 1.0, lower = more deterministic)
     #[instrument(skip(self))]
     pub fn temperature(mut self, temp: f32) -> Self {
-        debug!(previous_temp = self.config.temperature, new_temp = temp, "Setting temperature");
+        debug!(
+            previous_temp = self.config.temperature,
+            new_temp = temp,
+            "Setting temperature"
+        );
         self.config.temperature = temp;
         self
     }
@@ -169,7 +173,7 @@ impl LLMClient for OpenAIClient {
         T: Instructor + DeserializeOwned + Send + 'static,
     {
         info!("Generating structured response with OpenAI");
-        
+
         // Get the schema for type T
         let schema = T::schema();
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
@@ -235,7 +239,7 @@ impl LLMClient for OpenAIClient {
             error!(error = %e, "Failed to parse JSON response from OpenAI");
             e
         })?;
-        
+
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
             return Err(RStructorError::ApiError(
@@ -253,7 +257,7 @@ impl LLMClient for OpenAIClient {
                 args_len = function_call.arguments.len(),
                 "Function call received from OpenAI"
             );
-            
+
             // Parse the arguments JSON string into our target type
             let result: T = match serde_json::from_str(&function_call.arguments) {
                 Ok(parsed) => parsed,
@@ -276,7 +280,7 @@ impl LLMClient for OpenAIClient {
                 error!(error = ?e, "Custom validation failed");
                 return Err(e);
             }
-            
+
             info!("Successfully generated and validated structured data");
             Ok(result)
         } else {
@@ -286,7 +290,7 @@ impl LLMClient for OpenAIClient {
                     content_len = content.len(),
                     "No function call in response, attempting to parse content as JSON"
                 );
-                
+
                 // Try to extract JSON from the content (assuming the model might have returned JSON directly)
                 let result: T = match serde_json::from_str(content) {
                     Ok(parsed) => parsed,
@@ -309,7 +313,7 @@ impl LLMClient for OpenAIClient {
                     error!(error = ?e, "Custom validation failed");
                     return Err(e);
                 }
-                
+
                 info!("Successfully generated and validated structured data from content");
                 Ok(result)
             } else {
@@ -331,7 +335,7 @@ impl LLMClient for OpenAIClient {
     )]
     async fn generate(&self, prompt: &str) -> Result<String> {
         info!("Generating raw text response with OpenAI");
-        
+
         // Build the request without functions
         debug!("Building OpenAI API request for text generation");
         let request = ChatCompletionRequest {
@@ -381,7 +385,7 @@ impl LLMClient for OpenAIClient {
             error!(error = %e, "Failed to parse JSON response from OpenAI");
             e
         })?;
-        
+
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
             return Err(RStructorError::ApiError(
@@ -393,7 +397,10 @@ impl LLMClient for OpenAIClient {
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
 
         if let Some(content) = &message.content {
-            debug!(content_len = content.len(), "Successfully extracted content from response");
+            debug!(
+                content_len = content.len(),
+                "Successfully extracted content from response"
+            );
             Ok(content.clone())
         } else {
             error!("No content in OpenAI response");
