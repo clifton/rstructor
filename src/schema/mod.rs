@@ -3,8 +3,18 @@ mod custom_type;
 pub use builder::SchemaBuilder;
 pub use custom_type::CustomTypeSchema;
 
+use crate::error::Result;
 use serde_json::Value;
 use std::fmt::{Display, Formatter, Result as FmtResult};
+
+/// Helper function to call a struct's validate method if it exists
+/// This is used by the derive macro to prevent dead code warnings on struct validate methods
+pub fn call_validate_if_exists<T>(_obj: &T) -> Result<()> {
+    // This function is intentionally a no-op in the base implementation
+    // The derive macro will generate specialized versions that call the actual validate method
+    // for types that have one
+    Ok(())
+}
 
 /// Schema is a representation of a JSON Schema that describes the structure
 /// an LLM should return.

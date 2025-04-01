@@ -31,7 +31,8 @@ struct DayForecast {
     conditions: String,
 }
 
-// Add validation for the weather forecast
+// Implement custom validation directly on the WeatherForecast struct
+// The Instructor derive macro will call this method
 impl WeatherForecast {
     fn validate(&self) -> rstructor::Result<()> {
         // Check that location is not empty
@@ -79,6 +80,36 @@ impl WeatherForecast {
                     "Weather conditions cannot be empty".to_string(),
                 ));
             }
+        }
+
+        Ok(())
+    }
+}
+
+// Implement validation for DayForecast
+// This will be called by the derived Instructor implementation
+impl DayForecast {
+    fn validate(&self) -> rstructor::Result<()> {
+        // Check that day is not empty
+        if self.day.trim().is_empty() {
+            return Err(rstructor::RStructorError::ValidationError(
+                "Day cannot be empty".to_string(),
+            ));
+        }
+
+        // Check temperature is in reasonable range
+        if self.temperature < -100.0 || self.temperature > 70.0 {
+            return Err(rstructor::RStructorError::ValidationError(format!(
+                "Forecast temperature must be between -100 and 70°C, got {}",
+                self.temperature
+            )));
+        }
+
+        // Check that conditions is not empty
+        if self.conditions.trim().is_empty() {
+            return Err(rstructor::RStructorError::ValidationError(
+                "Weather conditions cannot be empty".to_string(),
+            ));
         }
 
         Ok(())
