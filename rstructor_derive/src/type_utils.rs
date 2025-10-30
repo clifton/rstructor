@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use syn::{GenericArgument, PathArguments, Type};
 
 #[cfg(test)]
