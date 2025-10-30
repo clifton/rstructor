@@ -245,12 +245,20 @@ pub fn generate_struct_schema(
                             let is_uppercase = first_char.is_some_and(|c| c.is_uppercase());
 
                             // Check if this could be an enum
+                            // CRITICAL: Use same strict criteria as non-array fields
+                            // Only treat as enum if it matches whitelist (Status, Type, etc.)
+                            let uppercase_count = type_name.chars().filter(|c| c.is_uppercase()).count();
                             let is_likely_enum = is_uppercase &&
                                 inner_schema_type == "object" &&
                                 !is_array_type(inner_type) &&
-                                // Additional heuristic: enums are usually short names without underscores
+                                // EXTREMELY strict - same as non-array handling
+                                type_name.len() <= 6 &&
+                                uppercase_count == 1 &&
                                 !type_name.contains('_') &&
-                                type_name.len() < 20;
+                                type_name.chars().all(|c| c.is_alphanumeric()) &&
+                                (type_name == "Status" || type_name == "Type" || type_name == "State" 
+                                 || type_name == "Color" || type_name == "Kind" || type_name == "Mode" 
+                                 || type_name == "Role" || type_name == "Level");
 
                             if is_likely_enum && type_name != "Entity" && type_name != "Item" {
                                 // For arrays of enum values (excluding Entity which is a known struct)
