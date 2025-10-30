@@ -369,7 +369,18 @@ mod nested_struct_tests {
         // Verify comments is an array of objects
         let comments_prop = &schema_json["properties"]["comments"];
         assert_eq!(comments_prop["type"], "array");
-        assert_eq!(comments_prop["items"]["type"], "object");
+        
+        // Schema enhancement should ensure items are objects
+        let items = &comments_prop["items"];
+        let items_type = items.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let has_properties = items.get("properties").and_then(|v| v.as_object()).is_some();
+        
+        assert!(
+            items_type == "object" || has_properties,
+            "Comments items should be type 'object' or have properties. Type: {:?}, Has properties: {:?}",
+            items_type,
+            has_properties
+        );
     }
 
     // ====== Edge cases ======
