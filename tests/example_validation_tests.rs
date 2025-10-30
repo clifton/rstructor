@@ -161,7 +161,7 @@ mod example_validation_tests {
         let nutrition_prop = &schema_json["properties"]["nutrition"];
         // The field should exist and have a type
         assert!(nutrition_prop.get("type").is_some());
-        
+
         // If it's an object type, verify it has properties
         // Otherwise, it's treated as a custom type (string)
         if nutrition_prop["type"] == "object" {

@@ -109,13 +109,22 @@ pub fn generate_struct_schema(
                             || name.contains("Custom");
 
                         // Check if it's likely an enum (starts with uppercase, is an object, not an array)
+                        // CRITICAL: Be EXTREMELY conservative - only flag as enum if it's clearly enum-like
+                        // Nested structs are MUCH more common than enums as fields, so default to struct
+                        // True enums are usually: single short PascalCase word, 1-8 chars, single capital letter
                         let first_char = name.chars().next();
+                        let uppercase_count = name.chars().filter(|c| c.is_uppercase()).count();
                         let is_enum = first_char.is_some_and(|c| c.is_uppercase())
                             && schema_type == "object"
                             && !is_array_type(&field.ty)
                             && !is_date
                             && !is_uuid
-                            && !is_custom;
+                            && !is_custom
+                            // Very strict criteria for enum detection:
+                            && name.len() <= 8  // Very short names only (enums: Status, Type, Color)
+                            && uppercase_count == 1  // Single capital letter (true PascalCase single word)
+                            && !name.contains("_")  // No underscores
+                            && name.chars().all(|c| c.is_alphanumeric()); // Only alphanumeric (no special chars)
 
                         (is_enum, is_date, is_uuid, is_custom)
                     } else {
@@ -123,9 +132,35 @@ pub fn generate_struct_schema(
                     };
 
                 // Create field property
-                // Note: Nested struct schema embedding temporarily disabled due to scope issues
-                // TODO: Re-enable with proper scoping
-                let field_prop = if is_likely_enum {
+                // CRITICAL: Check for nested structs FIRST - they should be type "object"
+                // Only treat as enum if it's clearly not a struct (very short, single PascalCase word)
+                let field_prop = if type_name.is_some()
+                    && schema_type == "object"
+                    && !is_array_type(&field.ty)
+                    && !is_date_type
+                    && !is_uuid_type
+                    && !is_custom_type
+                {
+                    // For nested struct/enum types - prioritize treating as object unless clearly enum
+                    if is_likely_enum {
+                        // Only if it's VERY likely an enum (short, single word), treat as string
+                        quote! {
+                            // Create property for this enum field
+                            let mut props = ::serde_json::Map::new();
+                            // Use string type for enums
+                            props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                            // We'll add the enum description separately since we need to handle field attributes
+                        }
+                    } else {
+                        // Treat as nested struct - must be type "object"
+                        quote! {
+                            // Create property for nested struct field
+                            let mut props = ::serde_json::Map::new();
+                            // CRITICAL: Must be type "object" for nested structs, not "string"
+                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                        }
+                    }
+                } else if is_likely_enum {
                     // For likely enum types, use String type with a reference to using enum values
                     quote! {
                         // Create property for this enum field
