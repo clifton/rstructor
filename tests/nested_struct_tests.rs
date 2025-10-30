@@ -132,9 +132,15 @@ mod nested_struct_tests {
 
         // Verify items are objects or have properties (schema enhancement adds properties)
         let items = &tags_prop["items"];
-        let items_type = items.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let has_properties = items.get("properties").and_then(|v| v.as_object()).is_some();
-        
+        let items_type = items
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let has_properties = items
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .is_some();
+
         // CRITICAL: Items MUST be objects for nested structs to work
         // Schema enhancement should ensure this, but verify anyway
         assert!(
@@ -144,7 +150,7 @@ mod nested_struct_tests {
             has_properties,
             serde_json::to_string_pretty(items).unwrap_or_default()
         );
-        
+
         // If properties exist, the enhancement worked
         if has_properties {
             assert!(items["properties"].is_object());
@@ -378,12 +384,18 @@ mod nested_struct_tests {
         // Verify comments is an array of objects
         let comments_prop = &schema_json["properties"]["comments"];
         assert_eq!(comments_prop["type"], "array");
-        
+
         // Schema enhancement should ensure items are objects
         let items = &comments_prop["items"];
-        let items_type = items.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let has_properties = items.get("properties").and_then(|v| v.as_object()).is_some();
-        
+        let items_type = items
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let has_properties = items
+            .get("properties")
+            .and_then(|v| v.as_object())
+            .is_some();
+
         assert!(
             items_type == "object" || has_properties,
             "Comments items should be type 'object' or have properties. Type: {:?}, Has properties: {:?}",

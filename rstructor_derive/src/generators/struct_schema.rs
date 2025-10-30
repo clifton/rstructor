@@ -129,7 +129,7 @@ pub fn generate_struct_schema(
                             && !name.contains("_")  // No underscores
                             && name.chars().all(|c| c.is_alphanumeric()) // Only alphanumeric
                             // Additional check: common enum names (whitelist approach)
-                            && (name == "Status" || name == "Type" || name == "State" || name == "Color" 
+                            && (name == "Status" || name == "Type" || name == "State" || name == "Color"
                                 || name == "Kind" || name == "Mode" || name == "Role" || name == "Level");
 
                     (is_enum, is_date, is_uuid, is_custom)
@@ -247,7 +247,8 @@ pub fn generate_struct_schema(
                             // Check if this could be an enum
                             // CRITICAL: Use same strict criteria as non-array fields
                             // Only treat as enum if it matches whitelist (Status, Type, etc.)
-                            let uppercase_count = type_name.chars().filter(|c| c.is_uppercase()).count();
+                            let uppercase_count =
+                                type_name.chars().filter(|c| c.is_uppercase()).count();
                             let is_likely_enum = is_uppercase &&
                                 inner_schema_type == "object" &&
                                 !is_array_type(inner_type) &&
@@ -256,30 +257,11 @@ pub fn generate_struct_schema(
                                 uppercase_count == 1 &&
                                 !type_name.contains('_') &&
                                 type_name.chars().all(|c| c.is_alphanumeric()) &&
-                                (type_name == "Status" || type_name == "Type" || type_name == "State" 
-                                 || type_name == "Color" || type_name == "Kind" || type_name == "Mode" 
+                                (type_name == "Status" || type_name == "Type" || type_name == "State"
+                                 || type_name == "Color" || type_name == "Kind" || type_name == "Mode"
                                  || type_name == "Role" || type_name == "Level");
 
-                            if is_likely_enum && type_name != "Entity" && type_name != "Item" {
-                                // For arrays of enum values (excluding Entity which is a known struct)
-                                let type_name_str = type_name.clone();
-                                quote! {
-                                    // Create property for this array field with enum items
-                                    let mut props = ::serde_json::Map::new();
-                                    props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-
-                                    // Add items schema for enum
-                                    let mut items_schema = ::serde_json::Map::new();
-                                    items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
-                                    items_schema.insert("description".to_string(),
-                                        ::serde_json::Value::String(format!("Must be one of the allowed values for {}", #type_name_str)));
-                                    props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
-                                }
-                            } else if type_name == "DateTime"
-                                || type_name == "NaiveDateTime"
-                                || type_name == "NaiveDate"
-                                || type_name == "Date"
-                            {
+                            if is_date {
                                 // Handle array of dates
                                 quote! {
                                     // Create property for this array field with date items
@@ -385,14 +367,7 @@ pub fn generate_struct_schema(
 
                 // Add description if available
                 if let Some(desc) = attrs.description {
-                    let desc_prop = if is_likely_enum {
-                        // For enum fields, enhance the description to include enum information
-                        let type_name_str = type_name.clone().unwrap_or_else(|| "".to_string());
-                        quote! {
-                            props.insert("description".to_string(),
-                                ::serde_json::Value::String(format!("{} (Must be one of the allowed enum values for {})", #desc, #type_name_str)));
-                        }
-                    } else if is_custom_type {
+                    let desc_prop = if is_custom_type {
                         // For custom types, just use the description as is (CustomTypeSchema will be used)
                         quote! {
                             props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
