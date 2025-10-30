@@ -31,10 +31,10 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// struct Person {
 ///     #[llm(description = "Full name of the person")]
 ///     name: String,
-///     
+///
 ///     #[llm(description = "Age of the person in years", example = 30)]
 ///     age: u32,
-///     
+///
 ///     #[llm(description = "List of skills", example = ["Programming", "Writing", "Design"])]
 ///     skills: Vec<String>,
 /// }
@@ -58,7 +58,7 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// struct Person {
 ///     #[llm(description = "Full name of the person")]
 ///     name: String,
-///     
+///
 ///     #[llm(description = "Age of the person in years")]
 ///     age: u32,
 /// }
@@ -192,6 +192,7 @@ fn find_validate_method(input: &syn::DeriveInput) -> bool {
                 }
                 Ok(())
             });
+            #[allow(clippy::collapsible_if)]
             if has_validation {
                 return true;
             }

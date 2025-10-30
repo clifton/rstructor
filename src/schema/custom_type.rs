@@ -82,8 +82,8 @@ pub trait CustomTypeSchema {
         }
 
         // Add any additional properties
-        if let Some(additional) = Self::schema_additional_properties() {
-            if let Some(additional_obj) = additional.as_object() {
+        if let Some(additional) = Self::schema_additional_properties()
+            && let Some(additional_obj) = additional.as_object() {
                 for (key, value) in additional_obj {
                     schema
                         .as_object_mut()
@@ -91,7 +91,6 @@ pub trait CustomTypeSchema {
                         .insert(key.clone(), value.clone());
                 }
             }
-        }
 
         schema
     }

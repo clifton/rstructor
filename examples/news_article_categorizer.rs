@@ -25,9 +25,14 @@ enum ArticleCategory {
 
 // Define entities mentioned in the article
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "An entity mentioned in the article. This must be a complete object with all three fields: name, entity_type, and relevance.")]
+#[llm(
+    description = "An entity mentioned in the article. This must be a complete object with all three fields: name, entity_type, and relevance."
+)]
 struct Entity {
-    #[llm(description = "Name of the entity (must be a string)", example = "Microsoft")]
+    #[llm(
+        description = "Name of the entity (must be a string)",
+        example = "Microsoft"
+    )]
     name: String,
 
     #[llm(
@@ -98,7 +103,9 @@ struct ArticleAnalysis {
     )]
     sentiment: String,
 
-    #[llm(description = "Main entities mentioned in the article. MUST be an array of objects, not strings. Each object must have 'name' (string), 'entity_type' (string), and 'relevance' (number 1-10) fields.")]
+    #[llm(
+        description = "Main entities mentioned in the article. MUST be an array of objects, not strings. Each object must have 'name' (string), 'entity_type' (string), and 'relevance' (number 1-10) fields."
+    )]
     entities: Vec<Entity>,
 
     #[llm(description = "Important keywords from the article",
@@ -228,7 +235,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             eprintln!("Error analyzing article: {}", e);
-            eprintln!("\nNote: This error may occur if the LLM returns entities as strings instead of objects.");
+            eprintln!(
+                "\nNote: This error may occur if the LLM returns entities as strings instead of objects."
+            );
             eprintln!("The retry mechanism attempts to fix this, but complex nested structures");
             eprintln!("can be challenging. Try running again or increase retry count.");
         }

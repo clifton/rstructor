@@ -96,33 +96,36 @@ impl Schema {
         let mut schema_json = self.schema.clone();
 
         // Enhance schemas: fix array items and nested object properties
-        if let Value::Object(obj) = &mut schema_json {
-            if let Some(Value::Object(props)) = obj.get_mut("properties") {
+        if let Value::Object(obj) = &mut schema_json
+            && let Some(Value::Object(props)) = obj.get_mut("properties") {
                 // Check each property
                 for (_, prop_value) in props.iter_mut() {
                     if let Value::Object(prop) = prop_value {
                         // First, handle nested object fields (non-array)
-                        if let Some(Value::String(prop_type)) = prop.get("type") {
-                            if prop_type == "object" && !prop.contains_key("properties") {
+                        if let Some(Value::String(prop_type)) = prop.get("type")
+                            && prop_type == "object" && !prop.contains_key("properties") {
                                 // This is a nested struct without embedded properties
                                 // Check if description indicates it needs properties
-                                let desc = prop.get("description")
+                                let desc = prop
+                                    .get("description")
                                     .and_then(|d| d.as_str())
                                     .unwrap_or("");
-                                if desc.contains("MUST be an object") || desc.contains("with exactly these fields") {
+                                if desc.contains("MUST be an object")
+                                    || desc.contains("with exactly these fields")
+                                {
                                     // This should have nested properties but doesn't
                                     // We can't resolve the type at runtime, but we can add better description
                                     // The actual fix would need to happen in the derive macro
                                 }
                             }
-                        }
 
                         // Check if this is an array property
-                        if let Some(Value::String(prop_type)) = prop.get("type") {
-                            if prop_type == "array" {
+                        if let Some(Value::String(prop_type)) = prop.get("type")
+                            && prop_type == "array" {
                                 // Get the parent property description (may indicate objects are needed)
                                 // Get this BEFORE any mutable borrows
-                                let parent_description = prop.get("description")
+                                let parent_description = prop
+                                    .get("description")
                                     .and_then(|d| d.as_str())
                                     .unwrap_or("")
                                     .to_string();
@@ -141,12 +144,12 @@ impl Schema {
                                 if let Some(Value::Object(items)) = prop.get_mut("items") {
                                     // Check if the items are objects or should be objects
                                     // Get items type and description BEFORE mutable operations
-                                    let items_type = items.get("type")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
+                                    let items_type =
+                                        items.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
                                     // Check both items description and parent property description
-                                    let items_description = items.get("description")
+                                    let items_description = items
+                                        .get("description")
                                         .and_then(|d| d.as_str())
                                         .unwrap_or("")
                                         .to_string();
@@ -155,14 +158,16 @@ impl Schema {
                                     // 1. Type is already "object"
                                     // 2. Items description mentions objects
                                     // 3. Parent property description mentions "MUST be an array of objects" or similar
-                                    let should_be_object = items_type == "object" ||
-                                        (items_type == "string" &&
-                                         (items_description.contains("object") ||
-                                          items_description.contains("MUST be") ||
-                                          items_description.contains("complete object") ||
-                                          parent_description.contains("MUST be an array of objects") ||
-                                          parent_description.contains("array of objects") ||
-                                          parent_description.contains("complete object")));
+                                    let should_be_object = items_type == "object"
+                                        || (items_type == "string"
+                                            && (items_description.contains("object")
+                                                || items_description.contains("MUST be")
+                                                || items_description.contains("complete object")
+                                                || parent_description
+                                                    .contains("MUST be an array of objects")
+                                                || parent_description
+                                                    .contains("array of objects")
+                                                || parent_description.contains("complete object")));
 
                                     if should_be_object {
                                         // Ensure type is set to object
@@ -264,11 +269,9 @@ impl Schema {
                                     }
                                 }
                             }
-                        }
                     }
                 }
             }
-        }
 
         schema_json
     }

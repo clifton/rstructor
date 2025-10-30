@@ -38,16 +38,28 @@ struct Step {
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Nutritional information per serving. All values are numbers, not strings.")]
 struct Nutrition {
-    #[llm(description = "Calories per serving (must be a number, not a string)", example = 350)]
+    #[llm(
+        description = "Calories per serving (must be a number, not a string)",
+        example = 350
+    )]
     calories: u16,
 
-    #[llm(description = "Protein in grams (must be a number, field name is 'protein_g')", example = 7.5)]
+    #[llm(
+        description = "Protein in grams (must be a number, field name is 'protein_g')",
+        example = 7.5
+    )]
     protein_g: f32,
 
-    #[llm(description = "Carbohydrates in grams (must be a number, field name is 'carbs_g', not 'carbohydrates')", example = 45.0)]
+    #[llm(
+        description = "Carbohydrates in grams (must be a number, field name is 'carbs_g', not 'carbohydrates')",
+        example = 45.0
+    )]
     carbs_g: f32,
 
-    #[llm(description = "Fat in grams (must be a number, field name is 'fat_g')", example = 15.2)]
+    #[llm(
+        description = "Fat in grams (must be a number, field name is 'fat_g')",
+        example = 15.2
+    )]
     fat_g: f32,
 }
 
@@ -101,13 +113,19 @@ struct Recipe {
     #[llm(description = "Recipe difficulty level", example = "Medium")]
     difficulty: String,
 
-    #[llm(description = "List of ingredients needed. MUST be an array of objects, not strings. Each object must have 'name', 'amount', and 'unit' fields.")]
+    #[llm(
+        description = "List of ingredients needed. MUST be an array of objects, not strings. Each object must have 'name', 'amount', and 'unit' fields."
+    )]
     ingredients: Vec<Ingredient>,
 
-    #[llm(description = "Step-by-step cooking instructions. MUST be an array of objects, not strings. Each object must have 'number', 'description', and optionally 'time_minutes' fields.")]
+    #[llm(
+        description = "Step-by-step cooking instructions. MUST be an array of objects, not strings. Each object must have 'number', 'description', and optionally 'time_minutes' fields."
+    )]
     steps: Vec<Step>,
 
-    #[llm(description = "Nutritional information per serving. MUST be an object with exactly these fields: calories (number), protein_g (number), carbs_g (number), fat_g (number). Field names must match exactly.")]
+    #[llm(
+        description = "Nutritional information per serving. MUST be an object with exactly these fields: calories (number), protein_g (number), carbs_g (number), fat_g (number). Field names must match exactly."
+    )]
     nutrition: Nutrition,
 }
 
@@ -198,7 +216,9 @@ CRITICAL REQUIREMENTS:
         println!("No API keys found in environment variables.");
         println!("Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY to run this example.");
         println!("\nNote: This example requires API keys because it makes actual LLM calls.");
-        println!("If you see validation errors, the LLM may need more retries or a clearer prompt.");
+        println!(
+            "If you see validation errors, the LLM may need more retries or a clearer prompt."
+        );
     }
 
     Ok(())

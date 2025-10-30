@@ -23,18 +23,32 @@ mod example_validation_tests {
     }
 
     #[derive(Instructor, Serialize, Deserialize, Debug)]
-    #[llm(description = "Nutritional information per serving. All values are numbers, not strings.")]
+    #[llm(
+        description = "Nutritional information per serving. All values are numbers, not strings."
+    )]
     struct TestNutrition {
-        #[llm(description = "Calories per serving (must be a number, not a string)", example = 350)]
+        #[llm(
+            description = "Calories per serving (must be a number, not a string)",
+            example = 350
+        )]
         calories: u16,
 
-        #[llm(description = "Protein in grams (must be a number, field name is 'protein_g')", example = 7.5)]
+        #[llm(
+            description = "Protein in grams (must be a number, field name is 'protein_g')",
+            example = 7.5
+        )]
         protein_g: f32,
 
-        #[llm(description = "Carbohydrates in grams (must be a number, field name is 'carbs_g', not 'carbohydrates')", example = 45.0)]
+        #[llm(
+            description = "Carbohydrates in grams (must be a number, field name is 'carbs_g', not 'carbohydrates')",
+            example = 45.0
+        )]
         carbs_g: f32,
 
-        #[llm(description = "Fat in grams (must be a number, field name is 'fat_g')", example = 15.2)]
+        #[llm(
+            description = "Fat in grams (must be a number, field name is 'fat_g')",
+            example = 15.2
+        )]
         fat_g: f32,
     }
 
@@ -43,18 +57,27 @@ mod example_validation_tests {
         #[llm(description = "Name of the recipe", example = "Chocolate Chip Cookies")]
         name: String,
 
-        #[llm(description = "List of ingredients needed. MUST be an array of objects, not strings. Each object must have 'name', 'amount', and 'unit' fields.")]
+        #[llm(
+            description = "List of ingredients needed. MUST be an array of objects, not strings. Each object must have 'name', 'amount', and 'unit' fields."
+        )]
         ingredients: Vec<TestIngredient>,
 
-        #[llm(description = "Nutritional information per serving. MUST be an object with exactly these fields: calories (number), protein_g (number), carbs_g (number), fat_g (number). Field names must match exactly.")]
+        #[llm(
+            description = "Nutritional information per serving. MUST be an object with exactly these fields: calories (number), protein_g (number), carbs_g (number), fat_g (number). Field names must match exactly."
+        )]
         nutrition: TestNutrition,
     }
 
     // Test structures from news_article_categorizer
     #[derive(Instructor, Serialize, Deserialize, Debug)]
-    #[llm(description = "An entity mentioned in the article. This must be a complete object with all three fields: name, entity_type, and relevance.")]
+    #[llm(
+        description = "An entity mentioned in the article. This must be a complete object with all three fields: name, entity_type, and relevance."
+    )]
     struct TestEntity {
-        #[llm(description = "Name of the entity (must be a string)", example = "Microsoft")]
+        #[llm(
+            description = "Name of the entity (must be a string)",
+            example = "Microsoft"
+        )]
         name: String,
 
         #[llm(
@@ -75,7 +98,9 @@ mod example_validation_tests {
         #[llm(description = "Title of the article", example = "Tech Stocks Tumble")]
         title: String,
 
-        #[llm(description = "Main entities mentioned in the article. MUST be an array of objects, not strings. Each object must have 'name' (string), 'entity_type' (string), and 'relevance' (number 1-10) fields.")]
+        #[llm(
+            description = "Main entities mentioned in the article. MUST be an array of objects, not strings. Each object must have 'name' (string), 'entity_type' (string), and 'relevance' (number 1-10) fields."
+        )]
         entities: Vec<TestEntity>,
     }
 
@@ -94,26 +119,40 @@ mod example_validation_tests {
 
         // Verify ingredients items are objects
         let ingredients_items = &ingredients_prop["items"];
-        eprintln!("DEBUG: Ingredients items schema: {}", serde_json::to_string_pretty(ingredients_items).unwrap());
+        eprintln!(
+            "DEBUG: Ingredients items schema: {}",
+            serde_json::to_string_pretty(ingredients_items).unwrap()
+        );
 
         // The schema enhancement should fix the type if the description indicates objects
         // Check if properties exist (the enhancement adds them) OR type is object
         let has_properties = ingredients_items["properties"].is_object();
         let is_object_type = ingredients_items["type"] == "object";
 
-        assert!(is_object_type || has_properties,
-                "Ingredients items should be objects or have properties. Type: {:?}, Has properties: {:?}",
-                ingredients_items.get("type"), has_properties);
+        assert!(
+            is_object_type || has_properties,
+            "Ingredients items should be objects or have properties. Type: {:?}, Has properties: {:?}",
+            ingredients_items.get("type"),
+            has_properties
+        );
 
         // If it has properties, the enhancement worked - verify it
         if has_properties {
             let props = ingredients_items["properties"].as_object().unwrap();
-            assert!(props.contains_key("name") || props.contains_key("amount") || props.contains_key("unit"),
-                    "Ingredients items properties should include name, amount, or unit. Got: {:?}", props.keys().collect::<Vec<_>>());
+            assert!(
+                props.contains_key("name")
+                    || props.contains_key("amount")
+                    || props.contains_key("unit"),
+                "Ingredients items properties should include name, amount, or unit. Got: {:?}",
+                props.keys().collect::<Vec<_>>()
+            );
         } else {
             // If no properties, type should be object
-            assert_eq!(ingredients_items["type"], "object",
-                      "If no properties, type must be object. Got: {:?}", ingredients_items);
+            assert_eq!(
+                ingredients_items["type"], "object",
+                "If no properties, type must be object. Got: {:?}",
+                ingredients_items
+            );
         }
 
         // Verify nutrition is an object
@@ -146,19 +185,28 @@ mod example_validation_tests {
         let entities_items = &entities_prop["items"];
         // Note: The schema enhancement logic adds properties even if type might be initially wrong
         // So we check for properties existence as the real indicator
-        assert!(entities_items["type"] == "object" || entities_items["properties"].is_object(),
-                "Entities items should be objects or have properties. Got: {:?}", entities_items);
+        assert!(
+            entities_items["type"] == "object" || entities_items["properties"].is_object(),
+            "Entities items should be objects or have properties. Got: {:?}",
+            entities_items
+        );
 
         // Verify entities items have schema structure (either from enhancement or embedding)
-        assert!(entities_items["properties"].is_object(),
-                "Entities items should have properties. Got: {:?}", entities_items);
+        assert!(
+            entities_items["properties"].is_object(),
+            "Entities items should have properties. Got: {:?}",
+            entities_items
+        );
         let entity_props = entities_items["properties"].as_object().unwrap();
         // The enhancement logic adds generic properties (name, entity_type, relevance)
         // so at least one of these should exist
-        assert!(entity_props.contains_key("name") ||
-                entity_props.contains_key("entity_type") ||
-                entity_props.contains_key("relevance"),
-                "Entity properties should include name, entity_type, or relevance. Got: {:?}", entity_props);
+        assert!(
+            entity_props.contains_key("name")
+                || entity_props.contains_key("entity_type")
+                || entity_props.contains_key("relevance"),
+            "Entity properties should include name, entity_type, or relevance. Got: {:?}",
+            entity_props
+        );
     }
 
     #[test]
@@ -169,7 +217,10 @@ mod example_validation_tests {
         let props = schema_json["properties"].as_object().unwrap();
 
         // Verify exact field names exist
-        assert!(props.contains_key("protein_g"), "Must have 'protein_g' field");
+        assert!(
+            props.contains_key("protein_g"),
+            "Must have 'protein_g' field"
+        );
         assert!(props.contains_key("carbs_g"), "Must have 'carbs_g' field");
         assert!(props.contains_key("fat_g"), "Must have 'fat_g' field");
 
