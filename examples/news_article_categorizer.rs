@@ -1,7 +1,7 @@
 #![allow(clippy::collapsible_if)]
 
 use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel, SchemaType,
+    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -165,26 +165,8 @@ async fn analyze_article(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Debug: Print the schema for ArticleAnalysis
-    let schema = ArticleAnalysis::schema();
-    println!("Schema: {}", schema); // This now uses our Display implementation with enhanced descriptions
-
-    // Debug: Print the schema for Entity
-    let entity_schema = Entity::schema();
-    println!("\nEntity Schema: {}", entity_schema);
-
-    // Let's check specifically what the entities field looks like
-    let schema_json = schema.to_json();
-    if let Some(properties) = schema_json.get("properties") {
-        if let Some(entities_prop) = properties.get("entities") {
-            println!("\nEntities property description:");
-            if let Some(items) = entities_prop.get("items") {
-                if let Some(desc) = items.get("description") {
-                    println!("Items description: {}", desc);
-                }
-            }
-        }
-    }
+    // Removed debug schema printing to avoid potential stack overflow issues
+    // The schema is automatically used by the LLM client
 
     // Sample article text
     let article = r#"
