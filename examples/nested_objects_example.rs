@@ -178,10 +178,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Important: Explicitly request structured data format
     let prompt = "Create a recipe for chocolate chip cookies.
 
-CRITICAL REQUIREMENTS:
+CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
 1. Ingredients MUST be an array of objects (not strings). Each object must have exactly: 'name' (string), 'amount' (number), 'unit' (string).
 2. Steps MUST be an array of objects (not strings). Each object must have: 'number' (integer starting at 1), 'description' (string), and optionally 'time_minutes' (integer).
-3. Nutrition MUST be an object with exactly these fields: 'calories' (integer), 'protein_g' (number), 'carbs_g' (number), 'fat_g' (number). All values must be numbers, not strings. Field names must match exactly.";
+3. Nutrition MUST be an object with exactly these fields: 'calories' (integer), 'protein_g' (number), 'carbs_g' (number), 'fat_g' (number). All values must be numbers, not strings. Field names must match exactly. THIS FIELD IS REQUIRED - DO NOT OMIT IT.
+4. All other fields (name, description, prep_time_minutes, cook_time_minutes, servings, difficulty) are also REQUIRED.";
 
     // Try using either OpenAI or Anthropic based on available API keys
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {

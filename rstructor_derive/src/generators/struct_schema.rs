@@ -90,7 +90,7 @@ pub fn generate_struct_schema(
                 // Check for well-known library types by exact match only (no contains checks)
                 let is_date_type = matches!(type_name.as_deref(), Some("DateTime") | Some("NaiveDateTime") | Some("NaiveDate") | Some("Date"));
                 let is_uuid_type = matches!(type_name.as_deref(), Some("Uuid"));
-                
+
                 // No custom type detection - removed all name-based heuristics
                 let is_custom_type = false;
 
@@ -164,7 +164,7 @@ pub fn generate_struct_schema(
                             // Check for well-known library types by exact match only
                             let is_date = matches!(type_name.as_str(), "DateTime" | "NaiveDateTime" | "NaiveDate" | "Date");
                             let is_uuid = type_name == "Uuid";
-                            
+
                             if is_date {
                                 // Handle array of dates
                                 quote! {
