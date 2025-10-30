@@ -160,7 +160,7 @@ impl OpenAIClient {
 #[async_trait]
 impl LLMClient for OpenAIClient {
     #[instrument(
-        name = "openai_generate_struct", 
+        name = "openai_generate_struct",
         skip(self, prompt),
         fields(
             type_name = std::any::type_name::<T>(),
@@ -177,11 +177,8 @@ impl LLMClient for OpenAIClient {
         // Get the schema for type T
         let schema = T::schema();
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
-        trace!(
-            schema_name = schema_name,
-            schema_size = schema.to_string().len(),
-            "Retrieved JSON schema for type"
-        );
+        // Avoid calling to_string() in trace to prevent potential stack overflow with complex schemas
+        trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
         // Create function definition with the schema
         let function = FunctionDef {
@@ -326,7 +323,7 @@ impl LLMClient for OpenAIClient {
     }
 
     #[instrument(
-        name = "openai_generate", 
+        name = "openai_generate",
         skip(self, prompt),
         fields(
             model = %self.config.model.as_str(),

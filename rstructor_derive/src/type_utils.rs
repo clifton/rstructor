@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use syn::{GenericArgument, PathArguments, Type};
 
 #[cfg(test)]
@@ -108,26 +110,23 @@ pub enum TypeCategory {
 
 /// Determine if a type is an Option<T>
 pub fn is_option_type(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
-            return segment.ident == "Option";
-        }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.first()
+    {
+        return segment.ident == "Option";
     }
     false
 }
 
 /// Get the inner type of an Option<T>
 pub fn get_option_inner_type(ty: &Type) -> &Type {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
-            if segment.ident == "Option" {
-                if let PathArguments::AngleBracketed(args) = &segment.arguments {
-                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
-                        return inner_ty;
-                    }
-                }
-            }
-        }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.first()
+        && segment.ident == "Option"
+        && let PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
+    {
+        return inner_ty;
     }
     ty
 }
@@ -173,10 +172,10 @@ pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
                 "Uuid" | "uuid::Uuid" => return "string",
                 "Option" => {
                     // For Option<T>, we need to look at the inner type
-                    if let PathArguments::AngleBracketed(args) = &segment.arguments {
-                        if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
-                            return get_schema_type_from_rust_type(inner_ty);
-                        }
+                    if let PathArguments::AngleBracketed(args) = &segment.arguments
+                        && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
+                    {
+                        return get_schema_type_from_rust_type(inner_ty);
                     }
                     return "null";
                 }
@@ -189,14 +188,14 @@ pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
 
 /// Get the inner type of an array type like Vec<T>
 pub fn get_array_inner_type(ty: &Type) -> Option<&Type> {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
-            let type_name = segment.ident.to_string();
-            if matches!(type_name.as_str(), "Vec" | "Array" | "HashSet" | "BTreeSet") {
-                if let PathArguments::AngleBracketed(args) = &segment.arguments {
-                    if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
-                        return Some(inner_ty);
-                    }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.first()
+    {
+        let type_name = segment.ident.to_string();
+        if matches!(type_name.as_str(), "Vec" | "Array" | "HashSet" | "BTreeSet") {
+            if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
+                    return Some(inner_ty);
                 }
             }
         }
@@ -206,11 +205,11 @@ pub fn get_array_inner_type(ty: &Type) -> Option<&Type> {
 
 /// Check if a type is an array type (Vec, Array, etc.)
 pub fn is_array_type(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
-            let type_name = segment.ident.to_string();
-            return matches!(type_name.as_str(), "Vec" | "Array" | "HashSet" | "BTreeSet");
-        }
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.first()
+    {
+        let type_name = segment.ident.to_string();
+        return matches!(type_name.as_str(), "Vec" | "Array" | "HashSet" | "BTreeSet");
     }
     false
 }

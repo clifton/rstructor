@@ -243,7 +243,19 @@ async fn process_event_request(
     description: &str,
 ) -> Result<EventPlan> {
     let prompt = format!(
-        "Based on the following description, create a detailed event plan. IMPORTANT: Make sure to include location, contact, and activities fields as required.\n\nLocation should have name, address, and city. Contact should have name and either email or phone. Activities should be a list with start and end times.\n\n{}",
+        "Target JSON: EventPlan\n\nCRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
+1. 'event_name' (REQUIRED - string)
+2. 'event_type' (REQUIRED - string)
+3. 'description' (REQUIRED - string)
+4. 'date' (REQUIRED - YYYY-MM-DD format)
+5. 'start_time' (REQUIRED - HH:MM format)
+6. 'end_time' (REQUIRED - HH:MM format)
+7. 'location' (REQUIRED - object with name, address, city at minimum)
+8. 'estimated_attendees' (REQUIRED - number)
+9. 'contact' (REQUIRED - object with name and either email or phone)
+10. 'activities' (REQUIRED - array of objects, each with name, start_time, end_time)
+
+Based on the following description, create a detailed event plan:\n\n{}",
         description
     );
 

@@ -31,10 +31,10 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// struct Person {
 ///     #[llm(description = "Full name of the person")]
 ///     name: String,
-///     
+///
 ///     #[llm(description = "Age of the person in years", example = 30)]
 ///     age: u32,
-///     
+///
 ///     #[llm(description = "List of skills", example = ["Programming", "Writing", "Design"])]
 ///     skills: Vec<String>,
 /// }
@@ -58,7 +58,7 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// struct Person {
 ///     #[llm(description = "Full name of the person")]
 ///     name: String,
-///     
+///
 ///     #[llm(description = "Age of the person in years")]
 ///     age: u32,
 /// }
@@ -182,6 +182,7 @@ fn find_validate_method(input: &syn::DeriveInput) -> bool {
         if attr.path().is_ident("doc") {
             let mut has_validation = false;
             let _ = attr.parse_nested_meta(|meta| {
+                #[allow(clippy::collapsible_if)]
                 if let Ok(value) = meta.value() {
                     if let Ok(lit_str) = value.parse::<syn::LitStr>() {
                         let doc_str = lit_str.value().to_lowercase();

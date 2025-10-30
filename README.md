@@ -71,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     // Generate structured information with a simple prompt
+    // For production use, prefer generate_struct_with_retry for automatic error recovery
     let movie: Movie = client.generate_struct("Tell me about the movie Inception").await?;
 
     // Use the structured data
@@ -84,6 +85,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 ## 📝 Detailed Examples
+
+### Production Example with Automatic Retry
+
+For production use, prefer `generate_struct_with_retry` which automatically retries on validation errors:
+
+```rust
+use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
+use serde::{Serialize, Deserialize};
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+#[llm(description = "Information about a movie")]
+struct Movie {
+    #[llm(description = "Title of the movie")]
+    title: String,
+
+    #[llm(description = "Year the movie was released", example = 2010)]
+    year: u16,
+
+    #[llm(description = "IMDB rating out of 10", example = 8.5)]
+    rating: f32,
+}
+
+// Generate with automatic retry (recommended for production)
+let movie: Movie = client
+    .generate_struct_with_retry::<Movie>(
+        "Tell me about Inception",
+        Some(3),    // max retries
+        Some(true),  // include error feedback in retries
+    )
+    .await?;
+```
 
 ### Basic Example with Validation
 
@@ -314,11 +346,11 @@ impl CustomTypeSchema for DateTime<Utc> {
     fn schema_type() -> &'static str {
         "string"
     }
-    
+
     fn schema_format() -> Option<&'static str> {
         Some("date-time")
     }
-    
+
     fn schema_description() -> Option<String> {
         Some("ISO-8601 formatted date and time".to_string())
     }
@@ -329,7 +361,7 @@ impl CustomTypeSchema for Uuid {
     fn schema_type() -> &'static str {
         "string"
     }
-    
+
     fn schema_format() -> Option<&'static str> {
         Some("uuid")
     }
@@ -345,16 +377,16 @@ Once implemented, these custom types can be used directly in your structs:
 struct Event {
     #[llm(description = "Unique identifier for the event")]
     id: Uuid,
-    
+
     #[llm(description = "Name of the event")]
     name: String,
-    
+
     #[llm(description = "When the event starts")]
     start_time: DateTime<Utc>,
-    
+
     #[llm(description = "When the event ends (optional)")]
     end_time: Option<DateTime<Utc>>,
-    
+
     #[llm(description = "Recurring event dates")]
     recurring_dates: Vec<DateTime<Utc>>, // Even works with arrays!
 }
@@ -369,11 +401,11 @@ impl CustomTypeSchema for EmailAddress {
     fn schema_type() -> &'static str {
         "string"
     }
-    
+
     fn schema_format() -> Option<&'static str> {
         Some("email")
     }
-    
+
     fn schema_additional_properties() -> Option<Value> {
         Some(json!({
             "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
@@ -454,26 +486,26 @@ pub trait CustomTypeSchema {
     ///
     /// This is typically "string" for dates, UUIDs, etc.
     fn schema_type() -> &'static str;
-    
+
     /// Returns the JSON Schema format for this custom type
     ///
     /// Common formats include "date-time", "uuid", "email", etc.
     fn schema_format() -> Option<&'static str> {
         None
     }
-    
+
     /// Returns a description of this custom type for documentation
     fn schema_description() -> Option<String> {
         None
     }
-    
+
     /// Returns any additional JSON Schema properties for this type
     ///
     /// This can include patterns, examples, minimum/maximum values, etc.
     fn schema_additional_properties() -> Option<Value> {
         None
     }
-    
+
     /// Generate a complete JSON Schema object for this type
     fn json_schema() -> Value {
         // Default implementation that combines all properties
@@ -481,19 +513,19 @@ pub trait CustomTypeSchema {
         let mut schema = json!({
             "type": Self::schema_type(),
         });
-        
+
         // Add format if present
         if let Some(format) = Self::schema_format() {
             schema.as_object_mut().unwrap()
                 .insert("format".to_string(), Value::String(format.to_string()));
         }
-        
+
         // Add description if present
         if let Some(description) = Self::schema_description() {
             schema.as_object_mut().unwrap()
                 .insert("description".to_string(), Value::String(description));
         }
-        
+
         // Add any additional properties
         if let Some(additional) = Self::schema_additional_properties() {
             // Merge additional properties into the schema
@@ -504,7 +536,7 @@ pub trait CustomTypeSchema {
                 }
             }
         }
-        
+
         schema
     }
 }
@@ -519,13 +551,30 @@ The `LLMClient` trait defines the interface for all LLM providers:
 ```rust
 #[async_trait]
 pub trait LLMClient {
+    /// Generate a structured object from a prompt (single attempt)
     async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static;
 
+    /// Generate a structured object with automatic retry on validation errors
+    ///
+    /// This is the recommended method for production use as it automatically
+    /// retries failed generations with error feedback to improve success rates.
+    async fn generate_struct_with_retry<T>(
+        &self,
+        prompt: &str,
+        max_retries: Option<usize>,
+        include_errors: Option<bool>,
+    ) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static;
+
+    /// Generate raw text without structure
     async fn generate(&self, prompt: &str) -> Result<String>;
 }
 ```
+
+**Note**: For production applications, prefer `generate_struct_with_retry` over `generate_struct` as it automatically handles validation errors by retrying with error feedback. This significantly improves success rates with complex schemas.
 
 ### Supported Attributes
 
@@ -601,6 +650,18 @@ cargo run --example structured_movie_info
 cargo run --example news_article_categorizer
 ```
 
+## ⚠️ Current Limitations
+
+RStructor currently focuses on single-turn, synchronous structured output generation. The following features are planned but not yet implemented:
+
+- **Streaming Responses**: Real-time streaming of partial results as they're generated
+- **Conversation History**: Multi-turn conversations with message history (currently only single prompts supported)
+- **System Messages**: Explicit system prompts for role-based interactions
+- **Response Modes**: Different validation strategies (strict, partial, etc.)
+- **Rate Limiting**: Built-in rate limit handling and backoff strategies
+
+For a detailed analysis of missing features compared to Python Instructor, see [FEATURE_ANALYSIS.md](FEATURE_ANALYSIS.md).
+
 ## 🛣️ Roadmap
 
 - [x] Core traits and interfaces
@@ -614,7 +675,12 @@ cargo run --example news_article_categorizer
 - [x] Support for enums with associated data (tagged unions)
 - [x] Support for custom types (dates, UUIDs, etc.)
 - [x] Structured logging and tracing
+- [x] Automatic retry with validation error feedback
 - [ ] Streaming responses
+- [ ] Conversation history / multi-turn support
+- [ ] System messages and role-based prompts
+- [ ] Response modes (strict, partial, retry)
+- [ ] Rate limiting and backoff strategies
 - [ ] Support for additional LLM providers
 - [ ] Integration with web frameworks (Axum, Actix)
 
