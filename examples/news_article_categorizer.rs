@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use rstructor::{
     AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel, SchemaType,
 };
