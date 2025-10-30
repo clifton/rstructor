@@ -287,9 +287,14 @@ impl Schema {
 }
 
 // Display implementation for Schema
+// NOTE: This can cause stack overflow with very complex schemas.
+// Prefer using serde_json::to_string_pretty(&schema.to_json()) directly
 impl Display for Schema {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{}", self.to_pretty_json())
+        // Use serde_json directly to avoid any potential recursion
+        let json = self.to_json();
+        let json_str = serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string());
+        write!(f, "{}", json_str)
     }
 }
 
