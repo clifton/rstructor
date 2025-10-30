@@ -111,7 +111,8 @@ pub fn generate_struct_schema(
                         // Check if it's likely an enum (starts with uppercase, is an object, not an array)
                         // CRITICAL: Be EXTREMELY conservative - only flag as enum if it's clearly enum-like
                         // Nested structs are MUCH more common than enums as fields, so default to struct
-                        // True enums are usually: single short PascalCase word, 1-8 chars, single capital letter
+                        // True enums are usually: VERY short single PascalCase word (Status, Type, Color, State)
+                        // Structs have descriptive names (Address, Person, ContactInfo, etc.)
                         let first_char = name.chars().next();
                         let uppercase_count = name.chars().filter(|c| c.is_uppercase()).count();
                         let is_enum = first_char.is_some_and(|c| c.is_uppercase())
@@ -120,11 +121,14 @@ pub fn generate_struct_schema(
                             && !is_date
                             && !is_uuid
                             && !is_custom
-                            // Very strict criteria for enum detection:
-                            && name.len() <= 8  // Very short names only (enums: Status, Type, Color)
+                            // EXTREMELY strict criteria - only match very short single-word enums:
+                            && name.len() <= 6  // Very short names only (Status=6, Type=4, Color=5, State=5)
                             && uppercase_count == 1  // Single capital letter (true PascalCase single word)
                             && !name.contains("_")  // No underscores
-                            && name.chars().all(|c| c.is_alphanumeric()); // Only alphanumeric (no special chars)
+                            && name.chars().all(|c| c.is_alphanumeric()) // Only alphanumeric
+                            // Additional check: common enum names (whitelist approach)
+                            && (name == "Status" || name == "Type" || name == "State" || name == "Color" 
+                                || name == "Kind" || name == "Mode" || name == "Role" || name == "Level");
 
                         (is_enum, is_date, is_uuid, is_custom)
                     } else {

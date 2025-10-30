@@ -386,9 +386,9 @@ mod nested_struct_tests {
             "empty": {}
         });
 
-        let container: Container = serde_json::from_value(json).unwrap();
+        let _container: Container = serde_json::from_value(json).unwrap();
         // Should deserialize successfully even with empty nested struct
-        assert!(true); // If we get here, it worked
+        // If we get here without panicking, the test passes
     }
 
     #[test]
