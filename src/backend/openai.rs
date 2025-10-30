@@ -177,9 +177,9 @@ impl LLMClient for OpenAIClient {
         // Get the schema for type T
         let schema = T::schema();
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
+        // Avoid calling to_string() in trace to prevent potential stack overflow with complex schemas
         trace!(
             schema_name = schema_name,
-            schema_size = schema.to_string().len(),
             "Retrieved JSON schema for type"
         );
 
