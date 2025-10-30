@@ -25,19 +25,19 @@ enum ArticleCategory {
 
 // Define entities mentioned in the article
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "An entity mentioned in the article")]
+#[llm(description = "An entity mentioned in the article. This must be a complete object with all three fields: name, entity_type, and relevance.")]
 struct Entity {
-    #[llm(description = "Name of the entity", example = "Microsoft")]
+    #[llm(description = "Name of the entity (must be a string)", example = "Microsoft")]
     name: String,
 
     #[llm(
-        description = "Type of the entity (person, organization, location, etc.)",
+        description = "Type of the entity (person, organization, location, etc.) (must be a string)",
         example = "organization"
     )]
     entity_type: String,
 
     #[llm(
-        description = "How important this entity is to the article (1-10 scale)",
+        description = "How important this entity is to the article (1-10 scale, must be a number between 1 and 10)",
         example = 8
     )]
     relevance: u8,
@@ -98,7 +98,7 @@ struct ArticleAnalysis {
     )]
     sentiment: String,
 
-    #[llm(description = "Main entities mentioned in the article")]
+    #[llm(description = "Main entities mentioned in the article. MUST be an array of objects, not strings. Each object must have 'name' (string), 'entity_type' (string), and 'relevance' (number 1-10) fields.")]
     entities: Vec<Entity>,
 
     #[llm(description = "Important keywords from the article",
@@ -126,7 +126,7 @@ async fn analyze_article(
             .build();
 
         let prompt = format!(
-            "Analyze the following news article completely according to the schema:\n\n{}",
+            "Analyze the following news article completely according to the schema.\n\nIMPORTANT: The 'entities' field must be an array of objects, where each object has 'name', 'entity_type', and 'relevance' fields. Do NOT return entities as strings. Each entity must be a complete JSON object.\n\nArticle:\n{}",
             article_text
         );
         // Use more retries (5) to give it a better chance with complex validation
@@ -142,7 +142,7 @@ async fn analyze_article(
             .build();
 
         let prompt = format!(
-            "Analyze the following news article completely according to the schema:\n\n{}",
+            "Analyze the following news article completely according to the schema.\n\nIMPORTANT: The 'entities' field must be an array of objects, where each object has 'name', 'entity_type', and 'relevance' fields. Do NOT return entities as strings. Each entity must be a complete JSON object.\n\nArticle:\n{}",
             article_text
         );
         // Use more retries (5) to give it a better chance with complex validation
@@ -182,27 +182,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     TECH GIANT UNVEILS REVOLUTIONARY AI CHIP AMID COMPETITION CONCERNS
 
     Silicon Valley, CA - Tech behemoth NeuraTech announced yesterday the release of their new quantum-
-    based AI processor, the N-2000, which they claim can perform machine learning tasks at speeds 50 
+    based AI processor, the N-2000, which they claim can perform machine learning tasks at speeds 50
     times faster than current market leaders while using 75% less energy.
 
-    CEO Jane Rodriguez showcased the processor at their annual developers conference, demonstrating 
-    its capabilities by training a large language model in minutes rather than days. "This represents 
-    a fundamental shift in what's possible with artificial intelligence," Rodriguez told the crowd of 
+    CEO Jane Rodriguez showcased the processor at their annual developers conference, demonstrating
+    its capabilities by training a large language model in minutes rather than days. "This represents
+    a fundamental shift in what's possible with artificial intelligence," Rodriguez told the crowd of
     developers and investors.
 
-    The announcement comes as regulatory bodies in both the US and EU are scrutinizing the growing 
-    concentration of AI capabilities among a small number of tech companies. Last month, the Federal 
+    The announcement comes as regulatory bodies in both the US and EU are scrutinizing the growing
+    concentration of AI capabilities among a small number of tech companies. Last month, the Federal
     Trade Commission opened an inquiry into potential anticompetitive practices in the AI chip market.
 
-    Market analysts reacted positively to the news, with NeuraTech's stock price jumping 12% by closing 
-    bell. "The efficiency gains here can't be overstated," said Morgan Stanley analyst Raj Patel. "If 
-    the performance metrics hold up in real-world applications, this could reshape the competitive 
+    Market analysts reacted positively to the news, with NeuraTech's stock price jumping 12% by closing
+    bell. "The efficiency gains here can't be overstated," said Morgan Stanley analyst Raj Patel. "If
+    the performance metrics hold up in real-world applications, this could reshape the competitive
     landscape."
 
-    Competing chip manufacturers SynthLogic and Quantum Semiconductors saw stock declines of 5% and 7% 
+    Competing chip manufacturers SynthLogic and Quantum Semiconductors saw stock declines of 5% and 7%
     respectively following the announcement. Representatives from both companies declined to comment.
 
-    The N-2000 processor is expected to begin shipping to select enterprise customers in Q3, with wider 
+    The N-2000 processor is expected to begin shipping to select enterprise customers in Q3, with wider
     availability planned for early next year.
     "#;
 
@@ -227,7 +227,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("\nBias Assessment: {}", analysis.bias_assessment);
         }
         Err(e) => {
-            println!("Error analyzing article: {}", e);
+            eprintln!("Error analyzing article: {}", e);
+            eprintln!("\nNote: This error may occur if the LLM returns entities as strings instead of objects.");
+            eprintln!("The retry mechanism attempts to fix this, but complex nested structures");
+            eprintln!("can be challenging. Try running again or increase retry count.");
         }
     }
 

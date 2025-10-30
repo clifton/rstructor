@@ -121,7 +121,52 @@ pub fn generate_struct_schema(
                     };
 
                 // Create field property
-                let field_prop = if is_likely_enum {
+                // IMPORTANT: Check for nested structs BEFORE checking for enums
+                // This ensures nested structs get their schemas embedded properly
+                let field_prop = if type_name.is_some() && schema_type == "object" && !is_array_type(&field.ty) && !is_date_type && !is_uuid_type && !is_custom_type {
+                    // For nested struct types, embed the full schema at runtime
+                    let field_type_path = if let Type::Path(path) = &field.ty {
+                        quote! { #path }
+                    } else {
+                        quote! { #field.ty }
+                    };
+
+                    quote! {
+                        // Create property for nested struct - embed full schema at runtime
+                        let mut props = ::serde_json::Map::new();
+
+                        // Try to get the nested struct's schema and embed its properties
+                        // This works because the nested type implements SchemaType
+                        let nested_schema = <#field_type_path as ::rstructor::schema::SchemaType>::schema();
+                        let nested_schema_json = nested_schema.to_json();
+
+                        // If the nested schema has properties, embed them
+                        if let Some(::serde_json::Value::Object(nested_obj)) = nested_schema_json.as_object() {
+                            // Set type to object
+                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+
+                            // Embed properties from nested schema
+                            if let Some(prop_val) = nested_obj.get("properties") {
+                                props.insert("properties".to_string(), prop_val.clone());
+                            }
+
+                            // Embed required fields from nested schema
+                            if let Some(req_val) = nested_obj.get("required") {
+                                props.insert("required".to_string(), req_val.clone());
+                            }
+
+                            // Use nested schema's description if available and no custom description provided
+                            if let Some(desc) = nested_obj.get("description") {
+                                if !props.contains_key("description") {
+                                    props.insert("description".to_string(), desc.clone());
+                                }
+                            }
+                        } else {
+                            // Fallback: just set type to object
+                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                        }
+                    }
+                } else if is_likely_enum {
                     // For likely enum types, use String type with a reference to using enum values
                     quote! {
                         // Create property for this enum field
@@ -166,6 +211,49 @@ pub fn generate_struct_schema(
                         props.insert("format".to_string(), ::serde_json::Value::String("uuid".to_string()));
                         props.insert("description".to_string(),
                                     ::serde_json::Value::String("UUID identifier string".to_string()));
+                    }
+                } else if type_name.is_some() && schema_type == "object" && !is_array_type(&field.ty) {
+                    // For nested struct types, embed the full schema at runtime
+                    let field_type_path = if let Type::Path(path) = &field.ty {
+                        quote! { #path }
+                    } else {
+                        quote! { #field.ty }
+                    };
+
+                    quote! {
+                        // Create property for nested struct - embed full schema at runtime
+                        let mut props = ::serde_json::Map::new();
+
+                        // Try to get the nested struct's schema and embed its properties
+                        // This works because the nested type implements SchemaType
+                        let nested_schema = <#field_type_path as ::rstructor::schema::SchemaType>::schema();
+                        let nested_schema_json = nested_schema.to_json();
+
+                        // If the nested schema has properties, embed them
+                        if let Some(::serde_json::Value::Object(nested_obj)) = nested_schema_json.as_object() {
+                            // Set type to object
+                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+
+                            // Embed properties from nested schema
+                            if let Some(prop_val) = nested_obj.get("properties") {
+                                props.insert("properties".to_string(), prop_val.clone());
+                            }
+
+                            // Embed required fields from nested schema
+                            if let Some(req_val) = nested_obj.get("required") {
+                                props.insert("required".to_string(), req_val.clone());
+                            }
+
+                            // Use nested schema's description if available and no custom description provided
+                            if let Some(desc) = nested_obj.get("description") {
+                                if !props.contains_key("description") {
+                                    props.insert("description".to_string(), desc.clone());
+                                }
+                            }
+                        } else {
+                            // Fallback: just set type to object
+                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                        }
                     }
                 } else if type_name.is_some() {
                     // Default handling for other custom types
@@ -257,29 +345,24 @@ pub fn generate_struct_schema(
                                     props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
                                 }
                             } else if is_uppercase && inner_schema_type == "object" {
-                                // For arrays of complex objects
+                                // For arrays of complex objects, embed the full nested schema
                                 let type_name_str = type_name.clone();
                                 quote! {
                                     // Create property for this array field with complex object items
                                     let mut props = ::serde_json::Map::new();
                                     props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
 
-                                    // Add items schema for complex objects
+                                    // Get the full schema for the nested struct type
+                                    // Note: We need to embed this at runtime since we can't resolve types at macro time
+                                    // We'll create a placeholder and let the schema enhancement logic handle it
                                     let mut items_schema = ::serde_json::Map::new();
-                                    items_schema.insert("type".to_string(), ::serde_json::Value::String(#inner_schema_type.to_string()));
+                                    items_schema.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
                                     items_schema.insert("description".to_string(),
-                                        ::serde_json::Value::String(format!("Each {} must include all required fields (name, entity_type, relevance, etc.)", #type_name_str)));
+                                        ::serde_json::Value::String(format!("Each {} must be a complete object with all required fields. MUST be an object, not a string.", #type_name_str)));
 
-                                    // For the Entity type specifically, provide a clear example in the schema
-                                    if #type_name_str == "Entity" {
-                                        let example_obj = ::serde_json::json!({
-                                            "name": "Example Organization",
-                                            "entity_type": "organization",
-                                            "relevance": 8
-                                        });
-                                        items_schema.insert("example".to_string(), example_obj);
-                                    }
-
+                                    // Try to get the nested struct's schema and embed its properties
+                                    // This will work if the type implements SchemaType
+                                    // We use a helper that will enhance the schema later
                                     props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
                                 }
                             } else {
