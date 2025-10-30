@@ -126,12 +126,14 @@ fn generate_complex_enum_schema(
         match &variant.fields {
             // For variants with no fields (simple enum variants)
             Fields::Unit => {
+                let variant_name_str = variant_name.clone();
+                let description_str = description.clone();
                 variant_schemas.push(quote! {
                     // Simple variant with no data
                     ::serde_json::json!({
                         "type": "string",
-                        "enum": [#variant_name],
-                        "description": #description
+                        "enum": [#variant_name_str],
+                        "description": #description_str
                     })
                 });
             }
@@ -146,18 +148,28 @@ fn generate_complex_enum_schema(
 
                     // Extract field schema based on its type
                     let field_schema = generate_field_schema(&field.ty, &None);
+                    let variant_name_str = variant_name.clone();
+                    let description_str = description.clone();
 
                     variant_schemas.push(quote! {
                         // Tuple variant with single field - { "variant": value }
-                        ::serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                #variant_name: #field_schema
-                            },
-                            "required": [#variant_name],
-                            "description": #description,
-                            "additionalProperties": false
-                        })
+                        {
+                            let field_schema_value = #field_schema;
+                            let mut properties_map = ::serde_json::Map::new();
+                            properties_map.insert(#variant_name_str.to_string(), field_schema_value);
+                            
+                            let mut required_array = Vec::new();
+                            required_array.push(::serde_json::Value::String(#variant_name_str.to_string()));
+                            
+                            let mut schema_obj = ::serde_json::Map::new();
+                            schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                            schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties_map));
+                            schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required_array));
+                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                            schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+                            
+                            ::serde_json::Value::Object(schema_obj)
+                        }
                     });
                 } else {
                     // Multiple unnamed fields - use array format
@@ -168,31 +180,45 @@ fn generate_complex_enum_schema(
                         field_schemas.push(field_schema);
                     }
 
+                    let variant_name_str = variant_name.clone();
+                    let description_str = description.clone();
+                    let field_count = fields.unnamed.len();
                     variant_schemas.push(quote! {
                         // Tuple variant with multiple fields - { "variant": [values...] }
-                        ::serde_json::json!({
-                            "type": "object",
-                            "properties": {
-                                #variant_name: {
-                                    "type": "array",
-                                    "items": [
-                                        #(#field_schemas),*
-                                    ],
-                                    "minItems": #fields.unnamed.len(),
-                                    "maxItems": #fields.unnamed.len()
-                                }
-                            },
-                            "required": [#variant_name],
-                            "description": #description,
-                            "additionalProperties": false
-                        })
+                        {
+                            let field_schema_values: Vec<::serde_json::Value> = vec![
+                                #(#field_schemas),*
+                            ];
+                            
+                            let mut items_array = ::serde_json::Map::new();
+                            items_array.insert("type".to_string(), ::serde_json::Value::String("array".to_string()));
+                            items_array.insert("items".to_string(), ::serde_json::Value::Array(field_schema_values));
+                            let field_count_u64 = #field_count as u64;
+                            items_array.insert("minItems".to_string(), ::serde_json::Value::Number(::serde_json::Number::from(field_count_u64)));
+                            items_array.insert("maxItems".to_string(), ::serde_json::Value::Number(::serde_json::Number::from(field_count_u64)));
+                            
+                            let mut variant_properties = ::serde_json::Map::new();
+                            variant_properties.insert(#variant_name_str.to_string(), ::serde_json::Value::Object(items_array));
+                            
+                            let mut required_array = Vec::new();
+                            required_array.push(::serde_json::Value::String(#variant_name_str.to_string()));
+                            
+                            let mut schema_obj = ::serde_json::Map::new();
+                            schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                            schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(variant_properties));
+                            schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required_array));
+                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                            schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+                            
+                            ::serde_json::Value::Object(schema_obj)
+                        }
                     });
                 }
             }
 
             // For struct-like variants with named fields e.g., Variant { field1: Type1, field2: Type2 }
             Fields::Named(fields) => {
-                let mut prop_schemas = Vec::new();
+                let mut prop_setters = Vec::new();
                 let mut required_fields = Vec::new();
 
                 for field in &fields.named {
@@ -206,8 +232,12 @@ fn generate_complex_enum_schema(
                         let is_optional = is_option_type(&field.ty);
                         let field_schema = generate_field_schema(&field.ty, &Some(field_desc));
 
-                        prop_schemas.push(quote! {
-                            #field_name_str: #field_schema
+                        let field_name_str_owned = field_name_str.clone();
+                        prop_setters.push(quote! {
+                            {
+                                let field_schema_value = #field_schema;
+                                properties_map.insert(#field_name_str_owned.to_string(), field_schema_value);
+                            }
                         });
 
                         if !is_optional {
@@ -218,9 +248,13 @@ fn generate_complex_enum_schema(
                     }
                 }
 
-                let required_array = if !required_fields.is_empty() {
+                let variant_name_str = variant_name.clone();
+                let description_str = description.clone();
+                let required_array_code = if !required_fields.is_empty() {
                     quote! {
-                        "required": [#(#required_fields),*],
+                        let mut required_vec = Vec::new();
+                        #(required_vec.push(#required_fields);)*
+                        variant_properties.insert("required".to_string(), ::serde_json::Value::Array(required_vec));
                     }
                 } else {
                     quote! {}
@@ -228,22 +262,31 @@ fn generate_complex_enum_schema(
 
                 variant_schemas.push(quote! {
                     // Struct variant with named fields
-                    ::serde_json::json!({
-                        "type": "object",
-                        "properties": {
-                            #variant_name: {
-                                "type": "object",
-                                "properties": {
-                                    #(#prop_schemas),*
-                                },
-                                #required_array
-                                "additionalProperties": false
-                            }
-                        },
-                        "required": [#variant_name],
-                        "description": #description,
-                        "additionalProperties": false
-                    })
+                    {
+                        let mut properties_map = ::serde_json::Map::new();
+                        #(#prop_setters)*
+                        
+                        let mut variant_properties = ::serde_json::Map::new();
+                        variant_properties.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                        variant_properties.insert("properties".to_string(), ::serde_json::Value::Object(properties_map));
+                        #required_array_code
+                        variant_properties.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+
+                        let mut outer_properties = ::serde_json::Map::new();
+                        outer_properties.insert(#variant_name_str.to_string(), ::serde_json::Value::Object(variant_properties));
+
+                        let mut schema_obj = ::serde_json::Map::new();
+                        schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                        schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(outer_properties));
+                        
+                        let mut required_array = Vec::new();
+                        required_array.push(::serde_json::Value::String(#variant_name_str.to_string()));
+                        schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required_array));
+                        schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                        schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+
+                        ::serde_json::Value::Object(schema_obj)
+                    }
                 });
             }
         }
@@ -368,33 +411,28 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                 if let Some(_segment) = last_segment {
                     // We don't need the type name for now, but this structure is useful for future enhancements
 
-                    let desc_prop = if let Some(desc) = description {
-                        quote! {
-                            "description": #desc,
-                        }
-                    } else {
-                        quote! {}
-                    };
-
                     // Use the type's schema if it implements SchemaType
-                    quote! {
-                        {
-                            // Try to use the type's schema if available
-                            if let Some(schema) = <#type_path as ::rstructor::schema::SchemaType>::schema_name() {
+                    // Note: This assumes the type implements SchemaType (which it will if it has #[derive(Instructor)])
+                    if let Some(desc) = description {
+                        let desc_str = desc.clone();
+                        quote! {
+                            {
+                                // Use the type's schema directly (it must implement SchemaType)
                                 let mut obj = <#type_path as ::rstructor::schema::SchemaType>::schema().to_json().clone();
 
                                 // Add description if provided
-                                if let ::serde_json::Value::Object(ref mut map) = obj {
-                                    #desc_prop
+                                if let ::serde_json::Value::Object(map) = &mut obj {
+                                    map.insert("description".to_string(), ::serde_json::Value::String(#desc_str.to_string()));
                                 }
 
                                 obj
-                            } else {
-                                // Fallback to simple object schema
-                                ::serde_json::json!({
-                                    "type": "object",
-                                    #desc_prop
-                                })
+                            }
+                        }
+                    } else {
+                        quote! {
+                            {
+                                // Use the type's schema directly (it must implement SchemaType)
+                                <#type_path as ::rstructor::schema::SchemaType>::schema().to_json()
                             }
                         }
                     }
