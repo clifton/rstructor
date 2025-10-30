@@ -88,34 +88,36 @@ pub fn generate_struct_schema(
                 };
 
                 // Special handling for enums and custom types used as fields
-                let (is_likely_enum, is_date_type, is_uuid_type, is_custom_type) =
-                    if let Some(name) = &type_name {
-                        // Check for special types
-                        let is_date = name == "DateTime"
-                            || name == "NaiveDateTime"
-                            || name == "NaiveDate"
-                            || name == "Date"
-                            || name.contains("Date")
-                            || name.contains("Time");
-                        let is_uuid = name == "Uuid";
+                let (is_likely_enum, is_date_type, is_uuid_type, is_custom_type) = if let Some(
+                    name,
+                ) = &type_name
+                {
+                    // Check for special types
+                    let is_date = name == "DateTime"
+                        || name == "NaiveDateTime"
+                        || name == "NaiveDate"
+                        || name == "Date"
+                        || name.contains("Date")
+                        || name.contains("Time");
+                    let is_uuid = name == "Uuid";
 
-                        // Check if this could be a custom type implementing CustomTypeSchema
-                        // Heuristic: Custom types often have "meaningful" names like CustomDate, EmailAddress, etc.
-                        let is_custom = name.contains("Date")
-                            || name.contains("Time")
-                            || name.contains("Email")
-                            || name.contains("Uuid")
-                            || name.contains("Phone")
-                            || name.contains("Custom");
+                    // Check if this could be a custom type implementing CustomTypeSchema
+                    // Heuristic: Custom types often have "meaningful" names like CustomDate, EmailAddress, etc.
+                    let is_custom = name.contains("Date")
+                        || name.contains("Time")
+                        || name.contains("Email")
+                        || name.contains("Uuid")
+                        || name.contains("Phone")
+                        || name.contains("Custom");
 
-                        // Check if it's likely an enum (starts with uppercase, is an object, not an array)
-                        // CRITICAL: Be EXTREMELY conservative - only flag as enum if it's clearly enum-like
-                        // Nested structs are MUCH more common than enums as fields, so default to struct
-                        // True enums are usually: VERY short single PascalCase word (Status, Type, Color, State)
-                        // Structs have descriptive names (Address, Person, ContactInfo, etc.)
-                        let first_char = name.chars().next();
-                        let uppercase_count = name.chars().filter(|c| c.is_uppercase()).count();
-                        let is_enum = first_char.is_some_and(|c| c.is_uppercase())
+                    // Check if it's likely an enum (starts with uppercase, is an object, not an array)
+                    // CRITICAL: Be EXTREMELY conservative - only flag as enum if it's clearly enum-like
+                    // Nested structs are MUCH more common than enums as fields, so default to struct
+                    // True enums are usually: VERY short single PascalCase word (Status, Type, Color, State)
+                    // Structs have descriptive names (Address, Person, ContactInfo, etc.)
+                    let first_char = name.chars().next();
+                    let uppercase_count = name.chars().filter(|c| c.is_uppercase()).count();
+                    let is_enum = first_char.is_some_and(|c| c.is_uppercase())
                             && schema_type == "object"
                             && !is_array_type(&field.ty)
                             && !is_date
@@ -130,10 +132,10 @@ pub fn generate_struct_schema(
                             && (name == "Status" || name == "Type" || name == "State" || name == "Color" 
                                 || name == "Kind" || name == "Mode" || name == "Role" || name == "Level");
 
-                        (is_enum, is_date, is_uuid, is_custom)
-                    } else {
-                        (false, false, false, false)
-                    };
+                    (is_enum, is_date, is_uuid, is_custom)
+                } else {
+                    (false, false, false, false)
+                };
 
                 // Create field property
                 // CRITICAL: Check for nested structs FIRST - they should be type "object"

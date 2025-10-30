@@ -51,7 +51,7 @@ mod nested_struct_tests {
         // Verify nested struct field exists
         let address_prop = &schema_json["properties"]["address"];
         assert!(address_prop.is_object(), "Address property should exist");
-        
+
         // Verify address is typed as object (even if properties aren't embedded)
         assert_eq!(
             address_prop["type"],
@@ -133,7 +133,7 @@ mod nested_struct_tests {
         // Verify items are objects
         let items = &tags_prop["items"];
         assert_eq!(items["type"], "object", "Tags items should be objects");
-        
+
         // Verify items have properties (from schema enhancement)
         assert!(
             items["properties"].is_object(),
@@ -197,11 +197,11 @@ mod nested_struct_tests {
 
         // Verify top-level structure
         assert_eq!(schema_json["type"], "object");
-        
+
         // Verify nested profile field
         let profile_prop = &schema_json["properties"]["profile"];
         assert_eq!(profile_prop["type"], "object");
-        
+
         // Profile should exist even if nested properties aren't fully embedded
         assert!(profile_prop.is_object());
     }
@@ -233,7 +233,10 @@ mod nested_struct_tests {
         #[llm(description = "Created timestamp", example = "2024-01-01T00:00:00Z")]
         created_at: String,
 
-        #[llm(description = "Last updated timestamp", example = "2024-01-02T00:00:00Z")]
+        #[llm(
+            description = "Last updated timestamp",
+            example = "2024-01-02T00:00:00Z"
+        )]
         updated_at: String,
     }
 
