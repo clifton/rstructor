@@ -182,6 +182,7 @@ fn find_validate_method(input: &syn::DeriveInput) -> bool {
         if attr.path().is_ident("doc") {
             let mut has_validation = false;
             let _ = attr.parse_nested_meta(|meta| {
+                #[allow(clippy::collapsible_if)]
                 if let Ok(value) = meta.value() {
                     if let Ok(lit_str) = value.parse::<syn::LitStr>() {
                         let doc_str = lit_str.value().to_lowercase();
@@ -192,7 +193,6 @@ fn find_validate_method(input: &syn::DeriveInput) -> bool {
                 }
                 Ok(())
             });
-            #[allow(clippy::collapsible_if)]
             if has_validation {
                 return true;
             }

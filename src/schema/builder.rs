@@ -83,9 +83,10 @@ impl SchemaBuilder {
                     schema["required"] = json!(self.required);
                 }
             } else if self.schema_type == "array"
-                && let Some(items) = self.properties.get("items") {
-                    schema["items"] = items.clone();
-                }
+                && let Some(items) = self.properties.get("items")
+            {
+                schema["items"] = items.clone();
+            }
         }
 
         if !self.examples.is_empty() {

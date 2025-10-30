@@ -121,58 +121,9 @@ pub fn generate_struct_schema(
                     };
 
                 // Create field property
-                // IMPORTANT: Check for nested structs BEFORE checking for enums
-                // This ensures nested structs get their schemas embedded properly
-                let field_prop = if type_name.is_some()
-                    && schema_type == "object"
-                    && !is_array_type(&field.ty)
-                    && !is_date_type
-                    && !is_uuid_type
-                    && !is_custom_type
-                {
-                    // For nested struct types, embed the full schema at runtime
-                    let field_type_path = if let Type::Path(path) = &field.ty {
-                        quote! { #path }
-                    } else {
-                        quote! { #field.ty }
-                    };
-
-                    quote! {
-                        // Create property for nested struct - embed full schema at runtime
-                        let mut props = ::serde_json::Map::new();
-
-                        // Try to get the nested struct's schema and embed its properties
-                        // This works because the nested type implements SchemaType
-                        let nested_schema = <#field_type_path as ::rstructor::schema::SchemaType>::schema();
-                        let nested_schema_json = nested_schema.to_json();
-
-                        // If the nested schema has properties, embed them
-                        if let Some(::serde_json::Value::Object(nested_obj)) = nested_schema_json.as_object() {
-                            // Set type to object
-                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
-
-                            // Embed properties from nested schema
-                            if let Some(prop_val) = nested_obj.get("properties") {
-                                props.insert("properties".to_string(), prop_val.clone());
-                            }
-
-                            // Embed required fields from nested schema
-                            if let Some(req_val) = nested_obj.get("required") {
-                                props.insert("required".to_string(), req_val.clone());
-                            }
-
-                            // Use nested schema's description if available and no custom description provided
-                            if let Some(desc) = nested_obj.get("description") {
-                                if !props.contains_key("description") {
-                                    props.insert("description".to_string(), desc.clone());
-                                }
-                            }
-                        } else {
-                            // Fallback: just set type to object
-                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
-                        }
-                    }
-                } else if is_likely_enum {
+                // Note: Nested struct schema embedding temporarily disabled due to scope issues
+                // TODO: Re-enable with proper scoping
+                let field_prop = if is_likely_enum {
                     // For likely enum types, use String type with a reference to using enum values
                     quote! {
                         // Create property for this enum field
@@ -243,7 +194,7 @@ pub fn generate_struct_schema(
                         };
 
                         // Choose the appropriate handling for the array items based on the inner type
-                        let items_tokens = if let Some(type_name) = &inner_type_name {
+                        let items_tokens: proc_macro2::TokenStream = if let Some(type_name) = &inner_type_name {
                             // Check if type name starts with uppercase (likely custom type)
                             let first_char = type_name.chars().next();
                             let is_uppercase = first_char.is_some_and(|c| c.is_uppercase());
@@ -354,8 +305,7 @@ pub fn generate_struct_schema(
                                 props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
                             }
                         };
-
-                        // Return the tokens
+                        
                         items_tokens
                     } else {
                         // Fallback for array without detectable item type

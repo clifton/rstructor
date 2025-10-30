@@ -170,10 +170,10 @@ pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
                 "Uuid" | "uuid::Uuid" => return "string",
                 "Option" => {
                     // For Option<T>, we need to look at the inner type
-                    if let PathArguments::AngleBracketed(args) = &segment.arguments {
-                        if let Some(GenericArgument::Type(inner_ty)) = args.args.first() {
-                            return get_schema_type_from_rust_type(inner_ty);
-                        }
+                    if let PathArguments::AngleBracketed(args) = &segment.arguments
+                        && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
+                    {
+                        return get_schema_type_from_rust_type(inner_ty);
                     }
                     return "null";
                 }
