@@ -168,11 +168,10 @@ impl LLMClient for AnthropicClient {
         // Get the schema for type T
         let schema = T::schema();
         // Avoid calling to_string() to prevent potential stack overflow with complex schemas
-        trace!(
-            "Retrieved JSON schema for type"
-        );
+        trace!("Retrieved JSON schema for type");
         // Get schema as JSON string - avoid Display impl which might cause recursion
-        let schema_str = serde_json::to_string(&schema.to_json()).unwrap_or_else(|_| "{}".to_string());
+        let schema_str =
+            serde_json::to_string(&schema.to_json()).unwrap_or_else(|_| "{}".to_string());
         debug!("Building structured prompt with schema");
         let structured_prompt = format!(
             "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
