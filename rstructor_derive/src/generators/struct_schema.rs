@@ -196,7 +196,9 @@ pub fn generate_struct_schema(
                         };
 
                         // Choose the appropriate handling for the array items based on the inner type
-                        let items_tokens: proc_macro2::TokenStream = if let Some(type_name) = &inner_type_name {
+                        let items_tokens: proc_macro2::TokenStream = if let Some(type_name) =
+                            &inner_type_name
+                        {
                             // Check if type name starts with uppercase (likely custom type)
                             let first_char = type_name.chars().next();
                             let is_uppercase = first_char.is_some_and(|c| c.is_uppercase());
@@ -307,7 +309,7 @@ pub fn generate_struct_schema(
                                 props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
                             }
                         };
-                        
+
                         items_tokens
                     } else {
                         // Fallback for array without detectable item type
