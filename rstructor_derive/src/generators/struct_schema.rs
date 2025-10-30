@@ -157,30 +157,14 @@ pub fn generate_struct_schema(
                         };
 
                         // Choose the appropriate handling for the array items based on the inner type
+                        // IMPORTANT: Default to treating as struct (object) - no name-based heuristics
                         let items_tokens: proc_macro2::TokenStream = if let Some(type_name) =
                             &inner_type_name
                         {
-                            // Check if type name starts with uppercase (likely custom type)
-                            let first_char = type_name.chars().next();
-                            let is_uppercase = first_char.is_some_and(|c| c.is_uppercase());
-
-                            // Check if this could be an enum
-                            // CRITICAL: Use same strict criteria as non-array fields
-                            // Only treat as enum if it matches whitelist (Status, Type, etc.)
-                            let uppercase_count =
-                                type_name.chars().filter(|c| c.is_uppercase()).count();
-                            let is_likely_enum = is_uppercase &&
-                                inner_schema_type == "object" &&
-                                !is_array_type(inner_type) &&
-                                // EXTREMELY strict - same as non-array handling
-                                type_name.len() <= 6 &&
-                                uppercase_count == 1 &&
-                                !type_name.contains('_') &&
-                                type_name.chars().all(|c| c.is_alphanumeric()) &&
-                                (type_name == "Status" || type_name == "Type" || type_name == "State"
-                                 || type_name == "Color" || type_name == "Kind" || type_name == "Mode"
-                                 || type_name == "Role" || type_name == "Level");
-
+                            // Check for well-known library types by exact match only
+                            let is_date = matches!(type_name.as_str(), "DateTime" | "NaiveDateTime" | "NaiveDate" | "Date");
+                            let is_uuid = type_name == "Uuid";
+                            
                             if is_date {
                                 // Handle array of dates
                                 quote! {
