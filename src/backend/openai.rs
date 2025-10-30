@@ -160,7 +160,7 @@ impl OpenAIClient {
 #[async_trait]
 impl LLMClient for OpenAIClient {
     #[instrument(
-        name = "openai_generate_struct", 
+        name = "openai_generate_struct",
         skip(self, prompt),
         fields(
             type_name = std::any::type_name::<T>(),
@@ -326,7 +326,7 @@ impl LLMClient for OpenAIClient {
     }
 
     #[instrument(
-        name = "openai_generate", 
+        name = "openai_generate",
         skip(self, prompt),
         fields(
             model = %self.config.model.as_str(),

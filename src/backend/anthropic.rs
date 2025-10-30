@@ -151,7 +151,7 @@ impl AnthropicClient {
 #[async_trait]
 impl LLMClient for AnthropicClient {
     #[instrument(
-        name = "anthropic_generate_struct", 
+        name = "anthropic_generate_struct",
         skip(self, prompt),
         fields(
             type_name = std::any::type_name::<T>(),
@@ -284,7 +284,7 @@ impl LLMClient for AnthropicClient {
     }
 
     #[instrument(
-        name = "anthropic_generate", 
+        name = "anthropic_generate",
         skip(self, prompt),
         fields(
             model = %self.config.model.as_str(),
