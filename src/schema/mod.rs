@@ -273,7 +273,11 @@ impl Schema {
     pub fn to_pretty_json(&self) -> String {
         // Get the schema with array enhancements
         let schema_json = self.to_json();
-        serde_json::to_string_pretty(&schema_json).unwrap_or_else(|_| self.schema.to_string())
+        // CRITICAL: Use serde_json directly to avoid recursion - never call self.schema.to_string()
+        // which would use Display impl and cause infinite recursion
+        serde_json::to_string_pretty(&schema_json).unwrap_or_else(|_| {
+            serde_json::to_string_pretty(&self.schema).unwrap_or_else(|_| "{}".to_string())
+        })
     }
 
     /// Create a schema builder for an object type
