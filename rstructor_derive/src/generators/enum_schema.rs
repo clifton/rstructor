@@ -157,17 +157,17 @@ fn generate_complex_enum_schema(
                             let field_schema_value = #field_schema;
                             let mut properties_map = ::serde_json::Map::new();
                             properties_map.insert(#variant_name_str.to_string(), field_schema_value);
-                            
+
                             let mut required_array = Vec::new();
                             required_array.push(::serde_json::Value::String(#variant_name_str.to_string()));
-                            
+
                             let mut schema_obj = ::serde_json::Map::new();
                             schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
                             schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties_map));
                             schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required_array));
                             schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
                             schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
-                            
+
                             ::serde_json::Value::Object(schema_obj)
                         }
                     });
@@ -189,27 +189,27 @@ fn generate_complex_enum_schema(
                             let field_schema_values: Vec<::serde_json::Value> = vec![
                                 #(#field_schemas),*
                             ];
-                            
+
                             let mut items_array = ::serde_json::Map::new();
                             items_array.insert("type".to_string(), ::serde_json::Value::String("array".to_string()));
                             items_array.insert("items".to_string(), ::serde_json::Value::Array(field_schema_values));
                             let field_count_u64 = #field_count as u64;
                             items_array.insert("minItems".to_string(), ::serde_json::Value::Number(::serde_json::Number::from(field_count_u64)));
                             items_array.insert("maxItems".to_string(), ::serde_json::Value::Number(::serde_json::Number::from(field_count_u64)));
-                            
+
                             let mut variant_properties = ::serde_json::Map::new();
                             variant_properties.insert(#variant_name_str.to_string(), ::serde_json::Value::Object(items_array));
-                            
+
                             let mut required_array = Vec::new();
                             required_array.push(::serde_json::Value::String(#variant_name_str.to_string()));
-                            
+
                             let mut schema_obj = ::serde_json::Map::new();
                             schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
                             schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(variant_properties));
                             schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required_array));
                             schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
                             schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
-                            
+
                             ::serde_json::Value::Object(schema_obj)
                         }
                     });
@@ -265,7 +265,7 @@ fn generate_complex_enum_schema(
                     {
                         let mut properties_map = ::serde_json::Map::new();
                         #(#prop_setters)*
-                        
+
                         let mut variant_properties = ::serde_json::Map::new();
                         variant_properties.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
                         variant_properties.insert("properties".to_string(), ::serde_json::Value::Object(properties_map));
@@ -278,7 +278,7 @@ fn generate_complex_enum_schema(
                         let mut schema_obj = ::serde_json::Map::new();
                         schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
                         schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(outer_properties));
-                        
+
                         let mut required_array = Vec::new();
                         required_array.push(::serde_json::Value::String(#variant_name_str.to_string()));
                         schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required_array));
