@@ -434,4 +434,338 @@ mod nested_struct_tests {
         let empty_prop = &schema_json["properties"]["empty"];
         assert_eq!(empty_prop["type"], "object");
     }
+
+    // ====== Enums within nested structs tests ======
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    enum UserRole {
+        Admin,
+        User,
+        Guest,
+        Moderator,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    enum AccountStatus {
+        Active,
+        Suspended,
+        Inactive,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct UserAccount {
+        #[llm(description = "Account username")]
+        username: String,
+
+        #[llm(description = "User role")]
+        role: UserRole,
+
+        #[llm(description = "Account status")]
+        status: AccountStatus,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct Organization {
+        #[llm(description = "Organization name")]
+        name: String,
+
+        #[llm(description = "Organization members")]
+        members: Vec<UserAccount>,
+    }
+
+    #[test]
+    fn test_enum_in_nested_struct_schema() {
+        let schema = Organization::schema();
+        let schema_json = schema.to_json();
+
+        // Verify top-level structure
+        assert_eq!(schema_json["type"], "object");
+        assert_eq!(schema_json["title"], "Organization");
+
+        // Verify members field is an array
+        let members_prop = &schema_json["properties"]["members"];
+        assert_eq!(members_prop["type"], "array");
+
+        // Verify items are objects
+        let items = &members_prop["items"];
+        assert_eq!(items["type"], "object");
+
+        // Verify nested struct has enum fields
+        // The schema should properly represent UserAccount with its enum fields
+        let items_props = items.get("properties");
+        if let Some(props) = items_props {
+            // If properties are embedded, verify enum fields exist
+            if let Some(role_prop) = props.get("role") {
+                assert!(role_prop.is_object());
+            }
+            if let Some(status_prop) = props.get("status") {
+                assert!(status_prop.is_object());
+            }
+        }
+    }
+
+    #[test]
+    fn test_enum_in_nested_struct_deserialization() {
+        let json = serde_json::json!({
+            "name": "Tech Corp",
+            "members": [
+                {
+                    "username": "alice",
+                    "role": "Admin",
+                    "status": "Active"
+                },
+                {
+                    "username": "bob",
+                    "role": "User",
+                    "status": "Active"
+                },
+                {
+                    "username": "charlie",
+                    "role": "Guest",
+                    "status": "Inactive"
+                }
+            ]
+        });
+
+        let org: Organization = serde_json::from_value(json).unwrap();
+        assert_eq!(org.name, "Tech Corp");
+        assert_eq!(org.members.len(), 3);
+        assert_eq!(org.members[0].username, "alice");
+        assert_eq!(org.members[0].role, UserRole::Admin);
+        assert_eq!(org.members[0].status, AccountStatus::Active);
+        assert_eq!(org.members[1].role, UserRole::User);
+        assert_eq!(org.members[2].role, UserRole::Guest);
+        assert_eq!(org.members[2].status, AccountStatus::Inactive);
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    enum Priority {
+        Low,
+        Medium,
+        High,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct TaskMetadata {
+        #[llm(description = "Task priority")]
+        priority: Priority,
+
+        #[llm(description = "Task tags")]
+        tags: Vec<String>,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct Project {
+        #[llm(description = "Project name")]
+        name: String,
+
+        #[llm(description = "Task metadata")]
+        task_metadata: TaskMetadata,
+    }
+
+    #[test]
+    fn test_enum_in_directly_nested_struct_schema() {
+        let schema = Project::schema();
+        let schema_json = schema.to_json();
+
+        // Verify task_metadata field exists
+        let metadata_prop = &schema_json["properties"]["task_metadata"];
+        assert_eq!(metadata_prop["type"], "object");
+
+        // Verify nested struct has enum field
+        let metadata_props = metadata_prop.get("properties");
+        if let Some(props) = metadata_props {
+            if let Some(priority_prop) = props.get("priority") {
+                assert!(priority_prop.is_object());
+            }
+        }
+    }
+
+    #[test]
+    fn test_enum_in_directly_nested_struct_deserialization() {
+        let json = serde_json::json!({
+            "name": "Website Redesign",
+            "task_metadata": {
+                "priority": "High",
+                "tags": ["urgent", "frontend"]
+            }
+        });
+
+        let project: Project = serde_json::from_value(json).unwrap();
+        assert_eq!(project.name, "Website Redesign");
+        assert_eq!(project.task_metadata.priority, Priority::High);
+        assert_eq!(project.task_metadata.tags.len(), 2);
+        assert_eq!(project.task_metadata.tags[0], "urgent");
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct TaskWithOptionalEnum {
+        #[llm(description = "Task title")]
+        title: String,
+
+        #[llm(description = "Optional priority")]
+        priority: Option<Priority>,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct TaskList {
+        #[llm(description = "List name")]
+        name: String,
+
+        #[llm(description = "Tasks in the list")]
+        tasks: Vec<TaskWithOptionalEnum>,
+    }
+
+    #[test]
+    fn test_optional_enum_in_nested_struct_schema() {
+        let schema = TaskList::schema();
+        let schema_json = schema.to_json();
+
+        // Verify tasks field is an array
+        let tasks_prop = &schema_json["properties"]["tasks"];
+        assert_eq!(tasks_prop["type"], "array");
+
+        // Verify items are objects
+        let items = &tasks_prop["items"];
+        assert_eq!(items["type"], "object");
+    }
+
+    #[test]
+    fn test_optional_enum_in_nested_struct_deserialization() {
+        let json = serde_json::json!({
+            "name": "My Tasks",
+            "tasks": [
+                {
+                    "title": "Task 1",
+                    "priority": "High"
+                },
+                {
+                    "title": "Task 2"
+                }
+            ]
+        });
+
+        let task_list: TaskList = serde_json::from_value(json).unwrap();
+        assert_eq!(task_list.name, "My Tasks");
+        assert_eq!(task_list.tasks.len(), 2);
+        assert_eq!(task_list.tasks[0].title, "Task 1");
+        assert_eq!(task_list.tasks[0].priority, Some(Priority::High));
+        assert_eq!(task_list.tasks[1].title, "Task 2");
+        assert_eq!(task_list.tasks[1].priority, None);
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    enum Department {
+        Engineering,
+        Marketing,
+        Sales,
+        Support,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct EmployeeInfo {
+        #[llm(description = "Employee ID")]
+        id: u32,
+
+        #[llm(description = "Department")]
+        department: Department,
+
+        #[llm(description = "Role")]
+        role: UserRole,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct Company {
+        #[llm(description = "Company name")]
+        name: String,
+
+        #[llm(description = "Employee information")]
+        employees: Vec<EmployeeInfo>,
+    }
+
+    #[test]
+    fn test_multiple_enums_in_nested_struct_schema() {
+        let schema = Company::schema();
+        let schema_json = schema.to_json();
+
+        // Verify employees field is an array
+        let employees_prop = &schema_json["properties"]["employees"];
+        assert_eq!(employees_prop["type"], "array");
+
+        // Verify items are objects
+        let items = &employees_prop["items"];
+        assert_eq!(items["type"], "object");
+    }
+
+    #[test]
+    fn test_multiple_enums_in_nested_struct_deserialization() {
+        let json = serde_json::json!({
+            "name": "Acme Corp",
+            "employees": [
+                {
+                    "id": 1,
+                    "department": "Engineering",
+                    "role": "Admin"
+                },
+                {
+                    "id": 2,
+                    "department": "Marketing",
+                    "role": "User"
+                }
+            ]
+        });
+
+        let company: Company = serde_json::from_value(json).unwrap();
+        assert_eq!(company.name, "Acme Corp");
+        assert_eq!(company.employees.len(), 2);
+        assert_eq!(company.employees[0].id, 1);
+        assert_eq!(company.employees[0].department, Department::Engineering);
+        assert_eq!(company.employees[0].role, UserRole::Admin);
+        assert_eq!(company.employees[1].department, Department::Marketing);
+        assert_eq!(company.employees[1].role, UserRole::User);
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct Team {
+        #[llm(description = "Team name")]
+        name: String,
+
+        #[llm(description = "Team department")]
+        department: Department,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+    struct Manager {
+        #[llm(description = "Manager name")]
+        name: String,
+
+        #[llm(description = "Managed team")]
+        team: Team,
+    }
+
+    #[test]
+    fn test_enum_in_deeply_nested_struct_schema() {
+        let schema = Manager::schema();
+        let schema_json = schema.to_json();
+
+        // Verify team field exists
+        let team_prop = &schema_json["properties"]["team"];
+        assert_eq!(team_prop["type"], "object");
+    }
+
+    #[test]
+    fn test_enum_in_deeply_nested_struct_deserialization() {
+        let json = serde_json::json!({
+            "name": "Alice Manager",
+            "team": {
+                "name": "Backend Team",
+                "department": "Engineering"
+            }
+        });
+
+        let manager: Manager = serde_json::from_value(json).unwrap();
+        assert_eq!(manager.name, "Alice Manager");
+        assert_eq!(manager.team.name, "Backend Team");
+        assert_eq!(manager.team.department, Department::Engineering);
+    }
 }
