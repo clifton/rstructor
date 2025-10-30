@@ -574,10 +574,10 @@ mod nested_struct_tests {
 
         // Verify nested struct has enum field
         let metadata_props = metadata_prop.get("properties");
-        if let Some(props) = metadata_props {
-            if let Some(priority_prop) = props.get("priority") {
-                assert!(priority_prop.is_object());
-            }
+        if let Some(props) = metadata_props
+            && let Some(priority_prop) = props.get("priority")
+        {
+            assert!(priority_prop.is_object());
         }
     }
 
