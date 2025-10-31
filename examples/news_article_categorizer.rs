@@ -139,7 +139,7 @@ async fn analyze_article(
             "Analyze the following news article completely according to the schema.\n\nCRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:\n1. The 'category' field is REQUIRED and must be one of: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.\n2. The 'entities' field must be an array of objects, where each object has 'name', 'entity_type', and 'relevance' fields. Do NOT return entities as strings. Each entity must be a complete JSON object.\n3. All other fields (title, summary, sentiment, keywords, bias_assessment) are also REQUIRED.\n\nArticle:\n{}",
             article_text
         );
-        let analysis = client.generate_struct::<ArticleAnalysis>(&prompt).await?;
+        let analysis = client.materialize::<ArticleAnalysis>(&prompt).await?;
         Ok(analysis)
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("Using Anthropic for article analysis...");
@@ -154,7 +154,7 @@ async fn analyze_article(
             "Analyze the following news article completely according to the schema.\n\nCRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:\n1. The 'category' field is REQUIRED and must be one of: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.\n2. The 'entities' field must be an array of objects, where each object has 'name', 'entity_type', and 'relevance' fields. Do NOT return entities as strings. Each entity must be a complete JSON object.\n3. All other fields (title, summary, sentiment, keywords, bias_assessment) are also REQUIRED.\n\nArticle:\n{}",
             article_text
         );
-        let analysis = client.generate_struct::<ArticleAnalysis>(&prompt).await?;
+        let analysis = client.materialize::<ArticleAnalysis>(&prompt).await?;
         Ok(analysis)
     } else {
         Err("No API keys found. Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY.".into())

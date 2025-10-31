@@ -259,7 +259,7 @@ Based on the following description, create a detailed event plan:\n\n{}",
         description
     );
 
-    client.generate_struct::<EventPlan>(&prompt).await
+    client.materialize::<EventPlan>(&prompt).await
 }
 
 #[tokio::main]

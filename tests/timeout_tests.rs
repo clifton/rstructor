@@ -46,7 +46,7 @@ mod timeout_tests {
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
         // Try to make a request - it should timeout
-        let result = client.generate_struct::<TestStruct>("test").await;
+        let result = client.materialize::<TestStruct>("test").await;
         assert!(result.is_err());
         match result.unwrap_err() {
             RStructorError::Timeout => {
@@ -103,7 +103,7 @@ mod timeout_tests {
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
         // Try to make a request - it should timeout
-        let result = client.generate_struct::<TestStruct>("test").await;
+        let result = client.materialize::<TestStruct>("test").await;
         assert!(result.is_err());
         match result.unwrap_err() {
             RStructorError::Timeout => {
@@ -196,7 +196,7 @@ mod timeout_tests {
         };
 
         // Try to make a request - it should timeout
-        let result = client.generate_struct::<TestStruct>("test").await;
+        let result = client.materialize::<TestStruct>("test").await;
         assert!(result.is_err());
         match result.unwrap_err() {
             RStructorError::Timeout => {
@@ -274,7 +274,7 @@ mod timeout_tests {
         };
 
         // Try to make a request - it should timeout
-        let result = client.generate_struct::<TestStruct>("test").await;
+        let result = client.materialize::<TestStruct>("test").await;
         assert!(result.is_err());
         match result.unwrap_err() {
             RStructorError::Timeout => {

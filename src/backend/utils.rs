@@ -248,7 +248,7 @@ macro_rules! impl_client_builder_methods {
 
             /// Set the maximum number of retry attempts for validation errors.
             ///
-            /// When `generate_struct` encounters a validation error, it will automatically
+            /// When `materialize` encounters a validation error, it will automatically
             /// retry up to this many times, including the validation error message in subsequent attempts.
             ///
             /// # Arguments

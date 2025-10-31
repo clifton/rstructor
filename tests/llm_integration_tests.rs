@@ -71,7 +71,7 @@ mod llm_integration_tests {
     // Test using OpenAI
     #[cfg(feature = "openai")]
     #[tokio::test]
-    async fn test_openai_generate_struct() {
+    async fn test_openai_materialize() {
         // Skip test if API key is not available
         let api_key = match env::var("OPENAI_API_KEY") {
             Ok(key) => key,
@@ -90,7 +90,7 @@ mod llm_integration_tests {
         };
 
         let prompt = "Provide information about the movie Inception";
-        let movie_result = client.generate_struct::<Movie>(prompt).await;
+        let movie_result = client.materialize::<Movie>(prompt).await;
 
         // Handle API errors gracefully
         if let Err(e) = &movie_result {
@@ -114,7 +114,7 @@ mod llm_integration_tests {
     // Test using Anthropic
     #[cfg(feature = "anthropic")]
     #[tokio::test]
-    async fn test_anthropic_generate_struct() {
+    async fn test_anthropic_materialize() {
         // Skip test if API key is not available
         let api_key = match env::var("ANTHROPIC_API_KEY") {
             Ok(key) => key,
@@ -135,7 +135,7 @@ mod llm_integration_tests {
         };
 
         let prompt = "Provide information about the movie Inception";
-        let movie_result = client.generate_struct::<Movie>(prompt).await;
+        let movie_result = client.materialize::<Movie>(prompt).await;
 
         // Handle API errors gracefully
         if let Err(e) = &movie_result {
@@ -159,7 +159,7 @@ mod llm_integration_tests {
     // Test using Grok
     #[cfg(feature = "grok")]
     #[tokio::test]
-    async fn test_grok_generate_struct() {
+    async fn test_grok_materialize() {
         // Skip test if API key is not available
         // Read from XAI_API_KEY env var
         let client = match GrokClient::from_env() {
@@ -174,7 +174,7 @@ mod llm_integration_tests {
         };
 
         let prompt = "Provide information about the movie Inception";
-        let movie_result = client.generate_struct::<Movie>(prompt).await;
+        let movie_result = client.materialize::<Movie>(prompt).await;
 
         // Handle API errors gracefully
         if let Err(e) = &movie_result {
@@ -198,7 +198,7 @@ mod llm_integration_tests {
     // Test using Gemini
     #[cfg(feature = "gemini")]
     #[tokio::test]
-    async fn test_gemini_generate_struct() {
+    async fn test_gemini_materialize() {
         // Skip test if API key is not available
         // Read from GEMINI_API_KEY env var
         let client = match GeminiClient::from_env() {
@@ -213,7 +213,7 @@ mod llm_integration_tests {
         };
 
         let prompt = "Provide information about the movie Inception";
-        let movie_result = client.generate_struct::<Movie>(prompt).await;
+        let movie_result = client.materialize::<Movie>(prompt).await;
 
         // Handle API errors gracefully
         if let Err(e) = &movie_result {

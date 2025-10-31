@@ -70,14 +70,14 @@ use crate::schema::SchemaType;
 ///     .model(OpenAIModel::Gpt4OMini);
 ///
 /// // Get structured data with automatic validation
-/// let product = client.generate_struct::<ProductInfo>("Describe a laptop").await?;
+/// let product = client.materialize::<ProductInfo>("Describe a laptop").await?;
 /// # Ok(())
 /// # }
 /// ```
 pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
     /// Optional validation logic beyond type checking
     ///
-    /// This method is called automatically by `generate_struct` to validate
+    /// This method is called automatically by `materialize` to validate
     /// the data returned by the LLM. The default implementation does nothing
     /// and returns Ok(()), but you can override it to add your own validation logic.
     ///

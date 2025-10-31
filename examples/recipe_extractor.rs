@@ -178,7 +178,7 @@ async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> 
     );
 
     // Use the library's built-in retry functionality
-    client.generate_struct::<Recipe>(&prompt).await
+    client.materialize::<Recipe>(&prompt).await
 }
 
 async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recipe> {
@@ -218,7 +218,7 @@ async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recip
     );
 
     // Use the library's built-in retry functionality
-    client.generate_struct::<Recipe>(&prompt).await
+    client.materialize::<Recipe>(&prompt).await
 }
 
 fn print_recipe(recipe: &Recipe) {

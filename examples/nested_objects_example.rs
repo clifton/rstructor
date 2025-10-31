@@ -194,7 +194,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
             .max_retries(5)
             .include_error_feedback(true);
 
-        let recipe: Recipe = client.generate_struct(prompt).await?;
+        let recipe: Recipe = client.materialize(prompt).await?;
 
         // Print the generated recipe
         print_recipe(&recipe);
@@ -207,7 +207,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
             .max_retries(5)
             .include_error_feedback(true);
 
-        let recipe: Recipe = client.generate_struct(prompt).await?;
+        let recipe: Recipe = client.materialize(prompt).await?;
 
         // Print the generated recipe
         print_recipe(&recipe);

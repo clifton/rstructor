@@ -87,7 +87,7 @@ async fn main() -> rstructor::Result<()> {
         println!("Prompt: {}", prompt);
 
         // Call the LLM to get a structured output with retry
-        match client.generate_struct::<WeatherInfo>(prompt).await {
+        match client.materialize::<WeatherInfo>(prompt).await {
             Ok(weather) => {
                 println!("\nReceived weather info from OpenAI:");
                 println!("Weather for {}: {} °C", weather.city, weather.temperature);
@@ -97,7 +97,7 @@ async fn main() -> rstructor::Result<()> {
 
                 // Weather comes back validated!
                 println!(
-                    "\nNote: The data has already been validated by the generate_struct method!"
+                    "\nNote: The data has already been validated by the materialize method!"
                 );
             }
             Err(e) => println!("Error getting weather from OpenAI: {}", e),

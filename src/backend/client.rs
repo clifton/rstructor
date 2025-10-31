@@ -51,9 +51,9 @@ use crate::model::Instructor;
 ///     .temperature(0.0)
 ///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///
-/// // Generate a structured response
+/// // Materialize a structured response
 /// let prompt = "Describe the movie Inception";
-/// let movie: Movie = client.generate_struct(prompt).await?;
+/// let movie: Movie = client.materialize(prompt).await?;
 ///
 /// println!("Title: {}", movie.title);
 /// println!("Director: {}", movie.director);
@@ -84,9 +84,9 @@ use crate::model::Instructor;
 ///     .temperature(0.0)
 ///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///
-/// // Generate a structured response
+/// // Materialize a structured response
 /// let prompt = "Write a short review of the movie The Matrix";
-/// let review: MovieReview = client.generate_struct(prompt).await?;
+/// let review: MovieReview = client.materialize(prompt).await?;
 ///
 /// println!("Movie: {}", review.movie_title);
 /// println!("Rating: {}/10", review.rating);
@@ -96,63 +96,16 @@ use crate::model::Instructor;
 /// ```
 #[async_trait]
 pub trait LLMClient {
-    /// Generate a structured object of type T from a prompt.
+    /// Materialize a structured object of type T from a prompt.
     ///
     /// This method takes a text prompt and returns a structured object
     /// of type T, where T implements the `Instructor` trait. The LLM is guided
     /// to produce output that conforms to the JSON schema defined by T.
     ///
     /// If the returned data doesn't match the expected schema or fails validation,
-    /// an error is returned.
-    async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
-    where
-        T: Instructor + DeserializeOwned + Send + 'static;
-
-    /// Generate a structured object with automatic retry for validation errors.
-    ///
-    /// **Deprecated**: Use `generate_struct()` with client retry configuration instead.
-    /// Set retry options using `.max_retries()` and `.include_error_feedback()` builder methods.
-    ///
-    /// This method is kept for backward compatibility but delegates to `generate_struct()`
-    /// with temporary retry configuration.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// use rstructor::{LLMClient, OpenAIClient, OpenAIModel, Instructor};
-    /// use serde::{Serialize, Deserialize};
-    ///
-    /// #[derive(Instructor, Serialize, Deserialize, Debug)]
-    /// struct Recipe {
-    ///     name: String,
-    ///     ingredients: Vec<String>,
-    ///     steps: Vec<String>,
-    /// }
-    ///
-    /// // Recommended: Use client configuration
-    /// let client = OpenAIClient::new("your-api-key")?
-    ///     .model(OpenAIModel::Gpt4O)
-    ///     .temperature(0.0)
-    ///     .max_retries(3)
-    ///     .include_error_feedback(true);
-    ///
-    /// let recipe = client.generate_struct::<Recipe>("Give me a chocolate cake recipe").await?;
-    ///
-    /// println!("Recipe: {}", recipe.name);
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use generate_struct() with client retry configuration instead. Set retry options using .max_retries() and .include_error_feedback() builder methods."
-    )]
-    async fn generate_struct_with_retry<T>(
-        &self,
-        prompt: &str,
-        max_retries: Option<usize>,
-        include_error_feedback: Option<bool>,
-    ) -> Result<T>
+    /// an error is returned. Configure retry behavior using `.max_retries()` and
+    /// `.include_error_feedback()` builder methods.
+    async fn materialize<T>(&self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static;
 

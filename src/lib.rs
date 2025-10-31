@@ -32,7 +32,7 @@
 ///     let client = OpenAIClient::new("your-openai-api-key")?;
 ///
 ///     // Generate a structured response
-///     let person: Person = client.generate_struct("Describe a fictional person").await?;
+///     let person: Person = client.materialize("Describe a fictional person").await?;
 ///
 ///     println!("Name: {}", person.name);
 ///     println!("Age: {}", person.age);

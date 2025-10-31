@@ -211,8 +211,8 @@ impl GrokClient {
 }
 
 impl GrokClient {
-    /// Internal implementation of generate_struct (without retry logic)
-    async fn generate_struct_internal<T>(&self, prompt: &str) -> Result<T>
+    /// Internal implementation of materialize (without retry logic)
+    async fn materialize_internal<T>(&self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -366,7 +366,7 @@ impl LLMClient for GrokClient {
         Self::from_env()
     }
     #[instrument(
-        name = "grok_generate_struct",
+        name = "grok_materialize",
         skip(self, prompt),
         fields(
             type_name = std::any::type_name::<T>(),
@@ -374,14 +374,14 @@ impl LLMClient for GrokClient {
             prompt_len = prompt.len()
         )
     )]
-    async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
+    async fn materialize<T>(&self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
         generate_with_retry(
             |prompt_owned: String| {
                 let this = self;
-                async move { this.generate_struct_internal::<T>(&prompt_owned).await }
+                async move { this.materialize_internal::<T>(&prompt_owned).await }
             },
             prompt,
             self.config.max_retries,
@@ -458,37 +458,5 @@ impl LLMClient for GrokClient {
                 "No content in response".to_string(),
             ))
         }
-    }
-
-    #[allow(deprecated)]
-    #[instrument(
-        name = "grok_generate_struct_with_retry",
-        skip(self, prompt),
-        fields(
-            type_name = std::any::type_name::<T>(),
-            max_retries = ?max_retries,
-            include_error_feedback = ?include_error_feedback,
-            prompt_len = prompt.len()
-        )
-    )]
-    async fn generate_struct_with_retry<T>(
-        &self,
-        prompt: &str,
-        max_retries: Option<usize>,
-        include_error_feedback: Option<bool>,
-    ) -> Result<T>
-    where
-        T: Instructor + DeserializeOwned + Send + 'static,
-    {
-        generate_with_retry(
-            |prompt_owned: String| {
-                let this = self;
-                async move { this.generate_struct_internal::<T>(&prompt_owned).await }
-            },
-            prompt,
-            max_retries,
-            include_error_feedback,
-        )
-        .await
     }
 }

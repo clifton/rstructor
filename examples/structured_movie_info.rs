@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .max_retries(3)
             .include_error_feedback(true);
 
-        match client.generate_struct::<Movie>(prompt).await {
+        match client.materialize::<Movie>(prompt).await {
             Ok(movie) => {
                 println!("\nOpenAI Response:");
                 println!("Title: {}", movie.title);
@@ -112,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .max_retries(3)
             .include_error_feedback(true);
 
-        match client.generate_struct::<Movie>(prompt).await {
+        match client.materialize::<Movie>(prompt).await {
             Ok(movie) => {
                 println!("\nAnthropic Response:");
                 println!("Title: {}", movie.title);

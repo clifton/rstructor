@@ -162,7 +162,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
    ALL THREE FIELDS ARE REQUIRED FOR EACH FORECAST ITEM.";
 
     // This line will be logged with spans and info - using 3 retries for more chances to see retry logs
-    let forecast_result = client.generate_struct::<WeatherForecast>(prompt).await;
+    let forecast_result = client.materialize::<WeatherForecast>(prompt).await;
 
     match forecast_result {
         Ok(forecast) => {
