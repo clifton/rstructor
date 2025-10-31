@@ -266,13 +266,13 @@ impl GrokClient {
     /// # use std::time::Duration;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = GrokClient::from_env()?  // Reads from XAI_API_KEY env var
-    ///     .with_timeout(Duration::from_secs(30))  // 30 second timeout
+    ///     .timeout(Duration::from_secs(30))  // 30 second timeout
     ///     .build();
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(skip(self))]
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         debug!(
             previous_timeout = ?self.config.timeout,
             new_timeout = ?timeout,

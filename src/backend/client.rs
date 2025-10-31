@@ -26,7 +26,7 @@ use crate::model::Instructor;
 ///   - Anthropic: `ANTHROPIC_API_KEY`
 ///   - Grok: `XAI_API_KEY`
 ///   - Gemini: `GEMINI_API_KEY`
-/// - Builder methods: `model()`, `temperature()`, `max_tokens()`, `with_timeout()`, `build()`
+/// - Builder methods: `model()`, `temperature()`, `max_tokens()`, `timeout()`, `build()`
 /// - All clients validate `max_tokens >= 1` to avoid API errors
 ///
 /// # Examples
@@ -51,7 +51,7 @@ use crate::model::Instructor;
 /// let client = OpenAIClient::new("your-openai-api-key")?
 ///     .model(OpenAIModel::Gpt4OMini)
 ///     .temperature(0.0)
-///     .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
+///     .timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
 ///     .build();
 ///
 /// // Generate a structured response
@@ -85,7 +85,7 @@ use crate::model::Instructor;
 /// let client = AnthropicClient::new("your-anthropic-api-key")?
 ///     .model(AnthropicModel::ClaudeSonnet4)
 ///     .temperature(0.0)
-///     .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
+///     .timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
 ///     .build();
 ///
 /// // Generate a structured response

@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAIClient::new(api_key)?
         .model(OpenAIModel::Gpt4OMini)
         .temperature(0.0)
-        .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
+        .timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
         .build();
 
     // Generate structured information with a simple prompt
@@ -466,7 +466,7 @@ let openai_client = OpenAIClient::new(openai_api_key)?
     .model(OpenAIModel::Gpt5)
     .temperature(0.2)
     .max_tokens(1500)
-    .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
+    .timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
 
 // Using Anthropic
@@ -474,7 +474,7 @@ let anthropic_client = AnthropicClient::new(anthropic_api_key)?
     .model(AnthropicModel::ClaudeSonnet4)
     .temperature(0.0)
     .max_tokens(2000)
-    .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
+    .timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
 
 // Using Grok (xAI) - reads from XAI_API_KEY environment variable
@@ -482,7 +482,7 @@ let grok_client = GrokClient::from_env()?  // Reads from XAI_API_KEY env var
     .model(GrokModel::Grok4)
     .temperature(0.0)
     .max_tokens(1500)
-    .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
+    .timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
 
 // Using Gemini (Google) - reads from GEMINI_API_KEY environment variable
@@ -490,7 +490,7 @@ let gemini_client = GeminiClient::from_env()?  // Reads from GEMINI_API_KEY env 
     .model(GeminiModel::Gemini25Flash)
     .temperature(0.0)
     .max_tokens(1500)
-    .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
+    .timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
 ```
 
@@ -504,7 +504,7 @@ use std::time::Duration;
 let client = OpenAIClient::new(api_key)?
     .model(OpenAIModel::Gpt4O)
     .temperature(0.0)
-    .with_timeout(Duration::from_secs(30))  // Set 30 second timeout
+    .timeout(Duration::from_secs(30))  // Set 30 second timeout
     .build();
 ```
 
