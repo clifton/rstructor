@@ -16,6 +16,7 @@ use crate::model::Instructor;
 /// The library includes implementations for popular LLM providers:
 /// - `OpenAIClient` for OpenAI's GPT models (gpt-3.5-turbo, gpt-4, etc.)
 /// - `AnthropicClient` for Anthropic's Claude models
+/// - `GrokClient` for xAI's Grok models (uses `XAI_API_KEY` env var by default)
 ///
 /// # Examples
 ///

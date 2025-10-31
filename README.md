@@ -16,7 +16,7 @@ Think of it as the Rust equivalent of [Instructor + Pydantic](https://github.com
 - **📝 Type-Safe Definitions**: Define data models as standard Rust structs/enums with attributes
 - **🔄 JSON Schema Generation**: Auto-generates JSON Schema from your Rust types
 - **✅ Built-in Validation**: Type checking plus custom business rule validation
-- **🔌 Multiple LLM Providers**: Support for OpenAI and Anthropic, with an extensible backend system
+- **🔌 Multiple LLM Providers**: Support for OpenAI, Anthropic, and Grok (xAI), with an extensible backend system
 - **🧩 Complex Data Structures**: Support for nested objects, arrays, optional fields, and deeply nested enums
 - **🧠 Schema Fidelity**: Heuristic-free JSON Schema generation that preserves nested struct and enum detail
 - **🔍 Custom Validation Rules**: Add domain-specific validation with automatically detected `validate` methods
@@ -476,11 +476,19 @@ let anthropic_client = AnthropicClient::new(anthropic_api_key)?
     .max_tokens(2000)
     .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
+
+// Using Grok (xAI) - automatically uses XAI_API_KEY env var if empty string provided
+let grok_client = GrokClient::new("")?  // Uses XAI_API_KEY env var
+    .model(GrokModel::Grok2)
+    .temperature(0.0)
+    .max_tokens(1500)
+    .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
+    .build();
 ```
 
 ### Configuring Request Timeouts
 
-Both `OpenAIClient` and `AnthropicClient` support configurable timeouts for HTTP requests using the builder pattern:
+All clients (`OpenAIClient`, `AnthropicClient`, and `GrokClient`) support configurable timeouts for HTTP requests using the builder pattern:
 
 ```rust
 use std::time::Duration;
@@ -668,12 +676,13 @@ Configure RStructor with feature flags:
 
 ```toml
 [dependencies]
-rstructor = { version = "0.1.0", features = ["openai", "anthropic"] }
+rstructor = { version = "0.1.0", features = ["openai", "anthropic", "grok"] }
 ```
 
 Available features:
 - `openai`: Include the OpenAI client
 - `anthropic`: Include the Anthropic client
+- `grok`: Include the Grok (xAI) client
 - `derive`: Include the derive macro (enabled by default)
 - `logging`: Enable tracing integration with default subscriber
 

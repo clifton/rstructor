@@ -34,11 +34,11 @@
 ///
 ///     // Generate a structured response
 ///     let person: Person = client.generate_struct("Describe a fictional person").await?;
-///     
+///
 ///     println!("Name: {}", person.name);
 ///     println!("Age: {}", person.age);
 ///     println!("Bio: {}", person.bio);
-///     
+///
 ///     Ok(())
 /// }
 /// ```
@@ -59,6 +59,9 @@ pub use backend::openai::{Model as OpenAIModel, OpenAIClient};
 
 #[cfg(feature = "anthropic")]
 pub use backend::anthropic::{AnthropicClient, AnthropicModel};
+
+#[cfg(feature = "grok")]
+pub use backend::grok::{GrokClient, Model as GrokModel};
 
 #[cfg(feature = "derive")]
 pub use rstructor_derive::Instructor;
