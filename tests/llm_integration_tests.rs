@@ -202,9 +202,7 @@ mod llm_integration_tests {
         // Skip test if API key is not available
         // Read from GEMINI_API_KEY env var
         let client = match GeminiClient::from_env() {
-            Ok(client) => client
-                .model(GeminiModel::Gemini25Flash)
-                .temperature(0.0),
+            Ok(client) => client.model(GeminiModel::Gemini25Flash).temperature(0.0),
             Err(e) => {
                 println!(
                     "Skipping test: Failed to create Gemini client (GEMINI_API_KEY not set): {:?}",
