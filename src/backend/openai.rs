@@ -3,7 +3,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Duration;
-use tokio::time;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::LLMClient;
@@ -252,31 +251,15 @@ impl LLMClient for OpenAIClient {
 
         // Send the request to OpenAI
         debug!("Sending request to OpenAI API");
-        let request_builder = self
+        let response = self
             .client
             .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
-            .json(&request);
-
-        let response = if let Some(timeout) = self.config.timeout {
-            time::timeout(timeout, request_builder.send())
-                .await
-                .map_err(|_| {
-                    error!(timeout = ?timeout, "Request to OpenAI API timed out");
-                    RStructorError::Timeout
-                })?
-                .map_err(|e| {
-                    error!(error = %e, "HTTP request to OpenAI failed");
-                    // Check if it's a timeout error from reqwest
-                    if e.is_timeout() {
-                        RStructorError::Timeout
-                    } else {
-                        RStructorError::HttpError(e)
-                    }
-                })?
-        } else {
-            request_builder.send().await.map_err(|e| {
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| {
                 error!(error = %e, "HTTP request to OpenAI failed");
                 // Check if it's a timeout error from reqwest
                 if e.is_timeout() {
@@ -284,8 +267,7 @@ impl LLMClient for OpenAIClient {
                 } else {
                     RStructorError::HttpError(e)
                 }
-            })?
-        };
+            })?;
 
         // Parse the response
         if !response.status().is_success() {
@@ -420,31 +402,15 @@ impl LLMClient for OpenAIClient {
 
         // Send the request to OpenAI
         debug!("Sending request to OpenAI API");
-        let request_builder = self
+        let response = self
             .client
             .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
-            .json(&request);
-
-        let response = if let Some(timeout) = self.config.timeout {
-            time::timeout(timeout, request_builder.send())
-                .await
-                .map_err(|_| {
-                    error!(timeout = ?timeout, "Request to OpenAI API timed out");
-                    RStructorError::Timeout
-                })?
-                .map_err(|e| {
-                    error!(error = %e, "HTTP request to OpenAI failed");
-                    // Check if it's a timeout error from reqwest
-                    if e.is_timeout() {
-                        RStructorError::Timeout
-                    } else {
-                        RStructorError::HttpError(e)
-                    }
-                })?
-        } else {
-            request_builder.send().await.map_err(|e| {
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| {
                 error!(error = %e, "HTTP request to OpenAI failed");
                 // Check if it's a timeout error from reqwest
                 if e.is_timeout() {
@@ -452,8 +418,7 @@ impl LLMClient for OpenAIClient {
                 } else {
                     RStructorError::HttpError(e)
                 }
-            })?
-        };
+            })?;
 
         // Parse the response
         if !response.status().is_success() {

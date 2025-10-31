@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tokio::time;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::LLMClient;
@@ -245,32 +244,16 @@ impl LLMClient for AnthropicClient {
             max_tokens = request.max_tokens,
             "Sending request to Anthropic API"
         );
-        let request_builder = self
+        let response = self
             .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json")
-            .json(&request);
-
-        let response = if let Some(timeout) = self.config.timeout {
-            time::timeout(timeout, request_builder.send())
-                .await
-                .map_err(|_| {
-                    error!(timeout = ?timeout, "Request to Anthropic API timed out");
-                    RStructorError::Timeout
-                })?
-                .map_err(|e| {
-                    error!(error = %e, "HTTP request to Anthropic failed");
-                    // Check if it's a timeout error from reqwest
-                    if e.is_timeout() {
-                        RStructorError::Timeout
-                    } else {
-                        RStructorError::HttpError(e)
-                    }
-                })?
-        } else {
-            request_builder.send().await.map_err(|e| {
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| {
                 error!(error = %e, "HTTP request to Anthropic failed");
                 // Check if it's a timeout error from reqwest
                 if e.is_timeout() {
@@ -278,8 +261,7 @@ impl LLMClient for AnthropicClient {
                 } else {
                     RStructorError::HttpError(e)
                 }
-            })?
-        };
+            })?;
 
         // Parse the response
         if !response.status().is_success() {
@@ -382,32 +364,16 @@ impl LLMClient for AnthropicClient {
             max_tokens = request.max_tokens,
             "Sending request to Anthropic API"
         );
-        let request_builder = self
+        let response = self
             .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json")
-            .json(&request);
-
-        let response = if let Some(timeout) = self.config.timeout {
-            time::timeout(timeout, request_builder.send())
-                .await
-                .map_err(|_| {
-                    error!(timeout = ?timeout, "Request to Anthropic API timed out");
-                    RStructorError::Timeout
-                })?
-                .map_err(|e| {
-                    error!(error = %e, "HTTP request to Anthropic failed");
-                    // Check if it's a timeout error from reqwest
-                    if e.is_timeout() {
-                        RStructorError::Timeout
-                    } else {
-                        RStructorError::HttpError(e)
-                    }
-                })?
-        } else {
-            request_builder.send().await.map_err(|e| {
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| {
                 error!(error = %e, "HTTP request to Anthropic failed");
                 // Check if it's a timeout error from reqwest
                 if e.is_timeout() {
@@ -415,8 +381,7 @@ impl LLMClient for AnthropicClient {
                 } else {
                     RStructorError::HttpError(e)
                 }
-            })?
-        };
+            })?;
 
         // Parse the response
         if !response.status().is_success() {
