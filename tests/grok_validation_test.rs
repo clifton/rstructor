@@ -73,7 +73,7 @@ mod grok_validation_tests {
         // skip full API validation if no API key is available
         // Test with empty string to use XAI_API_KEY env var
         let client = match GrokClient::from_env() {
-            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0).build(),
+            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0),
             Err(_) => {
                 println!("Skipping Grok API test (no API key found)");
                 // Just test the validation logic directly
@@ -211,10 +211,7 @@ mod grok_validation_tests {
         // This test demonstrates successful validation with reasonable data
         // Test with empty string to use XAI_API_KEY env var
         let client = match GrokClient::from_env() {
-            Ok(client) => client
-                .model(GrokModel::Grok4)
-                .temperature(0.0) // Use deterministic temperature for consistent results
-                .build(),
+            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0), // Use deterministic temperature for consistent results
             Err(_) => {
                 println!("Skipping Grok API test (no API key found)");
                 // Create a valid product object to test validation directly

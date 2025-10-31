@@ -70,8 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAIClient::new(api_key)?
         .model(OpenAIModel::Gpt4OMini)
         .temperature(0.0)
-        .timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
-        .build();
+        .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 
     // Generate structured information with a simple prompt
     // For production use, prefer generate_struct_with_retry for automatic error recovery
@@ -466,32 +465,28 @@ let openai_client = OpenAIClient::new(openai_api_key)?
     .model(OpenAIModel::Gpt5)
     .temperature(0.2)
     .max_tokens(1500)
-    .timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
-    .build();
+    .timeout(Duration::from_secs(60));  // Optional: set 60 second timeout
 
 // Using Anthropic
 let anthropic_client = AnthropicClient::new(anthropic_api_key)?
     .model(AnthropicModel::ClaudeSonnet4)
     .temperature(0.0)
     .max_tokens(2000)
-    .timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
-    .build();
+    .timeout(Duration::from_secs(60));  // Optional: set 60 second timeout
 
 // Using Grok (xAI) - reads from XAI_API_KEY environment variable
 let grok_client = GrokClient::from_env()?  // Reads from XAI_API_KEY env var
     .model(GrokModel::Grok4)
     .temperature(0.0)
     .max_tokens(1500)
-    .timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
-    .build();
+    .timeout(Duration::from_secs(60));  // Optional: set 60 second timeout
 
 // Using Gemini (Google) - reads from GEMINI_API_KEY environment variable
 let gemini_client = GeminiClient::from_env()?  // Reads from GEMINI_API_KEY env var
     .model(GeminiModel::Gemini25Flash)
     .temperature(0.0)
     .max_tokens(1500)
-    .timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
-    .build();
+    .timeout(Duration::from_secs(60));  // Optional: set 60 second timeout
 ```
 
 ### Configuring Request Timeouts
@@ -504,8 +499,7 @@ use std::time::Duration;
 let client = OpenAIClient::new(api_key)?
     .model(OpenAIModel::Gpt4O)
     .temperature(0.0)
-    .timeout(Duration::from_secs(30))  // Set 30 second timeout
-    .build();
+    .timeout(Duration::from_secs(30));  // Set 30 second timeout
 ```
 
 **Timeout Behavior:**

@@ -1,4 +1,5 @@
 pub mod client;
+mod utils;
 
 #[cfg(feature = "anthropic")]
 pub mod anthropic;
@@ -10,3 +11,4 @@ pub mod grok;
 pub mod openai;
 
 pub use client::LLMClient;
+pub(crate) use utils::{check_response_status, extract_json_from_markdown, handle_http_error};

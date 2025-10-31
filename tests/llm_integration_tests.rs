@@ -82,7 +82,7 @@ mod llm_integration_tests {
         };
 
         let client = match OpenAIClient::new(api_key) {
-            Ok(client) => client.model(OpenAIModel::Gpt4O).temperature(0.0).build(),
+            Ok(client) => client.model(OpenAIModel::Gpt4O).temperature(0.0),
             Err(e) => {
                 println!("Skipping test: Failed to create OpenAI client: {:?}", e);
                 return;
@@ -127,8 +127,7 @@ mod llm_integration_tests {
         let client = match AnthropicClient::new(api_key) {
             Ok(client) => client
                 .model(AnthropicModel::ClaudeSonnet45)
-                .temperature(0.0)
-                .build(),
+                .temperature(0.0),
             Err(e) => {
                 println!("Skipping test: Failed to create Anthropic client: {:?}", e);
                 return;
@@ -164,7 +163,7 @@ mod llm_integration_tests {
         // Skip test if API key is not available
         // Read from XAI_API_KEY env var
         let client = match GrokClient::from_env() {
-            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0).build(),
+            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0),
             Err(e) => {
                 println!(
                     "Skipping test: Failed to create Grok client (XAI_API_KEY not set): {:?}",
@@ -203,10 +202,7 @@ mod llm_integration_tests {
         // Skip test if API key is not available
         // Read from GEMINI_API_KEY env var
         let client = match GeminiClient::from_env() {
-            Ok(client) => client
-                .model(GeminiModel::Gemini25Flash)
-                .temperature(0.0)
-                .build(),
+            Ok(client) => client.model(GeminiModel::Gemini25Flash).temperature(0.0),
             Err(e) => {
                 println!(
                     "Skipping test: Failed to create Gemini client (GEMINI_API_KEY not set): {:?}",

@@ -29,8 +29,7 @@
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     // Create a client
-///     let client = OpenAIClient::new("your-openai-api-key")?
-///         .build();
+///     let client = OpenAIClient::new("your-openai-api-key")?;
 ///
 ///     // Generate a structured response
 ///     let person: Person = client.generate_struct("Describe a fictional person").await?;
