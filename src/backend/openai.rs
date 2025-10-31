@@ -267,12 +267,13 @@ impl OpenAIClient {
         self.config.timeout = Some(timeout);
 
         // Rebuild reqwest client with timeout immediately
-        let mut client_builder = reqwest::Client::builder();
-        client_builder = client_builder.timeout(timeout);
-        self.client = client_builder.build().unwrap_or_else(|e| {
-            warn!(error = %e, "Failed to build reqwest client with timeout, using default");
-            reqwest::Client::new()
-        });
+        self.client = reqwest::Client::builder()
+            .timeout(timeout)
+            .build()
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "Failed to build reqwest client with timeout, using default");
+                reqwest::Client::new()
+            });
 
         self
     }
