@@ -26,8 +26,9 @@ use crate::model::Instructor;
 ///   - Anthropic: `ANTHROPIC_API_KEY`
 ///   - Grok: `XAI_API_KEY`
 ///   - Gemini: `GEMINI_API_KEY`
-/// - Builder methods: `model()`, `temperature()`, `max_tokens()`, `timeout()`, `build()`
+/// - Builder methods: `model()`, `temperature()`, `max_tokens()`, `timeout()`
 /// - All clients validate `max_tokens >= 1` to avoid API errors
+/// - Timeout is applied immediately when `timeout()` is called - no need to call `build()`
 ///
 /// # Examples
 ///
@@ -51,8 +52,7 @@ use crate::model::Instructor;
 /// let client = OpenAIClient::new("your-openai-api-key")?
 ///     .model(OpenAIModel::Gpt4OMini)
 ///     .temperature(0.0)
-///     .timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
-///     .build();
+///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///
 /// // Generate a structured response
 /// let prompt = "Describe the movie Inception";
@@ -85,8 +85,7 @@ use crate::model::Instructor;
 /// let client = AnthropicClient::new("your-anthropic-api-key")?
 ///     .model(AnthropicModel::ClaudeSonnet4)
 ///     .temperature(0.0)
-///     .timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
-///     .build();
+///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///
 /// // Generate a structured response
 /// let prompt = "Write a short review of the movie The Matrix";
@@ -147,8 +146,7 @@ pub trait LLMClient {
     /// }
     ///
     /// let client = OpenAIClient::new("your-api-key")?
-    ///     .model(OpenAIModel::Gpt4O)
-    ///     .build();
+    ///     .model(OpenAIModel::Gpt4O);
     ///
     /// // This will automatically retry up to 3 times if validation fails
     /// let recipe = client.generate_struct_with_retry::<Recipe>(

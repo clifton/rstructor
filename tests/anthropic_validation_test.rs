@@ -96,8 +96,7 @@ mod anthropic_validation_tests {
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
             .model(AnthropicModel::ClaudeSonnet45)
-            .temperature(0.0) // Use deterministic output
-            .build();
+            .temperature(0.0); // Use deterministic output
 
         // First get a valid weather response
         let prompt = "What is the current weather in New York City?";
@@ -228,8 +227,7 @@ mod anthropic_validation_tests {
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
             .model(AnthropicModel::ClaudeSonnet45)
-            .temperature(0.0) // Use deterministic temperature for consistent results
-            .build();
+            .temperature(0.0); // Use deterministic temperature for consistent results
 
         // Normal prompt asking for weather in a real city
         let prompt = "What's the weather like in Paris today? Use realistic values.";

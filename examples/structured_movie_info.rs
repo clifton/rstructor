@@ -82,8 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt4OMini)
-            .temperature(0.0)
-            .build();
+            .temperature(0.0);
 
         match client
             .generate_struct_with_retry::<Movie>(prompt, Some(3), Some(true))
@@ -110,8 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let client = AnthropicClient::new(api_key)?
             .model(AnthropicModel::ClaudeSonnet4) // Best price/performance model
-            .temperature(0.0)
-            .build();
+            .temperature(0.0);
 
         match client
             .generate_struct_with_retry::<Movie>(prompt, Some(3), Some(true))

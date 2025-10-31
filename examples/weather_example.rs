@@ -78,8 +78,7 @@ async fn main() -> rstructor::Result<()> {
         // Create an OpenAI client
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt4OMini)
-            .temperature(0.0)
-            .build();
+            .temperature(0.0);
 
         // Define a prompt
         let prompt = "What's the weather like in Paris right now?";

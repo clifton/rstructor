@@ -190,8 +190,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
 
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt5) // More capable model for complex nested structures
-            .temperature(0.2)
-            .build();
+            .temperature(0.2);
 
         // Use more retries for complex nested structures (arrays of objects)
         let recipe: Recipe = client
@@ -205,8 +204,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
 
         let client = AnthropicClient::new(api_key)?
             .model(AnthropicModel::ClaudeSonnet4) // Using more capable model for complex structure
-            .temperature(0.2)
-            .build();
+            .temperature(0.2);
 
         // Use more retries for complex nested structures (arrays of objects)
         let recipe: Recipe = client

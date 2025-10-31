@@ -134,8 +134,7 @@ impl GeminiClient {
     /// ```no_run
     /// # use rstructor::GeminiClient;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = GeminiClient::new("your-gemini-api-key")?
-    ///     .build();
+    /// let client = GeminiClient::new("your-gemini-api-key")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -177,8 +176,7 @@ impl GeminiClient {
     /// ```no_run
     /// # use rstructor::GeminiClient;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = GeminiClient::from_env()?
-    ///     .build();
+    /// let client = GeminiClient::from_env()?;
     /// # Ok(())
     /// # }
     /// ```
@@ -254,8 +252,7 @@ impl GeminiClient {
     /// let client = GeminiClient::new("your-api-key")?
     ///     .model(GeminiModel::Gemini25Flash)
     ///     .temperature(0.0)
-    ///     .timeout(Duration::from_secs(30))  // 30 second timeout
-    ///     .build();
+    ///     .timeout(Duration::from_secs(30));  // 30 second timeout
     /// # Ok(())
     /// # }
     /// ```
@@ -267,25 +264,10 @@ impl GeminiClient {
             "Setting timeout"
         );
         self.config.timeout = Some(timeout);
-        self
-    }
 
-    /// Build the client (chainable after configuration)
-    #[instrument(skip(self))]
-    pub fn build(mut self) -> Self {
-        info!(
-            model = ?self.config.model,
-            temperature = self.config.temperature,
-            max_tokens = ?self.config.max_tokens,
-            timeout = ?self.config.timeout,
-            "Gemini client configuration complete"
-        );
-
-        // Configure reqwest client with timeout if specified
+        // Rebuild reqwest client with timeout immediately
         let mut client_builder = reqwest::Client::builder();
-        if let Some(timeout) = self.config.timeout {
-            client_builder = client_builder.timeout(timeout);
-        }
+        client_builder = client_builder.timeout(timeout);
         self.client = client_builder.build().unwrap_or_else(|e| {
             warn!(error = %e, "Failed to build reqwest client with timeout, using default");
             reqwest::Client::new()
