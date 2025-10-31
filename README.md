@@ -17,8 +17,9 @@ Think of it as the Rust equivalent of [Instructor + Pydantic](https://github.com
 - **🔄 JSON Schema Generation**: Auto-generates JSON Schema from your Rust types
 - **✅ Built-in Validation**: Type checking plus custom business rule validation
 - **🔌 Multiple LLM Providers**: Support for OpenAI and Anthropic, with an extensible backend system
-- **🧩 Complex Data Structures**: Support for nested objects, arrays, and optional fields
-- **🔍 Custom Validation Rules**: Add domain-specific validation for reliable results
+- **🧩 Complex Data Structures**: Support for nested objects, arrays, optional fields, and deeply nested enums
+- **🧠 Schema Fidelity**: Heuristic-free JSON Schema generation that preserves nested struct and enum detail
+- **🔍 Custom Validation Rules**: Add domain-specific validation with automatically detected `validate` methods
 - **🔁 Async API**: Fully asynchronous API for efficient operations
 - **⚙️ Builder Pattern**: Fluent API for configuring LLM clients
 - **📊 Feature Flags**: Optional backends via feature flags
@@ -165,6 +166,9 @@ impl Movie {
         Ok(())
     }
 }
+
+// The derive macro automatically wires this method into the generated implementation,
+// so you won't see `dead_code` warnings even if the method is only called by RStructor.
 ```
 
 ### Complex Nested Structures
@@ -304,6 +308,37 @@ enum PaymentMethod {
 // Usage:
 // let user_status: UserStatus = client.generate_struct("What's the user's status?").await?;
 ```
+
+#### Nested Enums Across Structs
+
+Enums can be freely nested inside other enums and structs—`#[derive(Instructor)]` now
+generates the correct schema without requiring manual `SchemaType` implementations:
+
+```rust
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+enum TaskState {
+    #[llm(description = "Task is pending with a priority level")]
+    Pending { priority: Priority },
+    #[llm(description = "Task is in progress")]
+    InProgress { priority: Priority, status: Status },
+    #[llm(description = "Task is completed")]
+    Completed { status: Status },
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Task {
+    #[llm(description = "Task title")]
+    title: String,
+
+    #[llm(description = "Current task state with nested enums")]
+    state: TaskState,
+}
+
+// Works automatically – TaskState::schema() includes the nested enum structure.
+```
+
+See `examples/nested_enum_example.rs` for a complete runnable walkthrough that
+also exercises deserialization of nested enum variants.
 
 When serialized to JSON, these enum variants with data become tagged unions:
 
@@ -634,8 +669,10 @@ See the `examples/` directory for complete, working examples:
 - `enum_with_data_example.rs`: Working with enums that have associated data (tagged unions)
 - `event_planner.rs`: Interactive event planning with user input
 - `weather_example.rs`: Simple model with validation demonstration
+- `validation_example.rs`: Demonstrates custom validation without dead code warnings
 - `custom_type_example.rs`: Using custom types like dates and UUIDs with JSON Schema format support
 - `logging_example.rs`: Demonstrates tracing integration with custom log levels
+- `nested_enum_example.rs`: Shows automatic schema generation for nested enums inside structs
 
 ## ▶️ Running the Examples
 
@@ -659,8 +696,6 @@ RStructor currently focuses on single-turn, synchronous structured output genera
 - **System Messages**: Explicit system prompts for role-based interactions
 - **Response Modes**: Different validation strategies (strict, partial, etc.)
 - **Rate Limiting**: Built-in rate limit handling and backoff strategies
-
-For a detailed analysis of missing features compared to Python Instructor, see [FEATURE_ANALYSIS.md](FEATURE_ANALYSIS.md).
 
 ## 🛣️ Roadmap
 
