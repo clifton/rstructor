@@ -16,8 +16,18 @@ use crate::model::Instructor;
 /// The library includes implementations for popular LLM providers:
 /// - `OpenAIClient` for OpenAI's GPT models (gpt-3.5-turbo, gpt-4, etc.)
 /// - `AnthropicClient` for Anthropic's Claude models
-/// - `GrokClient` for xAI's Grok models (uses `XAI_API_KEY` env var by default)
-/// - `GeminiClient` for Google's Gemini models (uses `GEMINI_API_KEY` env var by default)
+/// - `GrokClient` for xAI's Grok models
+/// - `GeminiClient` for Google's Gemini models
+///
+/// All clients implement a consistent interface:
+/// - `new(api_key)` - Create client with explicit API key (rejects empty strings)
+/// - `from_env()` - Create client from environment variable (required by this trait):
+///   - OpenAI: `OPENAI_API_KEY`
+///   - Anthropic: `ANTHROPIC_API_KEY`
+///   - Grok: `XAI_API_KEY`
+///   - Gemini: `GEMINI_API_KEY`
+/// - Builder methods: `model()`, `temperature()`, `max_tokens()`, `with_timeout()`, `build()`
+/// - All clients validate `max_tokens >= 1` to avoid API errors
 ///
 /// # Examples
 ///
@@ -263,4 +273,20 @@ pub trait LLMClient {
     /// This method provides a simpler interface for getting raw text completions
     /// from the LLM without enforcing any structure.
     async fn generate(&self, prompt: &str) -> Result<String>;
+
+    /// Create a new client by reading the API key from an environment variable.
+    ///
+    /// This is a required associated function that all `LLMClient` implementations must provide.
+    /// The specific environment variable name depends on the provider:
+    /// - OpenAI: `OPENAI_API_KEY`
+    /// - Anthropic: `ANTHROPIC_API_KEY`
+    /// - Grok: `XAI_API_KEY`
+    /// - Gemini: `GEMINI_API_KEY`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the required environment variable is not set.
+    fn from_env() -> Result<Self>
+    where
+        Self: Sized;
 }

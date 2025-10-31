@@ -245,7 +245,8 @@ impl GrokClient {
     #[instrument(skip(self))]
     pub fn max_tokens(mut self, max: u32) -> Self {
         debug!(previous_max = ?self.config.max_tokens, new_max = max, "Setting max_tokens");
-        self.config.max_tokens = Some(max);
+        // Ensure max_tokens is at least 1 to avoid API errors
+        self.config.max_tokens = Some(max.max(1));
         self
     }
 
@@ -308,6 +309,9 @@ impl GrokClient {
 
 #[async_trait]
 impl LLMClient for GrokClient {
+    fn from_env() -> Result<Self> {
+        Self::from_env()
+    }
     #[instrument(
         name = "grok_generate_struct",
         skip(self, prompt),

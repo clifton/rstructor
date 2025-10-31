@@ -238,7 +238,8 @@ impl GeminiClient {
             new_max_tokens = max_tokens,
             "Setting max_tokens"
         );
-        self.config.max_tokens = Some(max_tokens);
+        // Ensure max_tokens is at least 1 to avoid API errors
+        self.config.max_tokens = Some(max_tokens.max(1));
         self
     }
 
@@ -296,6 +297,9 @@ impl GeminiClient {
 
 #[async_trait]
 impl LLMClient for GeminiClient {
+    fn from_env() -> Result<Self> {
+        Self::from_env()
+    }
     #[instrument(
         name = "gemini_generate_struct",
         skip(self, prompt),
