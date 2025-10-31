@@ -162,8 +162,8 @@ mod llm_integration_tests {
     #[tokio::test]
     async fn test_grok_generate_struct() {
         // Skip test if API key is not available
-        // Test with empty string to use XAI_API_KEY env var
-        let client = match GrokClient::new("") {
+        // Read from XAI_API_KEY env var
+        let client = match GrokClient::from_env() {
             Ok(client) => client.model(GrokModel::Grok4).temperature(0.0).build(),
             Err(e) => {
                 println!(
@@ -201,8 +201,8 @@ mod llm_integration_tests {
     #[tokio::test]
     async fn test_gemini_generate_struct() {
         // Skip test if API key is not available
-        // Test with empty string to use GEMINI_API_KEY env var
-        let client = match GeminiClient::new("") {
+        // Read from GEMINI_API_KEY env var
+        let client = match GeminiClient::from_env() {
             Ok(client) => client
                 .model(GeminiModel::Gemini25Flash)
                 .temperature(0.0)

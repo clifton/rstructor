@@ -477,16 +477,16 @@ let anthropic_client = AnthropicClient::new(anthropic_api_key)?
     .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
 
-// Using Grok (xAI) - automatically uses XAI_API_KEY env var if empty string provided
-let grok_client = GrokClient::new("")?  // Uses XAI_API_KEY env var
+// Using Grok (xAI) - reads from XAI_API_KEY environment variable
+let grok_client = GrokClient::from_env()?  // Reads from XAI_API_KEY env var
     .model(GrokModel::Grok4)
     .temperature(0.0)
     .max_tokens(1500)
     .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
 
-// Using Gemini (Google) - automatically uses GEMINI_API_KEY env var if empty string provided
-let gemini_client = GeminiClient::new("")?  // Uses GEMINI_API_KEY env var
+// Using Gemini (Google) - reads from GEMINI_API_KEY environment variable
+let gemini_client = GeminiClient::from_env()?  // Reads from GEMINI_API_KEY env var
     .model(GeminiModel::Gemini25Flash)
     .temperature(0.0)
     .max_tokens(1500)

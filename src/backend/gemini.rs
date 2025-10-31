@@ -123,17 +123,29 @@ struct CandidatePart {
 }
 
 impl GeminiClient {
-    /// Create a new Gemini client with default configuration
+    /// Create a new Gemini client with the provided API key.
+    ///
+    /// # Arguments
+    ///
+    /// * `api_key` - Your Google Gemini API key
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::GeminiClient;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = GeminiClient::new("your-gemini-api-key")?
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
     #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini25Flash))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
-        let mut api_key = api_key.into();
+        let api_key = api_key.into();
         if api_key.is_empty() {
-            api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
-                RStructorError::ApiError(
-                    "No API key provided and GEMINI_API_KEY environment variable is not set"
-                        .to_string(),
-                )
-            })?;
+            return Err(RStructorError::ApiError(
+                "API key cannot be empty. Use GeminiClient::from_env() to read from GEMINI_API_KEY environment variable.".to_string(),
+            ));
         }
 
         let config = GeminiConfig {
@@ -149,6 +161,46 @@ impl GeminiClient {
         info!(
             model = %config.model.as_str(),
             "Created Gemini client"
+        );
+
+        Ok(Self { config, client })
+    }
+
+    /// Create a new Gemini client by reading the API key from the `GEMINI_API_KEY` environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `GEMINI_API_KEY` is not set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::GeminiClient;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = GeminiClient::from_env()?
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini25Flash))]
+    pub fn from_env() -> Result<Self> {
+        let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
+            RStructorError::ApiError("GEMINI_API_KEY environment variable is not set".to_string())
+        })?;
+
+        let config = GeminiConfig {
+            api_key,
+            model: Model::Gemini25Flash, // Default to Gemini 2.5 Flash (best price/performance for structured outputs)
+            temperature: 0.0,
+            max_tokens: None,
+            timeout: None, // Default: no timeout (uses reqwest's default)
+        };
+
+        let client = reqwest::Client::new();
+
+        info!(
+            model = %config.model.as_str(),
+            "Created Gemini client from environment variable"
         );
 
         Ok(Self { config, client })

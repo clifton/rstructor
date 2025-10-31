@@ -189,7 +189,7 @@ mod timeout_tests {
     async fn test_grok_timeout_configuration() {
         // Test that timeout can be set via builder pattern
         // Test with empty string to use XAI_API_KEY env var
-        let client = match GrokClient::new("") {
+        let client = match GrokClient::from_env() {
             Ok(client) => client
                 .model(GrokModel::Grok4)
                 .temperature(0.0)
@@ -223,7 +223,7 @@ mod timeout_tests {
     async fn test_grok_timeout_chaining() {
         // Test that timeout can be chained with other configuration methods
         // Test with empty string to use XAI_API_KEY env var
-        let _client = match GrokClient::new("") {
+        let _client = match GrokClient::from_env() {
             Ok(client) => client
                 .model(GrokModel::Grok4)
                 .temperature(0.5)
@@ -249,7 +249,7 @@ mod timeout_tests {
     async fn test_grok_no_timeout_default() {
         // Test that default client has no timeout
         // Test with empty string to use XAI_API_KEY env var
-        let _client = match GrokClient::new("") {
+        let _client = match GrokClient::from_env() {
             Ok(client) => client.build(),
             Err(e) => {
                 println!(
@@ -269,7 +269,7 @@ mod timeout_tests {
     async fn test_gemini_timeout_configuration() {
         // Test that timeout can be set via builder pattern
         // Test with empty string to use GEMINI_API_KEY env var
-        let client = match GeminiClient::new("") {
+        let client = match GeminiClient::from_env() {
             Ok(client) => client.build(),
             Err(e) => {
                 println!(
@@ -306,7 +306,7 @@ mod timeout_tests {
     async fn test_gemini_timeout_chaining() {
         // Test that timeout can be chained with other configuration methods
         // Test with empty string to use GEMINI_API_KEY env var
-        let client = match GeminiClient::new("") {
+        let client = match GeminiClient::from_env() {
             Ok(client) => client.build(),
             Err(e) => {
                 println!(
@@ -334,7 +334,7 @@ mod timeout_tests {
     async fn test_gemini_no_timeout_default() {
         // Test that default client has no timeout
         // Test with empty string to use GEMINI_API_KEY env var
-        let _client = match GeminiClient::new("") {
+        let _client = match GeminiClient::from_env() {
             Ok(client) => client.build(),
             Err(e) => {
                 println!(

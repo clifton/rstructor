@@ -117,24 +117,17 @@ struct ChatCompletionResponse {
 }
 
 impl GrokClient {
-    /// Create a new Grok client with default configuration.
+    /// Create a new Grok client with the provided API key.
     ///
-    /// If no API key is provided, attempts to read from the `XAI_API_KEY` environment variable.
+    /// # Arguments
     ///
-    /// # Errors
-    ///
-    /// Returns an error if no API key is provided and `XAI_API_KEY` is not set.
+    /// * `api_key` - Your xAI API key
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # use rstructor::GrokClient;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// // Using environment variable
-    /// let client = GrokClient::new("")?  // Empty string will use XAI_API_KEY env var
-    ///     .build();
-    ///
-    /// // Or explicitly provide API key
     /// let client = GrokClient::new("your-xai-api-key")?
     ///     .build();
     /// # Ok(())
@@ -142,19 +135,54 @@ impl GrokClient {
     /// ```
     #[instrument(name = "grok_client_new", skip(api_key), fields(model = ?Model::Grok4))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
-        let mut api_key = api_key.into();
-
-        // If API key is empty, try to read from environment variable
+        let api_key = api_key.into();
         if api_key.is_empty() {
-            api_key = std::env::var("XAI_API_KEY").map_err(|_| {
-                RStructorError::ApiError(
-                    "No API key provided and XAI_API_KEY environment variable is not set"
-                        .to_string(),
-                )
-            })?;
+            return Err(RStructorError::ApiError(
+                "API key cannot be empty. Use GrokClient::from_env() to read from XAI_API_KEY environment variable.".to_string(),
+            ));
         }
 
         info!("Creating new Grok client");
+        trace!("API key length: {}", api_key.len());
+
+        let config = GrokConfig {
+            api_key,
+            model: Model::Grok4, // Default to Grok-4 (latest flagship model)
+            temperature: 0.0,
+            max_tokens: None,
+            timeout: None, // Default: no timeout (uses reqwest's default)
+        };
+
+        debug!("Grok client created with default configuration");
+        Ok(Self {
+            config,
+            client: reqwest::Client::new(),
+        })
+    }
+
+    /// Create a new Grok client by reading the API key from the `XAI_API_KEY` environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `XAI_API_KEY` is not set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::GrokClient;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = GrokClient::from_env()?
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(name = "grok_client_from_env", fields(model = ?Model::Grok4))]
+    pub fn from_env() -> Result<Self> {
+        let api_key = std::env::var("XAI_API_KEY").map_err(|_| {
+            RStructorError::ApiError("XAI_API_KEY environment variable is not set".to_string())
+        })?;
+
+        info!("Creating new Grok client from environment variable");
         trace!("API key length: {}", api_key.len());
 
         let config = GrokConfig {
@@ -215,7 +243,7 @@ impl GrokClient {
     /// # use rstructor::GrokClient;
     /// # use std::time::Duration;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = GrokClient::new("")?  // Uses XAI_API_KEY env var
+    /// let client = GrokClient::from_env()?  // Reads from XAI_API_KEY env var
     ///     .with_timeout(Duration::from_secs(30))  // 30 second timeout
     ///     .build();
     /// # Ok(())
