@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::LLMClient;
@@ -35,6 +36,7 @@ pub struct OpenAIConfig {
     pub model: Model,
     pub temperature: f32,
     pub max_tokens: Option<u32>,
+    pub timeout: Option<Duration>,
 }
 
 /// OpenAI client for generating completions
@@ -107,6 +109,7 @@ impl OpenAIClient {
             model: Model::Gpt4O, // Default to GPT-4o
             temperature: 0.0,
             max_tokens: None,
+            timeout: None, // Default: no timeout (uses reqwest's default)
         };
 
         debug!("OpenAI client created with default configuration");
@@ -144,15 +147,59 @@ impl OpenAIClient {
         self
     }
 
+    /// Set the timeout for HTTP requests.
+    ///
+    /// This sets the timeout for both the connection and the entire request.
+    /// The timeout applies to each HTTP request made by the client.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - Timeout duration (e.g., `Duration::from_secs(30)` for 30 seconds)
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::OpenAIClient;
+    /// # use std::time::Duration;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::new("api-key")?
+    ///     .with_timeout(Duration::from_secs(30))  // 30 second timeout
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip(self))]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        debug!(
+            previous_timeout = ?self.config.timeout,
+            new_timeout = ?timeout,
+            "Setting timeout"
+        );
+        self.config.timeout = Some(timeout);
+        self
+    }
+
     /// Build the client (chainable after configuration)
     #[instrument(skip(self))]
-    pub fn build(self) -> Self {
+    pub fn build(mut self) -> Self {
         info!(
             model = ?self.config.model,
             temperature = self.config.temperature,
             max_tokens = ?self.config.max_tokens,
+            timeout = ?self.config.timeout,
             "OpenAI client configuration complete"
         );
+
+        // Configure reqwest client with timeout if specified
+        let mut client_builder = reqwest::Client::builder();
+        if let Some(timeout) = self.config.timeout {
+            client_builder = client_builder.timeout(timeout);
+        }
+        self.client = client_builder.build().unwrap_or_else(|e| {
+            warn!(error = %e, "Failed to build reqwest client with timeout, using default");
+            reqwest::Client::new()
+        });
+
         self
     }
 }
@@ -213,7 +260,12 @@ impl LLMClient for OpenAIClient {
             .await
             .map_err(|e| {
                 error!(error = %e, "HTTP request to OpenAI failed");
-                e
+                // Check if it's a timeout error from reqwest
+                if e.is_timeout() {
+                    RStructorError::Timeout
+                } else {
+                    RStructorError::HttpError(e)
+                }
             })?;
 
         // Parse the response
@@ -359,7 +411,12 @@ impl LLMClient for OpenAIClient {
             .await
             .map_err(|e| {
                 error!(error = %e, "HTTP request to OpenAI failed");
-                e
+                // Check if it's a timeout error from reqwest
+                if e.is_timeout() {
+                    RStructorError::Timeout
+                } else {
+                    RStructorError::HttpError(e)
+                }
             })?;
 
         // Parse the response
