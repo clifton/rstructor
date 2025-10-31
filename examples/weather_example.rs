@@ -96,9 +96,7 @@ async fn main() -> rstructor::Result<()> {
                 }
 
                 // Weather comes back validated!
-                println!(
-                    "\nNote: The data has already been validated by the materialize method!"
-                );
+                println!("\nNote: The data has already been validated by the materialize method!");
             }
             Err(e) => println!("Error getting weather from OpenAI: {}", e),
         }
