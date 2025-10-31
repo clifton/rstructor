@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::backend::{LLMClient, check_response_status, handle_http_error};
+use crate::backend::{LLMClient, check_response_status, generate_with_retry, handle_http_error};
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 
@@ -68,6 +68,8 @@ pub struct OpenAIConfig {
     pub temperature: f32,
     pub max_tokens: Option<u32>,
     pub timeout: Option<Duration>,
+    pub max_retries: Option<usize>,
+    pub include_error_feedback: Option<bool>,
 }
 
 /// OpenAI client for generating completions
@@ -159,7 +161,9 @@ impl OpenAIClient {
             model: Model::Gpt5ChatLatest, // Default to GPT-5 Chat Latest (latest flagship)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None, // Default: no timeout (uses reqwest's default)
+            timeout: None,     // Default: no timeout (uses reqwest's default)
+            max_retries: None, // Default: no retries (configure via .max_retries())
+            include_error_feedback: None, // Default: include error feedback in retry prompts
         };
 
         debug!("OpenAI client created with default configuration");
@@ -198,7 +202,9 @@ impl OpenAIClient {
             model: Model::Gpt5ChatLatest, // Default to GPT-5 Chat Latest (latest flagship)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None, // Default: no timeout (uses reqwest's default)
+            timeout: None,     // Default: no timeout (uses reqwest's default)
+            max_retries: None, // Default: no retries (configure via .max_retries())
+            include_error_feedback: None, // Default: include error feedback in retry prompts
         };
 
         debug!("OpenAI client created with default configuration");
@@ -219,21 +225,9 @@ crate::impl_client_builder_methods! {
     provider_name: "OpenAI"
 }
 
-#[async_trait]
-impl LLMClient for OpenAIClient {
-    fn from_env() -> Result<Self> {
-        Self::from_env()
-    }
-    #[instrument(
-        name = "openai_generate_struct",
-        skip(self, prompt),
-        fields(
-            type_name = std::any::type_name::<T>(),
-            model = %self.config.model.as_str(),
-            prompt_len = prompt.len()
-        )
-    )]
-    async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
+impl OpenAIClient {
+    /// Internal implementation of generate_struct (without retry logic)
+    async fn generate_struct_internal<T>(&self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -339,16 +333,18 @@ impl LLMClient for OpenAIClient {
                 );
 
                 // Try to extract JSON from the content (assuming the model might have returned JSON directly)
-                let result: T = match serde_json::from_str(content) {
+                use crate::backend::extract_json_from_markdown;
+                let json_content = extract_json_from_markdown(content);
+                let result: T = match serde_json::from_str(&json_content) {
                     Ok(parsed) => parsed,
                     Err(e) => {
                         let error_msg = format!(
                             "Failed to parse response content: {}\nPartial JSON: {}",
-                            e, content
+                            e, &json_content
                         );
                         error!(
                             error = %e,
-                            content = %content,
+                            content = %json_content,
                             "Failed to parse content as JSON"
                         );
                         return Err(RStructorError::ValidationError(error_msg));
@@ -370,6 +366,69 @@ impl LLMClient for OpenAIClient {
                 ))
             }
         }
+    }
+}
+
+#[async_trait]
+impl LLMClient for OpenAIClient {
+    fn from_env() -> Result<Self> {
+        Self::from_env()
+    }
+    #[instrument(
+        name = "openai_generate_struct",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        generate_with_retry(
+            |prompt_owned: String| {
+                let this = self;
+                async move { this.generate_struct_internal::<T>(&prompt_owned).await }
+            },
+            prompt,
+            self.config.max_retries,
+            self.config.include_error_feedback,
+        )
+        .await
+    }
+
+    #[allow(deprecated)]
+    #[instrument(
+        name = "openai_generate_struct_with_retry",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            max_retries = ?max_retries,
+            include_error_feedback = ?include_error_feedback,
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn generate_struct_with_retry<T>(
+        &self,
+        prompt: &str,
+        max_retries: Option<usize>,
+        include_error_feedback: Option<bool>,
+    ) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        generate_with_retry(
+            |prompt_owned: String| {
+                let this = self;
+                async move { this.generate_struct_internal::<T>(&prompt_owned).await }
+            },
+            prompt,
+            max_retries,
+            include_error_feedback,
+        )
+        .await
     }
 
     #[instrument(

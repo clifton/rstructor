@@ -150,7 +150,9 @@ async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> 
     // Create OpenAI client
     let client = OpenAIClient::new(api_key)?
         .model(OpenAIModel::Gpt4O) // Use GPT-4o for better recipes
-        .temperature(0.1); // Lower temperature for more consistent results
+        .temperature(0.1) // Lower temperature for more consistent results
+        .max_retries(3)
+        .include_error_feedback(true);
 
     // Generate the recipe with a structured prompt
     let prompt = format!(
@@ -176,9 +178,7 @@ async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> 
     );
 
     // Use the library's built-in retry functionality
-    client
-        .generate_struct_with_retry::<Recipe>(&prompt, Some(3), Some(true))
-        .await
+    client.generate_struct::<Recipe>(&prompt).await
 }
 
 async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recipe> {
@@ -190,7 +190,9 @@ async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recip
     // Create Anthropic client
     let client = AnthropicClient::new(api_key)?
         .model(AnthropicModel::ClaudeSonnet45) // Use Claude Sonnet 4.5 for better recipes
-        .temperature(0.1); // Lower temperature for more consistent results
+        .temperature(0.1) // Lower temperature for more consistent results
+        .max_retries(3)
+        .include_error_feedback(true);
 
     // Generate the recipe with a structured prompt
     let prompt = format!(
@@ -216,9 +218,7 @@ async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recip
     );
 
     // Use the library's built-in retry functionality
-    client
-        .generate_struct_with_retry::<Recipe>(&prompt, Some(3), Some(true))
-        .await
+    client.generate_struct::<Recipe>(&prompt).await
 }
 
 fn print_recipe(recipe: &Recipe) {

@@ -259,10 +259,7 @@ Based on the following description, create a detailed event plan:\n\n{}",
         description
     );
 
-    // Use retry with up to 5 attempts if validation fails
-    client
-        .generate_struct_with_retry::<EventPlan>(&prompt, Some(5), Some(true))
-        .await
+    client.generate_struct::<EventPlan>(&prompt).await
 }
 
 #[tokio::main]
@@ -301,7 +298,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt5)
-            .temperature(0.3);
+            .temperature(0.3)
+            .max_retries(5)
+            .include_error_feedback(true);
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),
@@ -317,7 +316,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         let client = AnthropicClient::new(api_key)?
             .model(AnthropicModel::ClaudeSonnet4)
-            .temperature(0.3);
+            .temperature(0.3)
+            .max_retries(5)
+            .include_error_feedback(true);
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),

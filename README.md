@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 
     // Generate structured information with a simple prompt
-    // For production use, prefer generate_struct_with_retry for automatic error recovery
+    // For production use, configure retries with .max_retries() / .include_error_feedback()
     let movie: Movie = client.generate_struct("Tell me about the movie Inception").await?;
 
     // Use the structured data
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Production Example with Automatic Retry
 
-For production use, prefer `generate_struct_with_retry` which automatically retries on validation errors:
+For production use, configure the client with retry options so it automatically retries on validation errors:
 
 ```rust
 use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
@@ -110,14 +110,12 @@ struct Movie {
     rating: f32,
 }
 
-// Generate with automatic retry (recommended for production)
-let movie: Movie = client
-    .generate_struct_with_retry::<Movie>(
-        "Tell me about Inception",
-        Some(3),    // max retries
-        Some(true),  // include error feedback in retries
-    )
-    .await?;
+// Configure the client to automatically retry validation errors
+let client = client
+    .max_retries(3)      // retry up to 3 times on validation errors
+    .include_error_feedback(true); // include validation feedback in retry prompts
+
+let movie: Movie = client.generate_struct::<Movie>("Tell me about Inception").await?;
 ```
 
 ### Basic Example with Validation
@@ -648,7 +646,7 @@ pub trait LLMClient {
         &self,
         prompt: &str,
         max_retries: Option<usize>,
-        include_errors: Option<bool>,
+        include_error_feedback: Option<bool>,
     ) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static;
@@ -658,7 +656,7 @@ pub trait LLMClient {
 }
 ```
 
-**Note**: For production applications, prefer `generate_struct_with_retry` over `generate_struct` as it automatically handles validation errors by retrying with error feedback. This significantly improves success rates with complex schemas.
+**Note**: For production applications, configure the client with `.max_retries()` and `.include_error_feedback()` and call `generate_struct()`. The `generate_struct_with_retry` method remains for backward compatibility but is deprecated in favor of builder-based configuration.
 
 ### Supported Attributes
 

@@ -142,7 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a client with higher temperature to increase chances of validation errors
     let client = AnthropicClient::new(api_key)?
         .model(AnthropicModel::ClaudeSonnet4)
-        .temperature(0.7); // Higher temperature = more creativity = more validation errors
+        .temperature(0.7) // Higher temperature = more creativity = more validation errors
+        .max_retries(3)
+        .include_error_feedback(true);
 
     println!("\nSending request to Anthropic API with increased randomness...");
     println!("Will retry up to 3 times on validation errors with detailed logging.\n");
@@ -160,9 +162,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
    ALL THREE FIELDS ARE REQUIRED FOR EACH FORECAST ITEM.";
 
     // This line will be logged with spans and info - using 3 retries for more chances to see retry logs
-    let forecast_result = client
-        .generate_struct_with_retry::<WeatherForecast>(prompt, Some(3), Some(true))
-        .await;
+    let forecast_result = client.generate_struct::<WeatherForecast>(prompt).await;
 
     match forecast_result {
         Ok(forecast) => {

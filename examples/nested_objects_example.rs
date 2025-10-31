@@ -190,12 +190,11 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
 
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt5) // More capable model for complex nested structures
-            .temperature(0.2);
+            .temperature(0.2)
+            .max_retries(5)
+            .include_error_feedback(true);
 
-        // Use more retries for complex nested structures (arrays of objects)
-        let recipe: Recipe = client
-            .generate_struct_with_retry(prompt, Some(5), Some(true))
-            .await?;
+        let recipe: Recipe = client.generate_struct(prompt).await?;
 
         // Print the generated recipe
         print_recipe(&recipe);
@@ -204,12 +203,11 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
 
         let client = AnthropicClient::new(api_key)?
             .model(AnthropicModel::ClaudeSonnet4) // Using more capable model for complex structure
-            .temperature(0.2);
+            .temperature(0.2)
+            .max_retries(5)
+            .include_error_feedback(true);
 
-        // Use more retries for complex nested structures (arrays of objects)
-        let recipe: Recipe = client
-            .generate_struct_with_retry(prompt, Some(5), Some(true))
-            .await?;
+        let recipe: Recipe = client.generate_struct(prompt).await?;
 
         // Print the generated recipe
         print_recipe(&recipe);
