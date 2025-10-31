@@ -58,12 +58,30 @@
 
 ### Update Process
 
-1. **Before adding/updating models**: Check the official documentation links above for the latest model identifiers
-2. **When updating**: Add new models to the appropriate enum (`Model`, `AnthropicModel`, `GrokModel`) in the respective backend files
-3. **Model identifiers**: Use the exact API model identifiers from the official documentation (e.g., `gpt-4o`, `claude-3-5-sonnet-20240620`, `grok-2-1212`)
-4. **Default models**: Update default model selection to use the latest recommended model when appropriate
-5. **Documentation**: Update rustdoc comments to reference the official documentation links
-6. **Testing**: Ensure new models work correctly with integration tests
+**CRITICAL RULES:**
+1. **ALWAYS use API endpoints to get current models** - Never guess or rely on web search. Use the official API endpoints:
+   - **OpenAI**: `GET https://api.openai.com/v1/models` (requires `Authorization: Bearer $OPENAI_API_KEY`)
+   - **Anthropic**: `GET https://api.anthropic.com/v1/models` (requires `x-api-key: $ANTHROPIC_API_KEY` and `anthropic-version: 2023-06-01`)
+   - **xAI (Grok)**: Check `https://docs.x.ai/docs/models` or use their API if available
+2. **NEVER guess model identifiers** - Always get exact model names from API responses or official documentation
+3. **NEVER rely on web search results** - Web search often returns outdated, incorrect, or speculative information
+4. **ALWAYS use exact API identifiers** - Model identifiers must match exactly what the API expects (e.g., `gpt-5-chat-latest`, `claude-sonnet-4-5-20250929`, `grok-4-0709`)
+5. **If API key is not available**: Ask the user to provide the exact model identifiers from the API endpoint, rather than guessing
+6. **Verify date stamps make sense** - If version X.Y is newer than X.Z, its date stamp should be later (e.g., Claude 3.7 date should be after Claude 3.5 date)
+7. **Check for new major versions** - Don't assume only minor version updates; check for major version releases (e.g., Claude 4, GPT-5)
+8. **Verify model name format** - Different providers may use different naming conventions (e.g., `claude-sonnet-4-20250514` vs `claude-4-sonnet-20250514`)
+9. **Filter for chat completion models** - Only include models suitable for chat completions (exclude specialized models like search-api, codex, audio, etc. unless specifically needed)
+
+**Steps:**
+1. **Get current models from API**: Use `curl` or API calls to fetch the latest model list from the provider's `/v1/models` endpoint
+2. **Parse API response**: Extract model `id` fields from the JSON response
+3. **Filter appropriate models**: For chat completions, include main chat models and exclude specialized variants unless needed
+4. **Verify model identifiers**: Ensure date stamps and version numbers are correct (e.g., Claude 3.7 should have a date later than Claude 3.5)
+5. **When updating**: Add new models to the appropriate enum (`Model`, `AnthropicModel`, `GrokModel`) in the respective backend files, ordered newest to oldest
+6. **Remove deprecated models**: Check API response for models that are no longer available and remove them
+7. **Default models**: Update default model selection to use the latest recommended model when appropriate
+8. **Documentation**: Update rustdoc comments to reference the official documentation links
+9. **Testing**: Ensure new models work correctly with integration tests
 
 ### Periodic Review Schedule
 

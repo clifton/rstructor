@@ -317,7 +317,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("\nProcessing your request with Anthropic...\n");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::Claude3Sonnet)
+            .model(AnthropicModel::ClaudeSonnet4)
             .temperature(0.3)
             .build();
 

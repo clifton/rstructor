@@ -98,7 +98,7 @@ mod timeout_tests {
         // Test with a very short timeout (should likely timeout)
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::Claude35Sonnet)
+            .model(AnthropicModel::ClaudeSonnet45)
             .temperature(0.0)
             .with_timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
             .build();
@@ -131,7 +131,7 @@ mod timeout_tests {
 
         let _client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::Claude35Sonnet)
+            .model(AnthropicModel::ClaudeSonnet45)
             .temperature(0.5)
             .max_tokens(100)
             .with_timeout(Duration::from_secs(2)) // 2 second timeout for unit tests

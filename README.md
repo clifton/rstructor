@@ -471,7 +471,7 @@ let openai_client = OpenAIClient::new(openai_api_key)?
 
 // Using Anthropic
 let anthropic_client = AnthropicClient::new(anthropic_api_key)?
-    .model(AnthropicModel::Claude3Sonnet)
+    .model(AnthropicModel::ClaudeSonnet4)
     .temperature(0.0)
     .max_tokens(2000)
     .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout

@@ -14,19 +14,38 @@ use crate::model::Instructor;
 /// [Anthropic Models Documentation](https://docs.anthropic.com/en/docs/about-claude/models/all-models).
 #[derive(Debug, Clone)]
 pub enum AnthropicModel {
+    /// Claude Haiku 4.5 (latest fastest model)
+    ClaudeHaiku45,
+    /// Claude Sonnet 4.5 (latest balanced model)
+    ClaudeSonnet45,
+    /// Claude Opus 4.1 (enhanced reasoning capabilities)
+    ClaudeOpus41,
+    /// Claude Opus 4 (high-intelligence model)
+    ClaudeOpus4,
+    /// Claude Sonnet 4 (balanced performance model)
+    ClaudeSonnet4,
+    /// Claude Sonnet 3.7 (enhanced reasoning)
+    Claude37Sonnet,
+    /// Claude Haiku 3.5 (fast, cost-effective model)
+    Claude35Haiku,
+    /// Claude Haiku 3 (fast, cost-effective model)
     Claude3Haiku,
-    Claude3Sonnet,
+    /// Claude Opus 3 (most capable model for complex tasks)
     Claude3Opus,
-    Claude35Sonnet, // Added Claude 3.5 Sonnet
 }
 
 impl AnthropicModel {
     pub fn as_str(&self) -> &'static str {
         match self {
+            AnthropicModel::ClaudeHaiku45 => "claude-haiku-4-5-20251001",
+            AnthropicModel::ClaudeSonnet45 => "claude-sonnet-4-5-20250929",
+            AnthropicModel::ClaudeOpus41 => "claude-opus-4-1-20250805",
+            AnthropicModel::ClaudeOpus4 => "claude-opus-4-20250514",
+            AnthropicModel::ClaudeSonnet4 => "claude-sonnet-4-20250514",
+            AnthropicModel::Claude37Sonnet => "claude-3-7-sonnet-20250219",
+            AnthropicModel::Claude35Haiku => "claude-3-5-haiku-20241022",
             AnthropicModel::Claude3Haiku => "claude-3-haiku-20240307",
-            AnthropicModel::Claude3Sonnet => "claude-3-sonnet-20240229",
             AnthropicModel::Claude3Opus => "claude-3-opus-20240229",
-            AnthropicModel::Claude35Sonnet => "claude-3-5-sonnet-20240620", // Claude 3.5 Sonnet model ID
         }
     }
 }
@@ -83,7 +102,7 @@ struct CompletionResponse {
 
 impl AnthropicClient {
     /// Create a new Anthropic client with default configuration
-    #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::Claude35Sonnet))]
+    #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::ClaudeSonnet45))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         info!("Creating new Anthropic client");
@@ -91,7 +110,7 @@ impl AnthropicClient {
 
         let config = AnthropicConfig {
             api_key,
-            model: AnthropicModel::Claude35Sonnet, // Default to Claude 3.5 Sonnet
+            model: AnthropicModel::ClaudeSonnet45, // Default to Claude Sonnet 4.5 (latest flagship)
             temperature: 0.0,
             max_tokens: None,
             timeout: None, // Default: no timeout (uses reqwest's default)

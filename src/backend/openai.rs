@@ -15,19 +15,47 @@ use crate::model::Instructor;
 /// [OpenAI Models Documentation](https://platform.openai.com/docs/models).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Model {
-    Gpt35Turbo,
-    Gpt4,
-    Gpt4Turbo,
+    /// GPT-5 Chat Latest (latest GPT-5 model for chat)
+    Gpt5ChatLatest,
+    /// GPT-5 Pro (most capable GPT-5 model)
+    Gpt5Pro,
+    /// GPT-5 (standard GPT-5 model)
+    Gpt5,
+    /// GPT-5 Mini (smaller, faster GPT-5 model)
+    Gpt5Mini,
+    /// GPT-4o (latest GPT-4 model, optimized for chat)
     Gpt4O,
+    /// GPT-4o Mini (smaller, faster, more cost-effective version)
+    Gpt4OMini,
+    /// GPT-4 Turbo (high-intelligence model)
+    Gpt4Turbo,
+    /// GPT-4 (standard GPT-4 model)
+    Gpt4,
+    /// GPT-3.5 Turbo (efficient model for simple tasks)
+    Gpt35Turbo,
+    /// O1 (reasoning model optimized for complex problem-solving)
+    O1,
+    /// O1 Mini (smaller reasoning model)
+    O1Mini,
+    /// O1 Pro (most capable reasoning model)
+    O1Pro,
 }
 
 impl Model {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Model::Gpt35Turbo => "gpt-3.5-turbo",
-            Model::Gpt4 => "gpt-4",
-            Model::Gpt4Turbo => "gpt-4-turbo-preview",
+            Model::Gpt5ChatLatest => "gpt-5-chat-latest",
+            Model::Gpt5Pro => "gpt-5-pro",
+            Model::Gpt5 => "gpt-5",
+            Model::Gpt5Mini => "gpt-5-mini",
             Model::Gpt4O => "gpt-4o",
+            Model::Gpt4OMini => "gpt-4o-mini",
+            Model::Gpt4Turbo => "gpt-4-turbo",
+            Model::Gpt4 => "gpt-4",
+            Model::Gpt35Turbo => "gpt-3.5-turbo",
+            Model::O1 => "o1",
+            Model::O1Mini => "o1-mini",
+            Model::O1Pro => "o1-pro",
         }
     }
 }
@@ -101,7 +129,7 @@ struct ChatCompletionResponse {
 
 impl OpenAIClient {
     /// Create a new OpenAI client with default configuration
-    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt4O))]
+    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt5ChatLatest))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         info!("Creating new OpenAI client");
@@ -109,7 +137,7 @@ impl OpenAIClient {
 
         let config = OpenAIConfig {
             api_key,
-            model: Model::Gpt4O, // Default to GPT-4o
+            model: Model::Gpt5ChatLatest, // Default to GPT-5 Chat Latest (latest flagship)
             temperature: 0.0,
             max_tokens: None,
             timeout: None, // Default: no timeout (uses reqwest's default)

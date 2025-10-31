@@ -123,7 +123,7 @@ mod llm_integration_tests {
 
         let client = match AnthropicClient::new(api_key) {
             Ok(client) => client
-                .model(AnthropicModel::Claude35Sonnet)
+                .model(AnthropicModel::ClaudeSonnet45)
                 .temperature(0.0)
                 .build(),
             Err(e) => {

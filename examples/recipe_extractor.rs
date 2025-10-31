@@ -190,7 +190,7 @@ async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recip
 
     // Create Anthropic client
     let client = AnthropicClient::new(api_key)?
-        .model(AnthropicModel::Claude35Sonnet) // Use Claude 3.5 Sonnet for better recipes
+        .model(AnthropicModel::ClaudeSonnet45) // Use Claude Sonnet 4.5 for better recipes
         .temperature(0.1) // Lower temperature for more consistent results
         .build();
 
