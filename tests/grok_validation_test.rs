@@ -103,7 +103,7 @@ mod grok_validation_tests {
 
         // First get a valid product response
         let prompt = "Describe a smartphone product with realistic details";
-        let valid_result = client.generate_struct::<ProductInfo>(prompt).await;
+        let valid_result = client.materialize::<ProductInfo>(prompt).await;
 
         // Skip the test if we have API issues
         if let Err(RStructorError::ApiError(_)) = &valid_result {
@@ -234,7 +234,7 @@ mod grok_validation_tests {
         let prompt = "Describe a laptop product with realistic details";
 
         // Should succeed validation
-        let result = client.generate_struct::<ProductInfo>(prompt).await;
+        let result = client.materialize::<ProductInfo>(prompt).await;
 
         // If we get API errors, skip the test but still test validation directly
         if let Err(RStructorError::ApiError(_)) = &result {

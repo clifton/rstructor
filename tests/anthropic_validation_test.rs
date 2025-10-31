@@ -100,7 +100,7 @@ mod anthropic_validation_tests {
 
         // First get a valid weather response
         let prompt = "What is the current weather in New York City?";
-        let valid_result = client.generate_struct::<WeatherInfo>(prompt).await;
+        let valid_result = client.materialize::<WeatherInfo>(prompt).await;
 
         // Skip the test if we have API issues
         if let Err(RStructorError::ApiError(_)) = &valid_result {
@@ -233,7 +233,7 @@ mod anthropic_validation_tests {
         let prompt = "What's the weather like in Paris today? Use realistic values.";
 
         // Should succeed validation
-        let result = client.generate_struct::<WeatherInfo>(prompt).await;
+        let result = client.materialize::<WeatherInfo>(prompt).await;
 
         // If we get API errors, skip the test but still test validation directly
         if let Err(RStructorError::ApiError(_)) = &result {

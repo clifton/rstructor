@@ -82,12 +82,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt4OMini)
-            .temperature(0.0);
+            .temperature(0.0)
+            .max_retries(3)
+            .include_error_feedback(true);
 
-        match client
-            .generate_struct_with_retry::<Movie>(prompt, Some(3), Some(true))
-            .await
-        {
+        match client.materialize::<Movie>(prompt).await {
             Ok(movie) => {
                 println!("\nOpenAI Response:");
                 println!("Title: {}", movie.title);
@@ -109,12 +108,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let client = AnthropicClient::new(api_key)?
             .model(AnthropicModel::ClaudeSonnet4) // Best price/performance model
-            .temperature(0.0);
+            .temperature(0.0)
+            .max_retries(3)
+            .include_error_feedback(true);
 
-        match client
-            .generate_struct_with_retry::<Movie>(prompt, Some(3), Some(true))
-            .await
-        {
+        match client.materialize::<Movie>(prompt).await {
             Ok(movie) => {
                 println!("\nAnthropic Response:");
                 println!("Title: {}", movie.title);

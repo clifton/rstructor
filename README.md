@@ -73,8 +73,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 
     // Generate structured information with a simple prompt
-    // For production use, prefer generate_struct_with_retry for automatic error recovery
-    let movie: Movie = client.generate_struct("Tell me about the movie Inception").await?;
+    // For production use, configure retries with .max_retries() / .include_error_feedback()
+    let movie: Movie = client.materialize("Tell me about the movie Inception").await?;
 
     // Use the structured data
     println!("Title: {}", movie.title);
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Production Example with Automatic Retry
 
-For production use, prefer `generate_struct_with_retry` which automatically retries on validation errors:
+For production use, configure the client with retry options so it automatically retries on validation errors:
 
 ```rust
 use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
@@ -110,14 +110,12 @@ struct Movie {
     rating: f32,
 }
 
-// Generate with automatic retry (recommended for production)
-let movie: Movie = client
-    .generate_struct_with_retry::<Movie>(
-        "Tell me about Inception",
-        Some(3),    // max retries
-        Some(true),  // include error feedback in retries
-    )
-    .await?;
+// Configure the client to automatically retry validation errors
+let client = client
+    .max_retries(3)      // retry up to 3 times on validation errors
+    .include_error_feedback(true); // include validation feedback in retry prompts
+
+let movie: Movie = client.materialize::<Movie>("Tell me about Inception").await?;
 ```
 
 ### Basic Example with Validation
@@ -219,7 +217,7 @@ struct Recipe {
 }
 
 // Usage:
-// let recipe: Recipe = client.generate_struct("Give me a recipe for chocolate chip cookies").await?;
+// let recipe: Recipe = client.materialize("Give me a recipe for chocolate chip cookies").await?;
 ```
 
 ### Working with Enums
@@ -262,7 +260,7 @@ struct SentimentAnalysis {
 }
 
 // Usage:
-// let analysis: SentimentAnalysis = client.generate_struct("Analyze the sentiment of: I love this product!").await?;
+// let analysis: SentimentAnalysis = client.materialize("Analyze the sentiment of: I love this product!").await?;
 ```
 
 #### Enums with Associated Data (Tagged Unions)
@@ -309,7 +307,7 @@ enum PaymentMethod {
 }
 
 // Usage:
-// let user_status: UserStatus = client.generate_struct("What's the user's status?").await?;
+// let user_status: UserStatus = client.materialize("What's the user's status?").await?;
 ```
 
 #### Nested Enums Across Structs
@@ -514,7 +512,7 @@ let client = OpenAIClient::new(api_key)?
 use rstructor::{OpenAIClient, OpenAIModel, RStructorError};
 use std::time::Duration;
 
-match client.generate_struct::<Movie>("prompt").await {
+match client.materialize::<Movie>("prompt").await {
     Ok(movie) => println!("Success: {:?}", movie),
     Err(RStructorError::Timeout) => eprintln!("Request timed out"),
     Err(e) => eprintln!("Other error: {}", e),
@@ -635,21 +633,10 @@ The `LLMClient` trait defines the interface for all LLM providers:
 ```rust
 #[async_trait]
 pub trait LLMClient {
-    /// Generate a structured object from a prompt (single attempt)
-    async fn generate_struct<T>(&self, prompt: &str) -> Result<T>
-    where
-        T: Instructor + DeserializeOwned + Send + 'static;
-
-    /// Generate a structured object with automatic retry on validation errors
+    /// Materialize a structured object from a prompt.
     ///
-    /// This is the recommended method for production use as it automatically
-    /// retries failed generations with error feedback to improve success rates.
-    async fn generate_struct_with_retry<T>(
-        &self,
-        prompt: &str,
-        max_retries: Option<usize>,
-        include_errors: Option<bool>,
-    ) -> Result<T>
+    /// Configure retry behavior using `.max_retries()` and `.include_error_feedback()` builder methods.
+    async fn materialize<T>(&self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static;
 
@@ -658,7 +645,7 @@ pub trait LLMClient {
 }
 ```
 
-**Note**: For production applications, prefer `generate_struct_with_retry` over `generate_struct` as it automatically handles validation errors by retrying with error feedback. This significantly improves success rates with complex schemas.
+**Note**: For production applications, configure the client with `.max_retries()` and `.include_error_feedback()` and call `materialize()`.
 
 ### Supported Attributes
 

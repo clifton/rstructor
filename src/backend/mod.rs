@@ -11,4 +11,6 @@ pub mod grok;
 pub mod openai;
 
 pub use client::LLMClient;
-pub(crate) use utils::{check_response_status, extract_json_from_markdown, handle_http_error};
+pub(crate) use utils::{
+    check_response_status, extract_json_from_markdown, generate_with_retry, handle_http_error,
+};

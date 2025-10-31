@@ -162,7 +162,7 @@ mod openai_validation_tests {
         let prompt = "Give me a recipe for chocolate chip cookies.";
 
         // Should pass validation
-        let result = client.generate_struct::<RecipeInfo>(prompt).await;
+        let result = client.materialize::<RecipeInfo>(prompt).await;
 
         // Validation should pass
         assert!(result.is_ok(), "Validation failed: {:?}", result.err());

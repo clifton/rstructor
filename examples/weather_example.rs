@@ -78,17 +78,16 @@ async fn main() -> rstructor::Result<()> {
         // Create an OpenAI client
         let client = OpenAIClient::new(api_key)?
             .model(OpenAIModel::Gpt4OMini)
-            .temperature(0.0);
+            .temperature(0.0)
+            .max_retries(3)
+            .include_error_feedback(true);
 
         // Define a prompt
         let prompt = "What's the weather like in Paris right now?";
         println!("Prompt: {}", prompt);
 
         // Call the LLM to get a structured output with retry
-        match client
-            .generate_struct_with_retry::<WeatherInfo>(prompt, Some(3), Some(true))
-            .await
-        {
+        match client.materialize::<WeatherInfo>(prompt).await {
             Ok(weather) => {
                 println!("\nReceived weather info from OpenAI:");
                 println!("Weather for {}: {} °C", weather.city, weather.temperature);
@@ -97,9 +96,7 @@ async fn main() -> rstructor::Result<()> {
                 }
 
                 // Weather comes back validated!
-                println!(
-                    "\nNote: The data has already been validated by the generate_struct method!"
-                );
+                println!("\nNote: The data has already been validated by the materialize method!");
             }
             Err(e) => println!("Error getting weather from OpenAI: {}", e),
         }
