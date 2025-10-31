@@ -329,6 +329,18 @@ impl LLMClient for GrokClient {
         // Avoid calling to_string() in trace to prevent potential stack overflow with complex schemas
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
+        // Get schema as JSON string - avoid Display impl which might cause recursion
+        let schema_str =
+            serde_json::to_string(&schema.to_json()).unwrap_or_else(|_| "{}".to_string());
+        debug!("Building structured prompt with schema");
+
+        // Enhance the prompt to explicitly request JSON output
+        // This helps when Grok doesn't respect function calling
+        let structured_prompt = format!(
+            "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
+            schema_str, prompt
+        );
+
         // Create function definition with the schema
         let function = FunctionDef {
             name: schema_name.clone(),
@@ -342,7 +354,7 @@ impl LLMClient for GrokClient {
             model: self.config.model.as_str().to_string(),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
-                content: prompt.to_string(),
+                content: structured_prompt,
             }],
             functions: Some(vec![function]),
             function_call: Some(json!({ "name": schema_name })),
@@ -410,16 +422,19 @@ impl LLMClient for GrokClient {
             );
 
             // Parse the arguments JSON string into our target type
-            let result: T = match serde_json::from_str(&function_call.arguments) {
+            // First, try to extract JSON from markdown code blocks if present
+            let json_content = extract_json_from_markdown(&function_call.arguments);
+            trace!(json = %json_content, "Attempting to parse function call arguments as JSON");
+            let result: T = match serde_json::from_str(&json_content) {
                 Ok(parsed) => parsed,
                 Err(e) => {
                     let error_msg = format!(
                         "Failed to parse response: {}\nPartial JSON: {}",
-                        e, &function_call.arguments
+                        e, json_content
                     );
                     error!(
                         error = %e,
-                        partial_json = %function_call.arguments,
+                        partial_json = %json_content,
                         "JSON parsing error"
                     );
                     return Err(RStructorError::ValidationError(error_msg));
