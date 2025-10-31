@@ -43,6 +43,7 @@ Here's a simple example of extracting structured information about a movie from 
 use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
 use serde::{Serialize, Deserialize};
 use std::env;
+use std::time::Duration;
 
 // Define your data model
 #[derive(Instructor, Serialize, Deserialize, Debug)]
@@ -69,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAIClient::new(api_key)?
         .model(OpenAIModel::Gpt35Turbo)
         .temperature(0.0)
-        .with_timeout(30.0)  // Optional: set 30 second timeout
+        .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
         .build();
 
     // Generate structured information with a simple prompt
@@ -94,6 +95,7 @@ For production use, prefer `generate_struct_with_retry` which automatically retr
 
 ```rust
 use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
+use std::time::Duration;
 use serde::{Serialize, Deserialize};
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
@@ -178,6 +180,7 @@ RStructor supports complex nested data structures:
 
 ```rust
 use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
+use std::time::Duration;
 use serde::{Serialize, Deserialize};
 
 // Define a nested data model for a recipe
@@ -463,7 +466,7 @@ let openai_client = OpenAIClient::new(openai_api_key)?
     .model(OpenAIModel::Gpt4)
     .temperature(0.2)
     .max_tokens(1500)
-    .with_timeout(60.0)  // Optional: set 60 second timeout
+    .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
 
 // Using Anthropic
@@ -471,7 +474,7 @@ let anthropic_client = AnthropicClient::new(anthropic_api_key)?
     .model(AnthropicModel::Claude3Sonnet)
     .temperature(0.0)
     .max_tokens(2000)
-    .with_timeout(60.0)  // Optional: set 60 second timeout
+    .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
 ```
 
@@ -480,10 +483,12 @@ let anthropic_client = AnthropicClient::new(anthropic_api_key)?
 Both `OpenAIClient` and `AnthropicClient` support configurable timeouts for HTTP requests using the builder pattern:
 
 ```rust
+use std::time::Duration;
+
 let client = OpenAIClient::new(api_key)?
     .model(OpenAIModel::Gpt4O)
     .temperature(0.0)
-    .with_timeout(30.0)  // Set 30 second timeout (in seconds)
+    .with_timeout(Duration::from_secs(30))  // Set 30 second timeout
     .build();
 ```
 
@@ -491,12 +496,13 @@ let client = OpenAIClient::new(api_key)?
 - The timeout applies to each HTTP request made by the client
 - If a request exceeds the timeout, it will return `RStructorError::Timeout`
 - If no timeout is specified, the client uses reqwest's default timeout behavior
-- Timeout values are specified in seconds as `f64` (e.g., `2.5` for 2.5 seconds)
+- Timeout values are specified as `std::time::Duration` (e.g., `Duration::from_secs(30)` or `Duration::from_millis(2500)`)
 
 **Example with timeout error handling:**
 
 ```rust
 use rstructor::{OpenAIClient, OpenAIModel, RStructorError};
+use std::time::Duration;
 
 match client.generate_struct::<Movie>("prompt").await {
     Ok(movie) => println!("Success: {:?}", movie),

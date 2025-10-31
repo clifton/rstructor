@@ -145,7 +145,7 @@ impl AnthropicClient {
     ///
     /// # Arguments
     ///
-    /// * `timeout_secs` - Timeout in seconds (e.g., 2.5 for 2.5 seconds)
+    /// * `timeout` - Timeout duration (e.g., `Duration::from_secs(30)` for 30 seconds)
     ///
     /// # Examples
     ///
@@ -154,14 +154,13 @@ impl AnthropicClient {
     /// # use std::time::Duration;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = AnthropicClient::new("api-key")?
-    ///     .with_timeout(30.0)  // 30 second timeout
+    ///     .with_timeout(Duration::from_secs(30))  // 30 second timeout
     ///     .build();
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(skip(self))]
-    pub fn with_timeout(mut self, timeout_secs: f64) -> Self {
-        let timeout = Duration::from_secs_f64(timeout_secs);
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
         debug!(
             previous_timeout = ?self.config.timeout,
             new_timeout = ?timeout,

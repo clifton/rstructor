@@ -25,6 +25,7 @@ use crate::model::Instructor;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// use rstructor::{LLMClient, Instructor, OpenAIClient, OpenAIModel};
 /// use serde::{Serialize, Deserialize};
+/// use std::time::Duration;
 ///
 /// // Define your data model
 /// #[derive(Instructor, Serialize, Deserialize, Debug)]
@@ -38,7 +39,7 @@ use crate::model::Instructor;
 /// let client = OpenAIClient::new("your-openai-api-key")?
 ///     .model(OpenAIModel::Gpt35Turbo)
 ///     .temperature(0.0)
-///     .with_timeout(30.0)  // Optional: set 30 second timeout
+///     .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
 ///     .build();
 ///
 /// // Generate a structured response
@@ -58,6 +59,7 @@ use crate::model::Instructor;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// use rstructor::{LLMClient, Instructor, AnthropicClient, AnthropicModel};
 /// use serde::{Serialize, Deserialize};
+/// use std::time::Duration;
 ///
 /// // Define your data model
 /// #[derive(Instructor, Serialize, Deserialize, Debug)]
@@ -71,7 +73,7 @@ use crate::model::Instructor;
 /// let client = AnthropicClient::new("your-anthropic-api-key")?
 ///     .model(AnthropicModel::Claude3Haiku)
 ///     .temperature(0.0)
-///     .with_timeout(30.0)  // Optional: set 30 second timeout
+///     .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
 ///     .build();
 ///
 /// // Generate a structured response
