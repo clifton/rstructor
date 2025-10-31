@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Using OpenAI...");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt35Turbo)
+            .model(OpenAIModel::Gpt4OMini)
             .temperature(0.0)
             .build();
 
@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\nUsing Anthropic...");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::Claude3Haiku) // Using smaller model for faster results
+            .model(AnthropicModel::ClaudeSonnet4) // Best price/performance model
             .temperature(0.0)
             .build();
 

@@ -6,6 +6,7 @@
 //! export OPENAI_API_KEY=your_key_here
 //! export ANTHROPIC_API_KEY=your_key_here
 //! export XAI_API_KEY=your_key_here
+//! export GEMINI_API_KEY=your_key_here
 //! cargo test --test llm_integration_tests
 //! ```
 
@@ -13,6 +14,8 @@
 mod llm_integration_tests {
     #[cfg(feature = "anthropic")]
     use rstructor::{AnthropicClient, AnthropicModel};
+    #[cfg(feature = "gemini")]
+    use rstructor::{GeminiClient, GeminiModel};
     #[cfg(feature = "grok")]
     use rstructor::{GrokClient, GrokModel};
     use rstructor::{Instructor, LLMClient, SchemaType};
@@ -159,8 +162,8 @@ mod llm_integration_tests {
     #[tokio::test]
     async fn test_grok_generate_struct() {
         // Skip test if API key is not available
-        // Test with empty string to use XAI_API_KEY env var
-        let client = match GrokClient::new("") {
+        // Read from XAI_API_KEY env var
+        let client = match GrokClient::from_env() {
             Ok(client) => client.model(GrokModel::Grok4).temperature(0.0).build(),
             Err(e) => {
                 println!(
@@ -191,6 +194,48 @@ mod llm_integration_tests {
         assert!(movie.plot.len() > 10);
 
         println!("Grok response: {:#?}", movie);
+    }
+
+    // Test using Gemini
+    #[cfg(feature = "gemini")]
+    #[tokio::test]
+    async fn test_gemini_generate_struct() {
+        // Skip test if API key is not available
+        // Read from GEMINI_API_KEY env var
+        let client = match GeminiClient::from_env() {
+            Ok(client) => client
+                .model(GeminiModel::Gemini25Flash)
+                .temperature(0.0)
+                .build(),
+            Err(e) => {
+                println!(
+                    "Skipping test: Failed to create Gemini client (GEMINI_API_KEY not set): {:?}",
+                    e
+                );
+                return;
+            }
+        };
+
+        let prompt = "Provide information about the movie Inception";
+        let movie_result = client.generate_struct::<Movie>(prompt).await;
+
+        // Handle API errors gracefully
+        if let Err(e) = &movie_result {
+            println!("Skipping test due to API error: {:?}", e);
+            return;
+        }
+
+        // Only validate when we have a successful response
+        let movie = movie_result.expect("Failed to get movie info");
+
+        // Validate response
+        assert_eq!(movie.title, "Inception");
+        assert_eq!(movie.year, 2010);
+        assert_eq!(movie.director, "Christopher Nolan");
+        assert!(!movie.actors.is_empty());
+        assert!(movie.plot.len() > 10);
+
+        println!("Gemini response: {:#?}", movie);
     }
 
     // Test to ensure schema is generated correctly

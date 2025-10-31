@@ -77,7 +77,7 @@ async fn main() -> rstructor::Result<()> {
 
         // Create an OpenAI client
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt35Turbo)
+            .model(OpenAIModel::Gpt4OMini)
             .temperature(0.0)
             .build();
 

@@ -17,6 +17,7 @@ use crate::model::Instructor;
 /// - `OpenAIClient` for OpenAI's GPT models (gpt-3.5-turbo, gpt-4, etc.)
 /// - `AnthropicClient` for Anthropic's Claude models
 /// - `GrokClient` for xAI's Grok models (uses `XAI_API_KEY` env var by default)
+/// - `GeminiClient` for Google's Gemini models (uses `GEMINI_API_KEY` env var by default)
 ///
 /// # Examples
 ///
@@ -38,7 +39,7 @@ use crate::model::Instructor;
 ///
 /// // Create a client
 /// let client = OpenAIClient::new("your-openai-api-key")?
-///     .model(OpenAIModel::Gpt35Turbo)
+///     .model(OpenAIModel::Gpt4OMini)
 ///     .temperature(0.0)
 ///     .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
 ///     .build();
@@ -72,7 +73,7 @@ use crate::model::Instructor;
 ///
 /// // Create a client
 /// let client = AnthropicClient::new("your-anthropic-api-key")?
-///     .model(AnthropicModel::Claude3Haiku)
+///     .model(AnthropicModel::ClaudeSonnet4)
 ///     .temperature(0.0)
 ///     .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
 ///     .build();

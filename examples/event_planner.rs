@@ -300,7 +300,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("\nProcessing your request with OpenAI...\n");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt4)
+            .model(OpenAIModel::Gpt5)
             .temperature(0.3)
             .build();
 
