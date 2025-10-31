@@ -12,26 +12,39 @@ use crate::model::Instructor;
 /// Grok models available for completion
 ///
 /// These are convenience variants for common Grok models.
-/// For the latest available models, check the [xAI API documentation](https://docs.x.ai/).
+/// For the latest available models and their identifiers, check the
+/// [xAI Models Documentation](https://docs.x.ai/docs/models).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Model {
-    /// Grok beta model
-    GrokBeta,
-    /// Grok-2 model (default)
-    Grok2,
-    /// Grok-2 vision model for multimodal tasks
+    /// Grok-4 (latest flagship model with 256k context window)
+    Grok4,
+    /// Grok-4 Fast Reasoning (faster variant optimized for reasoning tasks)
+    Grok4FastReasoning,
+    /// Grok-4 Fast Non-Reasoning (faster variant optimized for non-reasoning tasks)
+    Grok4FastNonReasoning,
+    /// Grok-3 (advanced model with enhanced reasoning)
+    Grok3,
+    /// Grok-3 Mini (efficient variant with 131k context window)
+    Grok3Mini,
+    /// Grok Code Fast 1 (optimized for coding tasks)
+    GrokCodeFast1,
+    /// Grok-2-1212 (enhanced accuracy and instruction adherence)
+    Grok21212,
+    /// Grok-2 Vision (multimodal vision model)
     Grok2Vision,
-    /// Grok-2 mini model (faster, more cost-effective)
-    Grok2Mini,
 }
 
 impl Model {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Model::GrokBeta => "grok-beta",
-            Model::Grok2 => "grok-2-1212",
+            Model::Grok4 => "grok-4-0709",
+            Model::Grok4FastReasoning => "grok-4-fast-reasoning",
+            Model::Grok4FastNonReasoning => "grok-4-fast-non-reasoning",
+            Model::Grok3 => "grok-3",
+            Model::Grok3Mini => "grok-3-mini",
+            Model::GrokCodeFast1 => "grok-code-fast-1",
+            Model::Grok21212 => "grok-2-1212",
             Model::Grok2Vision => "grok-2-vision-1212",
-            Model::Grok2Mini => "grok-2-mini-1212",
         }
     }
 }
@@ -127,7 +140,7 @@ impl GrokClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "grok_client_new", skip(api_key), fields(model = ?Model::Grok2))]
+    #[instrument(name = "grok_client_new", skip(api_key), fields(model = ?Model::Grok4))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let mut api_key = api_key.into();
 
@@ -135,7 +148,8 @@ impl GrokClient {
         if api_key.is_empty() {
             api_key = std::env::var("XAI_API_KEY").map_err(|_| {
                 RStructorError::ApiError(
-                    "No API key provided and XAI_API_KEY environment variable is not set".to_string(),
+                    "No API key provided and XAI_API_KEY environment variable is not set"
+                        .to_string(),
                 )
             })?;
         }
@@ -145,7 +159,7 @@ impl GrokClient {
 
         let config = GrokConfig {
             api_key,
-            model: Model::Grok2, // Default to Grok-2
+            model: Model::Grok4, // Default to Grok-4 (latest flagship model)
             temperature: 0.0,
             max_tokens: None,
             timeout: None, // Default: no timeout (uses reqwest's default)
@@ -503,4 +517,3 @@ impl LLMClient for GrokClient {
         }
     }
 }
-

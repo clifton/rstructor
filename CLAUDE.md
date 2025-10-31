@@ -38,3 +38,36 @@
 - Parse container attributes individually without relying on JSON parsing
 - Support multiple attribute specification styles that feel natural in Rust
 - For multi-value attributes, support both parentheses and array syntax
+
+## Model List Maintenance Guidelines
+
+**CRITICAL**: Model lists must be kept up-to-date with provider releases. When adding new providers or updating existing ones, always refer to the official documentation sources below:
+
+### Official Model Documentation Sources
+
+**OpenAI:**
+- Model Documentation: https://platform.openai.com/docs/models
+- Models API Endpoint: https://platform.openai.com/docs/api-reference/models/list
+
+**Anthropic:**
+- All Models Overview: https://docs.anthropic.com/en/docs/about-claude/models/all-models
+- Models List API: https://docs.anthropic.com/en/api/models-list
+
+**xAI (Grok):**
+- Models Documentation: https://docs.x.ai/docs/models
+
+### Update Process
+
+1. **Before adding/updating models**: Check the official documentation links above for the latest model identifiers
+2. **When updating**: Add new models to the appropriate enum (`Model`, `AnthropicModel`, `GrokModel`) in the respective backend files
+3. **Model identifiers**: Use the exact API model identifiers from the official documentation (e.g., `gpt-4o`, `claude-3-5-sonnet-20240620`, `grok-2-1212`)
+4. **Default models**: Update default model selection to use the latest recommended model when appropriate
+5. **Documentation**: Update rustdoc comments to reference the official documentation links
+6. **Testing**: Ensure new models work correctly with integration tests
+
+### Periodic Review Schedule
+
+- Review model lists quarterly or when new models are announced
+- Check for deprecated models and remove or mark them as deprecated
+- Update default model selections to use the latest recommended models
+- Verify all model identifiers match current API documentation

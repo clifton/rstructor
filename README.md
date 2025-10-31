@@ -479,7 +479,7 @@ let anthropic_client = AnthropicClient::new(anthropic_api_key)?
 
 // Using Grok (xAI) - automatically uses XAI_API_KEY env var if empty string provided
 let grok_client = GrokClient::new("")?  // Uses XAI_API_KEY env var
-    .model(GrokModel::Grok2)
+    .model(GrokModel::Grok4)
     .temperature(0.0)
     .max_tokens(1500)
     .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout

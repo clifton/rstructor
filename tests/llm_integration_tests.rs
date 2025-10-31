@@ -161,9 +161,12 @@ mod llm_integration_tests {
         // Skip test if API key is not available
         // Test with empty string to use XAI_API_KEY env var
         let client = match GrokClient::new("") {
-            Ok(client) => client.model(GrokModel::Grok2).temperature(0.0).build(),
+            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0).build(),
             Err(e) => {
-                println!("Skipping test: Failed to create Grok client (XAI_API_KEY not set): {:?}", e);
+                println!(
+                    "Skipping test: Failed to create Grok client (XAI_API_KEY not set): {:?}",
+                    e
+                );
                 return;
             }
         };

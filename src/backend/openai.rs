@@ -10,6 +10,9 @@ use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 
 /// OpenAI models available for completion
+///
+/// For the latest available models and their identifiers, check the
+/// [OpenAI Models Documentation](https://platform.openai.com/docs/models).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Model {
     Gpt35Turbo,

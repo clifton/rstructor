@@ -9,6 +9,9 @@ use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 
 /// Anthropic models available for completion
+///
+/// For the latest available models and their identifiers, check the
+/// [Anthropic Models Documentation](https://docs.anthropic.com/en/docs/about-claude/models/all-models).
 #[derive(Debug, Clone)]
 pub enum AnthropicModel {
     Claude3Haiku,
