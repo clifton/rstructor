@@ -1,7 +1,7 @@
 use rstructor::{Instructor, RStructorError, SchemaType};
 use serde::{Deserialize, Serialize};
 
-// Example that demonstrates how to use custom validation with RStructor
+// Example that demonstrates how to use custom validation with rstructor
 // without getting dead code warnings for the validate method
 
 // Define a Product type with validation

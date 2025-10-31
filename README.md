@@ -1,4 +1,4 @@
-# RStructor: Structured LLM Outputs for Rust
+# rstructor: Structured LLM Outputs for Rust
 
 <p align="center">
   <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024"/>
@@ -7,7 +7,7 @@
   <img src="https://github.com/clifton/rstructor/actions/workflows/clippy.yml/badge.svg" alt="Clippy Status"/>
 </p>
 
-RStructor is a Rust library for extracting structured data from Large Language Models (LLMs) with built-in validation. Define your schemas as Rust structs/enums, and RStructor will handle the rest—generating JSON Schemas, communicating with LLMs, parsing responses, and validating the results.
+rstructor is a Rust library for extracting structured data from Large Language Models (LLMs) with built-in validation. Define your schemas as Rust structs/enums, and rstructor will handle the rest—generating JSON Schemas, communicating with LLMs, parsing responses, and validating the results.
 
 Think of it as the Rust equivalent of [Instructor + Pydantic](https://github.com/jxnl/instructor) for Python, bringing the same structured output capabilities to the Rust ecosystem.
 
@@ -26,7 +26,7 @@ Think of it as the Rust equivalent of [Instructor + Pydantic](https://github.com
 
 ## 📦 Installation
 
-Add RStructor to your `Cargo.toml`:
+Add rstructor to your `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -171,12 +171,12 @@ impl Movie {
 }
 
 // The derive macro automatically wires this method into the generated implementation,
-// so you won't see `dead_code` warnings even if the method is only called by RStructor.
+// so you won't see `dead_code` warnings even if the method is only called by rstructor.
 ```
 
 ### Complex Nested Structures
 
-RStructor supports complex nested data structures:
+rstructor supports complex nested data structures:
 
 ```rust
 use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel};
@@ -225,7 +225,7 @@ struct Recipe {
 
 ### Working with Enums
 
-RStructor supports both simple enums and enums with associated data.
+rstructor supports both simple enums and enums with associated data.
 
 #### Simple Enums
 
@@ -268,7 +268,7 @@ struct SentimentAnalysis {
 
 #### Enums with Associated Data (Tagged Unions)
 
-RStructor also supports more complex enums with associated data:
+rstructor also supports more complex enums with associated data:
 
 ```rust
 use rstructor::{Instructor, SchemaType};
@@ -363,7 +363,7 @@ When serialized to JSON, these enum variants with data become tagged unions:
 
 ### Working with Custom Types (Dates, UUIDs, etc.)
 
-RStructor provides the `CustomTypeSchema` trait to handle types that don't have direct JSON representations but need specific schema formats. This is particularly useful for:
+rstructor provides the `CustomTypeSchema` trait to handle types that don't have direct JSON representations but need specific schema formats. This is particularly useful for:
 
 - Date/time types (e.g., `chrono::DateTime`)
 - UUIDs (e.g., `uuid::Uuid`)
@@ -554,7 +554,7 @@ struct Movie {
 
 ### Instructor Trait
 
-The `Instructor` trait is the core of RStructor. It's implemented automatically via the derive macro and provides schema generation and validation:
+The `Instructor` trait is the core of rstructor. It's implemented automatically via the derive macro and provides schema generation and validation:
 
 ```rust
 pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
@@ -680,7 +680,7 @@ pub trait LLMClient {
 
 ## 🔧 Feature Flags
 
-Configure RStructor with feature flags:
+Configure rstructor with feature flags:
 
 ```toml
 [dependencies]
@@ -697,7 +697,7 @@ Available features:
 
 ## 📊 Logging and Tracing
 
-RStructor includes structured logging via the `tracing` crate:
+rstructor includes structured logging via the `tracing` crate:
 
 ```rust
 use rstructor::logging::{init_logging, LogLevel};
@@ -750,7 +750,7 @@ cargo run --example news_article_categorizer
 
 ## ⚠️ Current Limitations
 
-RStructor currently focuses on single-turn, synchronous structured output generation. The following features are planned but not yet implemented:
+rstructor currently focuses on single-turn, synchronous structured output generation. The following features are planned but not yet implemented:
 
 - **Streaming Responses**: Real-time streaming of partial results as they're generated
 - **Conversation History**: Multi-turn conversations with message history (currently only single prompts supported)

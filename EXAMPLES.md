@@ -1,4 +1,4 @@
-# RStructor Attribute Examples
+# rstructor Attribute Examples
 
 This document shows how to properly use the various attributes with different Rust types.
 
@@ -112,7 +112,7 @@ phone: Option<String>,
 
 ### Enums
 
-RStructor supports both simple enums and enums with associated data.
+rstructor supports both simple enums and enums with associated data.
 
 #### Simple Enums
 

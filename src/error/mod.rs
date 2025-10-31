@@ -1,8 +1,8 @@
 use thiserror::Error;
 
-/// Error types for the RStructor library.
+/// Error types for the rstructor library.
 ///
-/// This enum defines the various error types that can occur within the RStructor library.
+/// This enum defines the various error types that can occur within the rstructor library.
 /// Each variant represents a different category of error and includes context about what went wrong.
 ///
 /// # Examples
@@ -81,9 +81,9 @@ impl PartialEq for RStructorError {
     }
 }
 
-/// A specialized Result type for RStructor operations.
+/// A specialized Result type for rstructor operations.
 ///
-/// This type is used throughout the RStructor library to return either
+/// This type is used throughout the rstructor library to return either
 /// a success value of type T or an RStructorError.
 ///
 /// # Examples

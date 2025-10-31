@@ -1,4 +1,4 @@
-//! Logging functionality for RStructor
+//! Logging functionality for rstructor
 //!
 //! This module provides utilities for configuring and working with logging
 //! through the `tracing` crate.
@@ -6,7 +6,7 @@
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Log levels supported by RStructor.
+/// Log levels supported by rstructor.
 ///
 /// These map to the tracing level hierarchy: ERROR, WARN, INFO, DEBUG, TRACE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +36,7 @@ impl LogLevel {
     }
 }
 
-/// Initialize logging for RStructor with a specific log level.
+/// Initialize logging for rstructor with a specific log level.
 ///
 /// This function sets up the tracing subscriber with the specified log level.
 /// It's typically called once at the start of your application.
@@ -77,7 +77,7 @@ pub fn init_logging(level: LogLevel) {
         .init();
 
     // Log initialization
-    tracing::info!("RStructor logging initialized at level: {:?}", level);
+    tracing::info!("rstructor logging initialized at level: {:?}", level);
 }
 
 /// Initialize logging with custom environment filter
@@ -104,7 +104,7 @@ pub fn init_logging_with_filter(filter: &str) {
         .init();
 
     tracing::info!(
-        "RStructor logging initialized with custom filter: {}",
+        "rstructor logging initialized with custom filter: {}",
         filter
     );
 }

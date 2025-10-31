@@ -1,8 +1,8 @@
-/// RStructor: A Rust library for structured outputs from LLMs
+/// rstructor: A Rust library for structured outputs from LLMs
 ///
 /// # Overview
 ///
-/// RStructor simplifies getting validated, strongly-typed outputs from Large Language Models
+/// rstructor simplifies getting validated, strongly-typed outputs from Large Language Models
 /// (LLMs) like GPT-4 and Claude. It automatically generates JSON Schema from your Rust types,
 /// sends the schema to LLMs, parses responses, and validates against the schema.
 ///

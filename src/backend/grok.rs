@@ -9,6 +9,27 @@ use crate::backend::LLMClient;
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 
+/// Extract JSON from markdown code blocks if present, otherwise return the content as-is
+fn extract_json_from_markdown(content: &str) -> String {
+    // Check if content is wrapped in markdown code blocks
+    let trimmed = content.trim();
+
+    // Match ```json ... ``` or ``` ... ```
+    if trimmed.starts_with("```") {
+        // Find the first newline after ```
+        if let Some(start_idx) = trimmed.find('\n') {
+            let after_start = &trimmed[start_idx + 1..];
+            // Find the closing ```
+            if let Some(end_idx) = after_start.rfind("```") {
+                return after_start[..end_idx].trim().to_string();
+            }
+        }
+    }
+
+    // If no markdown code blocks found, return as-is
+    trimmed.to_string()
+}
+
 /// Grok models available for completion
 ///
 /// These are convenience variants for common Grok models.
@@ -421,17 +442,21 @@ impl LLMClient for GrokClient {
                     "No function call in response, attempting to parse content as JSON"
                 );
 
+                // First, try to extract JSON from markdown code blocks if present
+                let json_content = extract_json_from_markdown(content);
+                trace!(json = %json_content, "Attempting to parse response as JSON");
+
                 // Try to extract JSON from the content (assuming the model might have returned JSON directly)
-                let result: T = match serde_json::from_str(content) {
+                let result: T = match serde_json::from_str(&json_content) {
                     Ok(parsed) => parsed,
                     Err(e) => {
                         let error_msg = format!(
                             "Failed to parse response content: {}\nPartial JSON: {}",
-                            e, content
+                            e, json_content
                         );
                         error!(
                             error = %e,
-                            content = %content,
+                            content = %json_content,
                             "Failed to parse content as JSON"
                         );
                         return Err(RStructorError::ValidationError(error_msg));

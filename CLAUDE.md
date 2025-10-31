@@ -1,4 +1,4 @@
-# CLAUDE.md - Agent Guidelines for RStructor
+# CLAUDE.md - Agent Guidelines for rstructor
 
 ## Rules
 - Always make sure there are relevant tests created and that they pass before finishing each task.
