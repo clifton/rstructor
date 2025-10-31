@@ -1,6 +1,6 @@
 [package]
 name = "rstructor_derive"
-version = "0.1.11"
+version = "0.1.12"
 edition = "2024"
 description = "Derive macros for the rstructor library"
 license = "MIT"
