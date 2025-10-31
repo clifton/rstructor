@@ -21,7 +21,7 @@ Think of it as the Rust equivalent of [Instructor + Pydantic](https://github.com
 - **🧠 Schema Fidelity**: Heuristic-free JSON Schema generation that preserves nested struct and enum detail
 - **🔍 Custom Validation Rules**: Add domain-specific validation with automatically detected `validate` methods
 - **🔁 Async API**: Fully asynchronous API for efficient operations
-- **⚙️ Builder Pattern**: Fluent API for configuring LLM clients
+- **⚙️ Builder Pattern**: Fluent API for configuring LLM clients (temperature retries, timeouts, etc)
 - **📊 Feature Flags**: Optional backends via feature flags
 
 ## 📦 Installation
@@ -69,6 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAIClient::new(api_key)?
         .model(OpenAIModel::Gpt35Turbo)
         .temperature(0.0)
+        .with_timeout(30.0)  // Optional: set 30 second timeout
         .build();
 
     // Generate structured information with a simple prompt
@@ -462,6 +463,7 @@ let openai_client = OpenAIClient::new(openai_api_key)?
     .model(OpenAIModel::Gpt4)
     .temperature(0.2)
     .max_tokens(1500)
+    .with_timeout(60.0)  // Optional: set 60 second timeout
     .build();
 
 // Using Anthropic
@@ -469,7 +471,38 @@ let anthropic_client = AnthropicClient::new(anthropic_api_key)?
     .model(AnthropicModel::Claude3Sonnet)
     .temperature(0.0)
     .max_tokens(2000)
+    .with_timeout(60.0)  // Optional: set 60 second timeout
     .build();
+```
+
+### Configuring Request Timeouts
+
+Both `OpenAIClient` and `AnthropicClient` support configurable timeouts for HTTP requests using the builder pattern:
+
+```rust
+let client = OpenAIClient::new(api_key)?
+    .model(OpenAIModel::Gpt4O)
+    .temperature(0.0)
+    .with_timeout(30.0)  // Set 30 second timeout (in seconds)
+    .build();
+```
+
+**Timeout Behavior:**
+- The timeout applies to each HTTP request made by the client
+- If a request exceeds the timeout, it will return `RStructorError::Timeout`
+- If no timeout is specified, the client uses reqwest's default timeout behavior
+- Timeout values are specified in seconds as `f64` (e.g., `2.5` for 2.5 seconds)
+
+**Example with timeout error handling:**
+
+```rust
+use rstructor::{OpenAIClient, OpenAIModel, RStructorError};
+
+match client.generate_struct::<Movie>("prompt").await {
+    Ok(movie) => println!("Success: {:?}", movie),
+    Err(RStructorError::Timeout) => eprintln!("Request timed out"),
+    Err(e) => eprintln!("Other error: {}", e),
+}
 ```
 
 ### Handling Container-Level Attributes
