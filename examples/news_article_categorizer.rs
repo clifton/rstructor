@@ -146,7 +146,7 @@ async fn analyze_article(
         println!("Using Anthropic for article analysis...");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::Claude3Sonnet)
+            .model(AnthropicModel::ClaudeSonnet4)
             .temperature(0.0)
             .build();
 

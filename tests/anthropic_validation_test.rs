@@ -95,7 +95,7 @@ mod anthropic_validation_tests {
 
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::Claude35Sonnet)
+            .model(AnthropicModel::ClaudeSonnet45)
             .temperature(0.0) // Use deterministic output
             .build();
 
@@ -227,7 +227,7 @@ mod anthropic_validation_tests {
 
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::Claude35Sonnet)
+            .model(AnthropicModel::ClaudeSonnet45)
             .temperature(0.0) // Use deterministic temperature for consistent results
             .build();
 

@@ -5,15 +5,19 @@
 //! ```bash
 //! export OPENAI_API_KEY=your_key_here
 //! export ANTHROPIC_API_KEY=your_key_here
+//! export XAI_API_KEY=your_key_here
 //! cargo test --test llm_integration_tests
 //! ```
 
 #[cfg(test)]
 mod llm_integration_tests {
-    use rstructor::{
-        AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
-        SchemaType,
-    };
+    #[cfg(feature = "anthropic")]
+    use rstructor::{AnthropicClient, AnthropicModel};
+    #[cfg(feature = "grok")]
+    use rstructor::{GrokClient, GrokModel};
+    use rstructor::{Instructor, LLMClient, SchemaType};
+    #[cfg(feature = "openai")]
+    use rstructor::{OpenAIClient, OpenAIModel};
     use serde::{Deserialize, Serialize};
     use std::env;
 
@@ -30,7 +34,7 @@ mod llm_integration_tests {
         #[llm(description = "Director of the movie", example = "Christopher Nolan")]
         director: String,
 
-        #[llm(description = "Main actors in the movie", 
+        #[llm(description = "Main actors in the movie",
               example = ["Leonardo DiCaprio", "Ellen Page"])]
         actors: Vec<String>,
 
@@ -62,6 +66,7 @@ mod llm_integration_tests {
     }
 
     // Test using OpenAI
+    #[cfg(feature = "openai")]
     #[tokio::test]
     async fn test_openai_generate_struct() {
         // Skip test if API key is not available
@@ -104,6 +109,7 @@ mod llm_integration_tests {
     }
 
     // Test using Anthropic
+    #[cfg(feature = "anthropic")]
     #[tokio::test]
     async fn test_anthropic_generate_struct() {
         // Skip test if API key is not available
@@ -117,7 +123,7 @@ mod llm_integration_tests {
 
         let client = match AnthropicClient::new(api_key) {
             Ok(client) => client
-                .model(AnthropicModel::Claude35Sonnet)
+                .model(AnthropicModel::ClaudeSonnet45)
                 .temperature(0.0)
                 .build(),
             Err(e) => {
@@ -146,6 +152,45 @@ mod llm_integration_tests {
         assert!(movie.plot.len() > 10);
 
         println!("Anthropic response: {:#?}", movie);
+    }
+
+    // Test using Grok
+    #[cfg(feature = "grok")]
+    #[tokio::test]
+    async fn test_grok_generate_struct() {
+        // Skip test if API key is not available
+        // Test with empty string to use XAI_API_KEY env var
+        let client = match GrokClient::new("") {
+            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0).build(),
+            Err(e) => {
+                println!(
+                    "Skipping test: Failed to create Grok client (XAI_API_KEY not set): {:?}",
+                    e
+                );
+                return;
+            }
+        };
+
+        let prompt = "Provide information about the movie Inception";
+        let movie_result = client.generate_struct::<Movie>(prompt).await;
+
+        // Handle API errors gracefully
+        if let Err(e) = &movie_result {
+            println!("Skipping test due to API error: {:?}", e);
+            return;
+        }
+
+        // Only validate when we have a successful response
+        let movie = movie_result.expect("Failed to get movie info");
+
+        // Validate response
+        assert_eq!(movie.title, "Inception");
+        assert_eq!(movie.year, 2010);
+        assert_eq!(movie.director, "Christopher Nolan");
+        assert!(!movie.actors.is_empty());
+        assert!(movie.plot.len() > 10);
+
+        println!("Grok response: {:#?}", movie);
     }
 
     // Test to ensure schema is generated correctly

@@ -9,60 +9,49 @@ use crate::backend::LLMClient;
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 
-/// OpenAI models available for completion
+/// Grok models available for completion
 ///
+/// These are convenience variants for common Grok models.
 /// For the latest available models and their identifiers, check the
-/// [OpenAI Models Documentation](https://platform.openai.com/docs/models).
+/// [xAI Models Documentation](https://docs.x.ai/docs/models).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Model {
-    /// GPT-5 Chat Latest (latest GPT-5 model for chat)
-    Gpt5ChatLatest,
-    /// GPT-5 Pro (most capable GPT-5 model)
-    Gpt5Pro,
-    /// GPT-5 (standard GPT-5 model)
-    Gpt5,
-    /// GPT-5 Mini (smaller, faster GPT-5 model)
-    Gpt5Mini,
-    /// GPT-4o (latest GPT-4 model, optimized for chat)
-    Gpt4O,
-    /// GPT-4o Mini (smaller, faster, more cost-effective version)
-    Gpt4OMini,
-    /// GPT-4 Turbo (high-intelligence model)
-    Gpt4Turbo,
-    /// GPT-4 (standard GPT-4 model)
-    Gpt4,
-    /// GPT-3.5 Turbo (efficient model for simple tasks)
-    Gpt35Turbo,
-    /// O1 (reasoning model optimized for complex problem-solving)
-    O1,
-    /// O1 Mini (smaller reasoning model)
-    O1Mini,
-    /// O1 Pro (most capable reasoning model)
-    O1Pro,
+    /// Grok-4 (latest flagship model with 256k context window)
+    Grok4,
+    /// Grok-4 Fast Reasoning (faster variant optimized for reasoning tasks)
+    Grok4FastReasoning,
+    /// Grok-4 Fast Non-Reasoning (faster variant optimized for non-reasoning tasks)
+    Grok4FastNonReasoning,
+    /// Grok-3 (advanced model with enhanced reasoning)
+    Grok3,
+    /// Grok-3 Mini (efficient variant with 131k context window)
+    Grok3Mini,
+    /// Grok Code Fast 1 (optimized for coding tasks)
+    GrokCodeFast1,
+    /// Grok-2-1212 (enhanced accuracy and instruction adherence)
+    Grok21212,
+    /// Grok-2 Vision (multimodal vision model)
+    Grok2Vision,
 }
 
 impl Model {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Model::Gpt5ChatLatest => "gpt-5-chat-latest",
-            Model::Gpt5Pro => "gpt-5-pro",
-            Model::Gpt5 => "gpt-5",
-            Model::Gpt5Mini => "gpt-5-mini",
-            Model::Gpt4O => "gpt-4o",
-            Model::Gpt4OMini => "gpt-4o-mini",
-            Model::Gpt4Turbo => "gpt-4-turbo",
-            Model::Gpt4 => "gpt-4",
-            Model::Gpt35Turbo => "gpt-3.5-turbo",
-            Model::O1 => "o1",
-            Model::O1Mini => "o1-mini",
-            Model::O1Pro => "o1-pro",
+            Model::Grok4 => "grok-4-0709",
+            Model::Grok4FastReasoning => "grok-4-fast-reasoning",
+            Model::Grok4FastNonReasoning => "grok-4-fast-non-reasoning",
+            Model::Grok3 => "grok-3",
+            Model::Grok3Mini => "grok-3-mini",
+            Model::GrokCodeFast1 => "grok-code-fast-1",
+            Model::Grok21212 => "grok-2-1212",
+            Model::Grok2Vision => "grok-2-vision-1212",
         }
     }
 }
 
-/// Configuration for the OpenAI client
+/// Configuration for the Grok client
 #[derive(Debug, Clone)]
-pub struct OpenAIConfig {
+pub struct GrokConfig {
     pub api_key: String,
     pub model: Model,
     pub temperature: f32,
@@ -70,13 +59,13 @@ pub struct OpenAIConfig {
     pub timeout: Option<Duration>,
 }
 
-/// OpenAI client for generating completions
-pub struct OpenAIClient {
-    config: OpenAIConfig,
+/// Grok client for generating completions
+pub struct GrokClient {
+    config: GrokConfig,
     client: reqwest::Client,
 }
 
-// OpenAI API request and response structures
+// Grok API request and response structures (OpenAI-compatible)
 #[derive(Debug, Serialize)]
 struct ChatMessage {
     role: String,
@@ -127,23 +116,56 @@ struct ChatCompletionResponse {
     choices: Vec<ChatCompletionChoice>,
 }
 
-impl OpenAIClient {
-    /// Create a new OpenAI client with default configuration
-    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt5ChatLatest))]
+impl GrokClient {
+    /// Create a new Grok client with default configuration.
+    ///
+    /// If no API key is provided, attempts to read from the `XAI_API_KEY` environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no API key is provided and `XAI_API_KEY` is not set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::GrokClient;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// // Using environment variable
+    /// let client = GrokClient::new("")?  // Empty string will use XAI_API_KEY env var
+    ///     .build();
+    ///
+    /// // Or explicitly provide API key
+    /// let client = GrokClient::new("your-xai-api-key")?
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(name = "grok_client_new", skip(api_key), fields(model = ?Model::Grok4))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
-        let api_key = api_key.into();
-        info!("Creating new OpenAI client");
+        let mut api_key = api_key.into();
+
+        // If API key is empty, try to read from environment variable
+        if api_key.is_empty() {
+            api_key = std::env::var("XAI_API_KEY").map_err(|_| {
+                RStructorError::ApiError(
+                    "No API key provided and XAI_API_KEY environment variable is not set"
+                        .to_string(),
+                )
+            })?;
+        }
+
+        info!("Creating new Grok client");
         trace!("API key length: {}", api_key.len());
 
-        let config = OpenAIConfig {
+        let config = GrokConfig {
             api_key,
-            model: Model::Gpt5ChatLatest, // Default to GPT-5 Chat Latest (latest flagship)
+            model: Model::Grok4, // Default to Grok-4 (latest flagship model)
             temperature: 0.0,
             max_tokens: None,
             timeout: None, // Default: no timeout (uses reqwest's default)
         };
 
-        debug!("OpenAI client created with default configuration");
+        debug!("Grok client created with default configuration");
         Ok(Self {
             config,
             client: reqwest::Client::new(),
@@ -153,7 +175,7 @@ impl OpenAIClient {
     /// Set the model to use
     #[instrument(skip(self))]
     pub fn model(mut self, model: Model) -> Self {
-        debug!(previous_model = ?self.config.model, new_model = ?model, "Setting OpenAI model");
+        debug!(previous_model = ?self.config.model, new_model = ?model, "Setting Grok model");
         self.config.model = model;
         self
     }
@@ -190,10 +212,10 @@ impl OpenAIClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use rstructor::OpenAIClient;
+    /// # use rstructor::GrokClient;
     /// # use std::time::Duration;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let client = OpenAIClient::new("api-key")?
+    /// let client = GrokClient::new("")?  // Uses XAI_API_KEY env var
     ///     .with_timeout(Duration::from_secs(30))  // 30 second timeout
     ///     .build();
     /// # Ok(())
@@ -218,7 +240,7 @@ impl OpenAIClient {
             temperature = self.config.temperature,
             max_tokens = ?self.config.max_tokens,
             timeout = ?self.config.timeout,
-            "OpenAI client configuration complete"
+            "Grok client configuration complete"
         );
 
         // Configure reqwest client with timeout if specified
@@ -236,9 +258,9 @@ impl OpenAIClient {
 }
 
 #[async_trait]
-impl LLMClient for OpenAIClient {
+impl LLMClient for GrokClient {
     #[instrument(
-        name = "openai_generate_struct",
+        name = "grok_generate_struct",
         skip(self, prompt),
         fields(
             type_name = std::any::type_name::<T>(),
@@ -250,7 +272,7 @@ impl LLMClient for OpenAIClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        info!("Generating structured response with OpenAI");
+        info!("Generating structured response with Grok");
 
         // Get the schema for type T
         let schema = T::schema();
@@ -266,7 +288,7 @@ impl LLMClient for OpenAIClient {
         };
 
         // Build the request
-        debug!("Building OpenAI API request with function calling");
+        debug!("Building Grok API request with function calling");
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
             messages: vec![ChatMessage {
@@ -279,18 +301,18 @@ impl LLMClient for OpenAIClient {
             max_tokens: self.config.max_tokens,
         };
 
-        // Send the request to OpenAI
-        debug!("Sending request to OpenAI API");
+        // Send the request to Grok/xAI API
+        debug!("Sending request to Grok API");
         let response = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post("https://api.x.ai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
             .await
             .map_err(|e| {
-                error!(error = %e, "HTTP request to OpenAI failed");
+                error!(error = %e, "HTTP request to Grok API failed");
                 // Check if it's a timeout error from reqwest
                 if e.is_timeout() {
                     RStructorError::Timeout
@@ -306,22 +328,22 @@ impl LLMClient for OpenAIClient {
             error!(
                 status = %status,
                 error = %error_text,
-                "OpenAI API returned error response"
+                "Grok API returned error response"
             );
             return Err(RStructorError::ApiError(format!(
-                "OpenAI API error: {}",
+                "Grok API error: {}",
                 error_text
             )));
         }
 
-        debug!("Successfully received response from OpenAI");
+        debug!("Successfully received response from Grok API");
         let completion: ChatCompletionResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from OpenAI");
+            error!(error = %e, "Failed to parse JSON response from Grok API");
             e
         })?;
 
         if completion.choices.is_empty() {
-            error!("OpenAI returned empty choices array");
+            error!("Grok API returned empty choices array");
             return Err(RStructorError::ApiError(
                 "No completion choices returned".to_string(),
             ));
@@ -335,7 +357,7 @@ impl LLMClient for OpenAIClient {
             debug!(
                 function_name = %function_call.name,
                 args_len = function_call.arguments.len(),
-                "Function call received from OpenAI"
+                "Function call received from Grok API"
             );
 
             // Parse the arguments JSON string into our target type
@@ -397,7 +419,7 @@ impl LLMClient for OpenAIClient {
                 info!("Successfully generated and validated structured data from content");
                 Ok(result)
             } else {
-                error!("No function call or content in OpenAI response");
+                error!("No function call or content in Grok API response");
                 Err(RStructorError::ApiError(
                     "No function call or content in response".to_string(),
                 ))
@@ -406,7 +428,7 @@ impl LLMClient for OpenAIClient {
     }
 
     #[instrument(
-        name = "openai_generate",
+        name = "grok_generate",
         skip(self, prompt),
         fields(
             model = %self.config.model.as_str(),
@@ -414,10 +436,10 @@ impl LLMClient for OpenAIClient {
         )
     )]
     async fn generate(&self, prompt: &str) -> Result<String> {
-        info!("Generating raw text response with OpenAI");
+        info!("Generating raw text response with Grok");
 
         // Build the request without functions
-        debug!("Building OpenAI API request for text generation");
+        debug!("Building Grok API request for text generation");
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
             messages: vec![ChatMessage {
@@ -430,18 +452,18 @@ impl LLMClient for OpenAIClient {
             max_tokens: self.config.max_tokens,
         };
 
-        // Send the request to OpenAI
-        debug!("Sending request to OpenAI API");
+        // Send the request to Grok/xAI API
+        debug!("Sending request to Grok API");
         let response = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post("https://api.x.ai/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
             .await
             .map_err(|e| {
-                error!(error = %e, "HTTP request to OpenAI failed");
+                error!(error = %e, "HTTP request to Grok API failed");
                 // Check if it's a timeout error from reqwest
                 if e.is_timeout() {
                     RStructorError::Timeout
@@ -457,22 +479,22 @@ impl LLMClient for OpenAIClient {
             error!(
                 status = %status,
                 error = %error_text,
-                "OpenAI API returned error response"
+                "Grok API returned error response"
             );
             return Err(RStructorError::ApiError(format!(
-                "OpenAI API error: {}",
+                "Grok API error: {}",
                 error_text
             )));
         }
 
-        debug!("Successfully received response from OpenAI");
+        debug!("Successfully received response from Grok API");
         let completion: ChatCompletionResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from OpenAI");
+            error!(error = %e, "Failed to parse JSON response from Grok API");
             e
         })?;
 
         if completion.choices.is_empty() {
-            error!("OpenAI returned empty choices array");
+            error!("Grok API returned empty choices array");
             return Err(RStructorError::ApiError(
                 "No completion choices returned".to_string(),
             ));
@@ -488,7 +510,7 @@ impl LLMClient for OpenAIClient {
             );
             Ok(content.clone())
         } else {
-            error!("No content in OpenAI response");
+            error!("No content in Grok API response");
             Err(RStructorError::ApiError(
                 "No content in response".to_string(),
             ))

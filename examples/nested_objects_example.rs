@@ -204,7 +204,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
         println!("Using Anthropic to generate recipe...");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::Claude3Sonnet) // Using more capable model for complex structure
+            .model(AnthropicModel::ClaudeSonnet4) // Using more capable model for complex structure
             .temperature(0.2)
             .build();
 

@@ -8,22 +8,65 @@ use crate::backend::LLMClient;
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 
+/// Extract JSON from markdown code blocks if present, otherwise return the content as-is
+fn extract_json_from_markdown(content: &str) -> String {
+    // Check if content is wrapped in markdown code blocks
+    let trimmed = content.trim();
+
+    // Match ```json ... ``` or ``` ... ```
+    if trimmed.starts_with("```") {
+        // Find the first newline after ```
+        if let Some(start_idx) = trimmed.find('\n') {
+            let after_start = &trimmed[start_idx + 1..];
+            // Find the closing ```
+            if let Some(end_idx) = after_start.rfind("```") {
+                return after_start[..end_idx].trim().to_string();
+            }
+        }
+    }
+
+    // If no markdown code blocks found, return as-is
+    trimmed.to_string()
+}
+
 /// Anthropic models available for completion
+///
+/// For the latest available models and their identifiers, check the
+/// [Anthropic Models Documentation](https://docs.anthropic.com/en/docs/about-claude/models/all-models).
 #[derive(Debug, Clone)]
 pub enum AnthropicModel {
+    /// Claude Haiku 4.5 (latest fastest model)
+    ClaudeHaiku45,
+    /// Claude Sonnet 4.5 (latest balanced model)
+    ClaudeSonnet45,
+    /// Claude Opus 4.1 (enhanced reasoning capabilities)
+    ClaudeOpus41,
+    /// Claude Opus 4 (high-intelligence model)
+    ClaudeOpus4,
+    /// Claude Sonnet 4 (balanced performance model)
+    ClaudeSonnet4,
+    /// Claude Sonnet 3.7 (enhanced reasoning)
+    Claude37Sonnet,
+    /// Claude Haiku 3.5 (fast, cost-effective model)
+    Claude35Haiku,
+    /// Claude Haiku 3 (fast, cost-effective model)
     Claude3Haiku,
-    Claude3Sonnet,
+    /// Claude Opus 3 (most capable model for complex tasks)
     Claude3Opus,
-    Claude35Sonnet, // Added Claude 3.5 Sonnet
 }
 
 impl AnthropicModel {
     pub fn as_str(&self) -> &'static str {
         match self {
+            AnthropicModel::ClaudeHaiku45 => "claude-haiku-4-5-20251001",
+            AnthropicModel::ClaudeSonnet45 => "claude-sonnet-4-5-20250929",
+            AnthropicModel::ClaudeOpus41 => "claude-opus-4-1-20250805",
+            AnthropicModel::ClaudeOpus4 => "claude-opus-4-20250514",
+            AnthropicModel::ClaudeSonnet4 => "claude-sonnet-4-20250514",
+            AnthropicModel::Claude37Sonnet => "claude-3-7-sonnet-20250219",
+            AnthropicModel::Claude35Haiku => "claude-3-5-haiku-20241022",
             AnthropicModel::Claude3Haiku => "claude-3-haiku-20240307",
-            AnthropicModel::Claude3Sonnet => "claude-3-sonnet-20240229",
             AnthropicModel::Claude3Opus => "claude-3-opus-20240229",
-            AnthropicModel::Claude35Sonnet => "claude-3-5-sonnet-20240620", // Claude 3.5 Sonnet model ID
         }
     }
 }
@@ -80,7 +123,7 @@ struct CompletionResponse {
 
 impl AnthropicClient {
     /// Create a new Anthropic client with default configuration
-    #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::Claude35Sonnet))]
+    #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::ClaudeSonnet45))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         info!("Creating new Anthropic client");
@@ -88,7 +131,7 @@ impl AnthropicClient {
 
         let config = AnthropicConfig {
             api_key,
-            model: AnthropicModel::Claude35Sonnet, // Default to Claude 3.5 Sonnet
+            model: AnthropicModel::ClaudeSonnet45, // Default to Claude Sonnet 4.5 (latest flagship)
             temperature: 0.0,
             max_tokens: None,
             timeout: None, // Default: no timeout (uses reqwest's default)
@@ -306,17 +349,19 @@ impl LLMClient for AnthropicClient {
         };
 
         // Try to parse the content as JSON
-        trace!(json = %content, "Attempting to parse response as JSON");
-        let result: T = match serde_json::from_str(content) {
+        // First, try to extract JSON from markdown code blocks if present
+        let json_content = extract_json_from_markdown(content);
+        trace!(json = %json_content, "Attempting to parse response as JSON");
+        let result: T = match serde_json::from_str(&json_content) {
             Ok(parsed) => parsed,
             Err(e) => {
                 let error_msg = format!(
                     "Failed to parse response as JSON: {}\nPartial JSON: {}",
-                    e, content
+                    e, json_content
                 );
                 error!(
                     error = %e,
-                    content = %content,
+                    content = %json_content,
                     "JSON parsing error"
                 );
                 return Err(RStructorError::ValidationError(error_msg));
