@@ -64,11 +64,11 @@ bump_version_silent() {
     esac
 
     local new_version="$major.$minor.$patch"
-    
+
     # Update version in Cargo.toml
     sed -i.bak "s/^version = \"$current_version\"/version = \"$new_version\"/" "$cargo_file"
     rm "${cargo_file}.bak"
-    
+
     # Print the version without any other message
     echo "$new_version"
 }
@@ -95,6 +95,46 @@ rm Cargo.toml.bak
 echo "Updating Cargo.lock..."
 cargo generate-lockfile
 
+# Find the previous release tag (looking for the most recent v* tag)
+PREVIOUS_TAG=$(git describe --tags --abbrev=0 --match "v*" 2>/dev/null || echo "")
+if [ -z "$PREVIOUS_TAG" ]; then
+    echo "No previous release tag found. This appears to be the first release."
+    CHANGELOG_RANGE="HEAD"
+else
+    echo "Previous release tag: $PREVIOUS_TAG"
+    CHANGELOG_RANGE="$PREVIOUS_TAG..HEAD"
+fi
+
+# Generate changelog from git commits
+generate_changelog() {
+    if [ -z "$PREVIOUS_TAG" ]; then
+        # For first release, get all commits
+        git log --pretty=format:"- %s (%h)" --no-merges
+    else
+        # Get commits since last release, excluding version bump commits
+        git log --pretty=format:"- %s (%h)" --no-merges "$CHANGELOG_RANGE" | grep -v "Bump version"
+    fi
+}
+
+CHANGELOG=$(generate_changelog)
+if [ -z "$CHANGELOG" ]; then
+    CHANGELOG="- No changes to document"
+fi
+
+# Create release notes
+RELEASE_NOTES=$(cat <<EOF
+## Version $MAIN_VERSION
+
+### Changes
+
+$CHANGELOG
+
+### Dependency Versions
+- **rstructor**: $MAIN_VERSION
+- **rstructor_derive**: $DERIVE_VERSION
+EOF
+)
+
 # Create git commit and tag for both
 git add rstructor_derive/Cargo.toml Cargo.toml
 git commit -m "Bump version to $MAIN_VERSION"
@@ -110,6 +150,14 @@ read -p "Would you like to push the changes and tags to git? (y/N) " should_push
 if [ "$should_push" = "y" ] || [ "$should_push" = "Y" ]; then
     git push && git push origin "v$MAIN_VERSION" "derive-v$DERIVE_VERSION"
     echo "Successfully pushed changes to git"
+
+    # Create GitHub release with changelog
+    echo "Creating GitHub release..."
+    echo "$RELEASE_NOTES" | gh release create "v$MAIN_VERSION" \
+        --title "v$MAIN_VERSION" \
+        --notes-file - \
+        --target main
+    echo "Successfully created GitHub release"
 else
     echo "Skipped pushing to git"
 fi
@@ -120,15 +168,15 @@ if [ "$should_publish" = "y" ] || [ "$should_publish" = "Y" ]; then
     # Publish derive crate first
     echo "Publishing rstructor_derive v$DERIVE_VERSION to crates.io..."
     (cd rstructor_derive && cargo publish)
-    
+
     # Wait a moment for crates.io to register the new version
     echo "Waiting 15 seconds for crates.io to update..."
     sleep 15
-    
+
     # Then publish main crate
     echo "Publishing rstructor v$MAIN_VERSION to crates.io..."
     cargo publish
-    
+
     echo "Successfully published both crates to crates.io"
 else
     echo "Skipped publishing to crates.io"
