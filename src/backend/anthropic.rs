@@ -8,6 +8,27 @@ use crate::backend::LLMClient;
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 
+/// Extract JSON from markdown code blocks if present, otherwise return the content as-is
+fn extract_json_from_markdown(content: &str) -> String {
+    // Check if content is wrapped in markdown code blocks
+    let trimmed = content.trim();
+
+    // Match ```json ... ``` or ``` ... ```
+    if trimmed.starts_with("```") {
+        // Find the first newline after ```
+        if let Some(start_idx) = trimmed.find('\n') {
+            let after_start = &trimmed[start_idx + 1..];
+            // Find the closing ```
+            if let Some(end_idx) = after_start.rfind("```") {
+                return after_start[..end_idx].trim().to_string();
+            }
+        }
+    }
+
+    // If no markdown code blocks found, return as-is
+    trimmed.to_string()
+}
+
 /// Anthropic models available for completion
 ///
 /// For the latest available models and their identifiers, check the
@@ -328,17 +349,19 @@ impl LLMClient for AnthropicClient {
         };
 
         // Try to parse the content as JSON
-        trace!(json = %content, "Attempting to parse response as JSON");
-        let result: T = match serde_json::from_str(content) {
+        // First, try to extract JSON from markdown code blocks if present
+        let json_content = extract_json_from_markdown(content);
+        trace!(json = %json_content, "Attempting to parse response as JSON");
+        let result: T = match serde_json::from_str(&json_content) {
             Ok(parsed) => parsed,
             Err(e) => {
                 let error_msg = format!(
                     "Failed to parse response as JSON: {}\nPartial JSON: {}",
-                    e, content
+                    e, json_content
                 );
                 error!(
                     error = %e,
-                    content = %content,
+                    content = %json_content,
                     "JSON parsing error"
                 );
                 return Err(RStructorError::ValidationError(error_msg));
