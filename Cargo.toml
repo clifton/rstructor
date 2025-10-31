@@ -1,6 +1,6 @@
 [package]
 name = "rstructor"
-version = "0.1.12"
+version = "0.1.13"
 edition = "2024"
 description = "A Rust library for structured outputs from LLMs with validation"
 license = "MIT"
@@ -32,7 +32,7 @@ thiserror = "2.0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 tracing-futures = { version = "0.2", optional = true }
-rstructor_derive = { version = "0.1.12", path = "./rstructor_derive", optional = true }
+rstructor_derive = { version = "0.1.13", path = "./rstructor_derive", optional = true }
 chrono = "0.4" # For date/time validation in examples
 
 # Feature flags
