@@ -38,14 +38,14 @@ use crate::schema::SchemaType;
 ///                 format!("Product price must be positive, got {}", self.price)
 ///             ));
 ///         }
-///         
+///
 ///         // Name can't be empty
 ///         if self.name.trim().is_empty() {
 ///             return Err(RStructorError::ValidationError(
 ///                 "Product name cannot be empty".to_string()
 ///             ));
 ///         }
-///         
+///
 ///         Ok(())
 ///     }
 /// }
@@ -67,7 +67,7 @@ use crate::schema::SchemaType;
 ///
 /// // Create a client
 /// let client = OpenAIClient::new("your-api-key")?
-///     .model(OpenAIModel::Gpt35Turbo)
+///     .model(OpenAIModel::Gpt4OMini)
 ///     .build();
 ///
 /// // Get structured data with automatic validation

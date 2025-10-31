@@ -141,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a client with higher temperature to increase chances of validation errors
     let client = AnthropicClient::new(api_key)?
-        .model(AnthropicModel::Claude3Haiku)
+        .model(AnthropicModel::ClaudeSonnet4)
         .temperature(0.7) // Higher temperature = more creativity = more validation errors
         .build();
 

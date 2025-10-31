@@ -130,7 +130,7 @@ async fn analyze_article(
         println!("Using OpenAI for article analysis...");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt4)
+            .model(OpenAIModel::Gpt5)
             .temperature(0.0)
             .build();
 

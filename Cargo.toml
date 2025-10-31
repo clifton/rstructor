@@ -37,10 +37,11 @@ chrono = "0.4" # For date/time validation in examples
 
 # Feature flags
 [features]
-default = ["openai", "anthropic", "grok", "derive", "logging"]
+default = ["openai", "anthropic", "grok", "gemini", "derive", "logging"]
 openai = ["reqwest", "tokio"]
 anthropic = ["reqwest", "tokio"]
 grok = ["reqwest", "tokio"]
+gemini = ["reqwest", "tokio"]
 derive = ["rstructor_derive"]
 logging = ["tracing-subscriber", "tracing-futures"]
 

@@ -16,7 +16,7 @@ Think of it as the Rust equivalent of [Instructor + Pydantic](https://github.com
 - **📝 Type-Safe Definitions**: Define data models as standard Rust structs/enums with attributes
 - **🔄 JSON Schema Generation**: Auto-generates JSON Schema from your Rust types
 - **✅ Built-in Validation**: Type checking plus custom business rule validation
-- **🔌 Multiple LLM Providers**: Support for OpenAI, Anthropic, and Grok (xAI), with an extensible backend system
+- **🔌 Multiple LLM Providers**: Support for OpenAI, Anthropic, Grok (xAI), and Gemini (Google), with an extensible backend system
 - **🧩 Complex Data Structures**: Support for nested objects, arrays, optional fields, and deeply nested enums
 - **🧠 Schema Fidelity**: Heuristic-free JSON Schema generation that preserves nested struct and enum detail
 - **🔍 Custom Validation Rules**: Add domain-specific validation with automatically detected `validate` methods
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create an OpenAI client
     let client = OpenAIClient::new(api_key)?
-        .model(OpenAIModel::Gpt35Turbo)
+        .model(OpenAIModel::Gpt4OMini)
         .temperature(0.0)
         .with_timeout(Duration::from_secs(30))  // Optional: set 30 second timeout
         .build();
@@ -463,7 +463,7 @@ Choose between different providers:
 ```rust
 // Using OpenAI
 let openai_client = OpenAIClient::new(openai_api_key)?
-    .model(OpenAIModel::Gpt4)
+    .model(OpenAIModel::Gpt5)
     .temperature(0.2)
     .max_tokens(1500)
     .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
@@ -484,11 +484,19 @@ let grok_client = GrokClient::new("")?  // Uses XAI_API_KEY env var
     .max_tokens(1500)
     .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
     .build();
+
+// Using Gemini (Google) - automatically uses GEMINI_API_KEY env var if empty string provided
+let gemini_client = GeminiClient::new("")?  // Uses GEMINI_API_KEY env var
+    .model(GeminiModel::Gemini25Flash)
+    .temperature(0.0)
+    .max_tokens(1500)
+    .with_timeout(Duration::from_secs(60))  // Optional: set 60 second timeout
+    .build();
 ```
 
 ### Configuring Request Timeouts
 
-All clients (`OpenAIClient`, `AnthropicClient`, and `GrokClient`) support configurable timeouts for HTTP requests using the builder pattern:
+All clients (`OpenAIClient`, `AnthropicClient`, `GrokClient`, and `GeminiClient`) support configurable timeouts for HTTP requests using the builder pattern:
 
 ```rust
 use std::time::Duration;
@@ -676,13 +684,14 @@ Configure RStructor with feature flags:
 
 ```toml
 [dependencies]
-rstructor = { version = "0.1.0", features = ["openai", "anthropic", "grok"] }
+rstructor = { version = "0.1.0", features = ["openai", "anthropic", "grok", "gemini"] }
 ```
 
 Available features:
 - `openai`: Include the OpenAI client
 - `anthropic`: Include the Anthropic client
 - `grok`: Include the Grok (xAI) client
+- `gemini`: Include the Gemini (Google) client
 - `derive`: Include the derive macro (enabled by default)
 - `logging`: Enable tracing integration with default subscriber
 
@@ -729,6 +738,10 @@ See the `examples/` directory for complete, working examples:
 export OPENAI_API_KEY=your_openai_key_here
 # or
 export ANTHROPIC_API_KEY=your_anthropic_key_here
+# or
+export XAI_API_KEY=your_xai_key_here
+# or
+export GEMINI_API_KEY=your_gemini_key_here
 
 # Run examples
 cargo run --example structured_movie_info

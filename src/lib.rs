@@ -60,6 +60,9 @@ pub use backend::openai::{Model as OpenAIModel, OpenAIClient};
 #[cfg(feature = "anthropic")]
 pub use backend::anthropic::{AnthropicClient, AnthropicModel};
 
+#[cfg(feature = "gemini")]
+pub use backend::gemini::{GeminiClient, Model as GeminiModel};
+
 #[cfg(feature = "grok")]
 pub use backend::grok::{GrokClient, Model as GrokModel};
 

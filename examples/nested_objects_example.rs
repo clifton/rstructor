@@ -189,7 +189,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
         println!("Using OpenAI to generate recipe...");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt4) // More capable model for complex nested structures
+            .model(OpenAIModel::Gpt5) // More capable model for complex nested structures
             .temperature(0.2)
             .build();
 
