@@ -43,7 +43,7 @@ mod timeout_tests {
             .expect("Failed to create OpenAI client")
             .model(OpenAIModel::Gpt4O)
             .temperature(0.0)
-            .with_timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
+            .timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
             .build();
 
         // Try to make a request - it should timeout
@@ -77,7 +77,7 @@ mod timeout_tests {
             .model(OpenAIModel::Gpt4O)
             .temperature(0.5)
             .max_tokens(100)
-            .with_timeout(Duration::from_secs(2)) // 2 second timeout for unit tests
+            .timeout(Duration::from_secs(2)) // 2 second timeout for unit tests
             .build();
 
         // Verify that client was created successfully with timeout
@@ -102,7 +102,7 @@ mod timeout_tests {
             .expect("Failed to create Anthropic client")
             .model(AnthropicModel::ClaudeSonnet45)
             .temperature(0.0)
-            .with_timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
+            .timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
             .build();
 
         // Try to make a request - it should timeout
@@ -136,7 +136,7 @@ mod timeout_tests {
             .model(AnthropicModel::ClaudeSonnet45)
             .temperature(0.5)
             .max_tokens(100)
-            .with_timeout(Duration::from_secs(2)) // 2 second timeout for unit tests
+            .timeout(Duration::from_secs(2)) // 2 second timeout for unit tests
             .build();
 
         // Verify that client was created successfully with timeout
@@ -193,7 +193,7 @@ mod timeout_tests {
             Ok(client) => client
                 .model(GrokModel::Grok4)
                 .temperature(0.0)
-                .with_timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
+                .timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
                 .build(),
             Err(e) => {
                 println!(
@@ -228,7 +228,7 @@ mod timeout_tests {
                 .model(GrokModel::Grok4)
                 .temperature(0.5)
                 .max_tokens(100)
-                .with_timeout(Duration::from_secs(2)) // 2 second timeout for unit tests
+                .timeout(Duration::from_secs(2)) // 2 second timeout for unit tests
                 .build(),
             Err(e) => {
                 println!(
@@ -284,7 +284,7 @@ mod timeout_tests {
         let client = client
             .model(GeminiModel::Gemini25Flash)
             .temperature(0.0)
-            .with_timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
+            .timeout(Duration::from_millis(1)) // 1ms timeout - should timeout
             .build();
 
         // Try to make a request - it should timeout
@@ -321,7 +321,7 @@ mod timeout_tests {
             .model(GeminiModel::Gemini25Flash)
             .temperature(0.5)
             .max_tokens(100)
-            .with_timeout(Duration::from_secs(2)) // 2 second timeout for unit tests
+            .timeout(Duration::from_secs(2)) // 2 second timeout for unit tests
             .build();
 
         // Verify that client was created successfully with timeout

@@ -128,11 +128,71 @@ struct ChatCompletionResponse {
 }
 
 impl OpenAIClient {
-    /// Create a new OpenAI client with default configuration
+    /// Create a new OpenAI client with the provided API key.
+    ///
+    /// # Arguments
+    ///
+    /// * `api_key` - Your OpenAI API key
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::OpenAIClient;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::new("your-openai-api-key")?
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
     #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt5ChatLatest))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
+        if api_key.is_empty() {
+            return Err(RStructorError::ApiError(
+                "API key cannot be empty. Use OpenAIClient::from_env() to read from OPENAI_API_KEY environment variable.".to_string(),
+            ));
+        }
         info!("Creating new OpenAI client");
+        trace!("API key length: {}", api_key.len());
+
+        let config = OpenAIConfig {
+            api_key,
+            model: Model::Gpt5ChatLatest, // Default to GPT-5 Chat Latest (latest flagship)
+            temperature: 0.0,
+            max_tokens: None,
+            timeout: None, // Default: no timeout (uses reqwest's default)
+        };
+
+        debug!("OpenAI client created with default configuration");
+        Ok(Self {
+            config,
+            client: reqwest::Client::new(),
+        })
+    }
+
+    /// Create a new OpenAI client by reading the API key from the `OPENAI_API_KEY` environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `OPENAI_API_KEY` is not set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::OpenAIClient;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt5ChatLatest))]
+    pub fn from_env() -> Result<Self> {
+        let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+            RStructorError::ApiError("OPENAI_API_KEY environment variable is not set".to_string())
+        })?;
+
+        info!("Creating new OpenAI client from environment variable");
         trace!("API key length: {}", api_key.len());
 
         let config = OpenAIConfig {
@@ -174,7 +234,8 @@ impl OpenAIClient {
     #[instrument(skip(self))]
     pub fn max_tokens(mut self, max: u32) -> Self {
         debug!(previous_max = ?self.config.max_tokens, new_max = max, "Setting max_tokens");
-        self.config.max_tokens = Some(max);
+        // Ensure max_tokens is at least 1 to avoid API errors
+        self.config.max_tokens = Some(max.max(1));
         self
     }
 
@@ -194,13 +255,13 @@ impl OpenAIClient {
     /// # use std::time::Duration;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = OpenAIClient::new("api-key")?
-    ///     .with_timeout(Duration::from_secs(30))  // 30 second timeout
+    ///     .timeout(Duration::from_secs(30))  // 30 second timeout
     ///     .build();
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(skip(self))]
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         debug!(
             previous_timeout = ?self.config.timeout,
             new_timeout = ?timeout,
@@ -237,6 +298,9 @@ impl OpenAIClient {
 
 #[async_trait]
 impl LLMClient for OpenAIClient {
+    fn from_env() -> Result<Self> {
+        Self::from_env()
+    }
     #[instrument(
         name = "openai_generate_struct",
         skip(self, prompt),

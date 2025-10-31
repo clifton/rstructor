@@ -238,7 +238,8 @@ impl GeminiClient {
             new_max_tokens = max_tokens,
             "Setting max_tokens"
         );
-        self.config.max_tokens = Some(max_tokens);
+        // Ensure max_tokens is at least 1 to avoid API errors
+        self.config.max_tokens = Some(max_tokens.max(1));
         self
     }
 
@@ -253,13 +254,13 @@ impl GeminiClient {
     /// let client = GeminiClient::new("your-api-key")?
     ///     .model(GeminiModel::Gemini25Flash)
     ///     .temperature(0.0)
-    ///     .with_timeout(Duration::from_secs(30))  // 30 second timeout
+    ///     .timeout(Duration::from_secs(30))  // 30 second timeout
     ///     .build();
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(skip(self))]
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         debug!(
             previous_timeout = ?self.config.timeout,
             new_timeout = ?timeout,
@@ -296,6 +297,9 @@ impl GeminiClient {
 
 #[async_trait]
 impl LLMClient for GeminiClient {
+    fn from_env() -> Result<Self> {
+        Self::from_env()
+    }
     #[instrument(
         name = "gemini_generate_struct",
         skip(self, prompt),

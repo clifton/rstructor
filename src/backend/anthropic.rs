@@ -122,11 +122,73 @@ struct CompletionResponse {
 }
 
 impl AnthropicClient {
-    /// Create a new Anthropic client with default configuration
+    /// Create a new Anthropic client with the provided API key.
+    ///
+    /// # Arguments
+    ///
+    /// * `api_key` - Your Anthropic API key
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::AnthropicClient;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = AnthropicClient::new("your-anthropic-api-key")?
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
     #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::ClaudeSonnet45))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
+        if api_key.is_empty() {
+            return Err(RStructorError::ApiError(
+                "API key cannot be empty. Use AnthropicClient::from_env() to read from ANTHROPIC_API_KEY environment variable.".to_string(),
+            ));
+        }
         info!("Creating new Anthropic client");
+        trace!("API key length: {}", api_key.len());
+
+        let config = AnthropicConfig {
+            api_key,
+            model: AnthropicModel::ClaudeSonnet45, // Default to Claude Sonnet 4.5 (latest flagship)
+            temperature: 0.0,
+            max_tokens: None,
+            timeout: None, // Default: no timeout (uses reqwest's default)
+        };
+
+        debug!("Anthropic client created with default configuration");
+        Ok(Self {
+            config,
+            client: reqwest::Client::new(),
+        })
+    }
+
+    /// Create a new Anthropic client by reading the API key from the `ANTHROPIC_API_KEY` environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `ANTHROPIC_API_KEY` is not set.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use rstructor::AnthropicClient;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = AnthropicClient::from_env()?
+    ///     .build();
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(name = "anthropic_client_from_env", fields(model = ?AnthropicModel::ClaudeSonnet45))]
+    pub fn from_env() -> Result<Self> {
+        let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
+            RStructorError::ApiError(
+                "ANTHROPIC_API_KEY environment variable is not set".to_string(),
+            )
+        })?;
+
+        info!("Creating new Anthropic client from environment variable");
         trace!("API key length: {}", api_key.len());
 
         let config = AnthropicConfig {
@@ -197,13 +259,13 @@ impl AnthropicClient {
     /// # use std::time::Duration;
     /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
     /// let client = AnthropicClient::new("api-key")?
-    ///     .with_timeout(Duration::from_secs(30))  // 30 second timeout
+    ///     .timeout(Duration::from_secs(30))  // 30 second timeout
     ///     .build();
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(skip(self))]
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    pub fn timeout(mut self, timeout: Duration) -> Self {
         debug!(
             previous_timeout = ?self.config.timeout,
             new_timeout = ?timeout,
@@ -240,6 +302,9 @@ impl AnthropicClient {
 
 #[async_trait]
 impl LLMClient for AnthropicClient {
+    fn from_env() -> Result<Self> {
+        Self::from_env()
+    }
     #[instrument(
         name = "anthropic_generate_struct",
         skip(self, prompt),
