@@ -31,27 +31,7 @@ exclude = [
   "*.orig",
   "*.bak",
 ]
-keywords = [
-  "llm",
-  "openai",
-  "anthropic",
-  "grok",
-  "gemini",
-  "validation",
-  "json-schema",
-  "structured-output",
-  "structured-outputs",
-  "pydantic",
-  "instructor",
-  "type-safe",
-  "ai",
-  "chatgpt",
-  "claude",
-  "schema-generation",
-  "extract",
-  "parsing",
-  "serde",
-]
+keywords = ["pydantic", "instructor", "structured-output", "llm", "openai"]
 categories = [
   "api-bindings",
   "web-programming",
