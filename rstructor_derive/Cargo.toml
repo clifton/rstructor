@@ -8,19 +8,14 @@ repository = "https://github.com/clifton/rstructor"
 authors = ["Clifton King <cliftonk@gmail.com>"]
 documentation = "https://docs.rs/rstructor_derive"
 exclude = [
-    # Tests directory
-    "tests/",
-    # Test files mixed in with source
-    "*_tests.rs",
-    "*_test.rs",
-    # Backup files from sed/editors
-    "*.orig",
-    "*.bak",
+  # Backup files from sed/editors
+  "*.orig",
+  "*.bak",
 ]
-keywords = ["llm", "derive", "macros", "json-schema", "validation"]
+keywords = ["derive", "json-schema", "llm", "pydantic", "instructor"]
 categories = [
-  "api-bindings",
   "development-tools::procedural-macro-helpers",
+  "api-bindings",
   "parsing",
 ]
 
@@ -37,4 +32,3 @@ serde_json = "1.0"
 rstructor = { path = ".." }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-

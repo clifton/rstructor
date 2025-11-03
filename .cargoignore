@@ -7,16 +7,6 @@ release.sh
 # Documentation that shouldn't be in the crate
 CLAUDE.md
 EXAMPLES.md
-MARKETING.md
-HN_POST.md
-REDDIT_POST.md
-SEO_CHECKLIST.md
-
-# Examples directory (not needed in published crate)
-examples/
-
-# Tests directory (not needed in published crate)
-tests/
 
 # GitHub workflows
 .github/
@@ -50,6 +40,7 @@ target/
 .claude/
 *.tmp
 *.temp
+tmp/
 
 # Any files with "test" or "example" in name that aren't needed
 *_test.rs
