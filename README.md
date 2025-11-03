@@ -1,15 +1,28 @@
 # rstructor: Structured LLM Outputs for Rust
 
+<!-- Badges for SEO and visual appeal -->
 <p align="center">
-  <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024"/>
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"/>
-  <img src="https://github.com/clifton/rstructor/actions/workflows/test.yml/badge.svg" alt="Tests Status"/>
-  <img src="https://github.com/clifton/rstructor/actions/workflows/clippy.yml/badge.svg" alt="Clippy Status"/>
+  <img src="https://img.shields.io/badge/rust-2024-orange" alt="Rust 2024 Edition"/>
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"/>
+  <img src="https://img.shields.io/crates/v/rstructor" alt="crates.io version"/>
+  <img src="https://img.shields.io/crates/d/rstructor" alt="crates.io downloads"/>
+  <img src="https://github.com/clifton/rstructor/actions/workflows/test.yml/badge.svg" alt="CI Tests Status"/>
+  <img src="https://github.com/clifton/rstructor/actions/workflows/clippy.yml/badge.svg" alt="Clippy Lint Status"/>
 </p>
 
 rstructor is a Rust library for extracting structured data from Large Language Models (LLMs) with built-in validation. Define your schemas as Rust structs/enums, and rstructor will handle the rest—generating JSON Schemas, communicating with LLMs, parsing responses, and validating the results.
 
 Think of it as the Rust equivalent of [Instructor + Pydantic](https://github.com/jxnl/instructor) for Python, bringing the same structured output capabilities to the Rust ecosystem.
+
+## 🔍 For Python Developers
+
+If you're coming from Python and searching for:
+- **"pydantic rust"** or **"rust pydantic"** → rstructor provides similar schema validation and type safety
+- **"instructor rust"** or **"rust instructor"** → rstructor offers the same structured LLM output extraction
+- **"structured output rust"** or **"llm structured output rust"** → this is exactly what rstructor does
+- **"type-safe llm rust"** → rstructor ensures type safety from LLM responses to Rust structs
+
+rstructor brings the familiar Python patterns you know from Instructor and Pydantic to Rust, with the added benefits of Rust's type system and performance.
 
 ## ✨ Features
 
