@@ -1,0 +1,25 @@
+# Files to exclude from crates.io package for rstructor_derive
+
+# Tests directory (not needed in published crate)
+tests/
+
+# Backup files
+*.bak
+*.backup
+**/*.rs.bk
+
+# IDE and editor files
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# Build artifacts
+target/
+*.pdb
+
+# Cargo lock file (for libraries, this shouldn't be published)
+Cargo.lock
+

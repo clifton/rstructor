@@ -1,12 +1,22 @@
 [package]
 name = "rstructor_derive"
-version = "0.1.21"
+version = "0.1.22"
 edition = "2024"
 description = "Derive macros for the rstructor library"
 license = "MIT"
 repository = "https://github.com/clifton/rstructor"
 authors = ["Clifton King <cliftonk@gmail.com>"]
 documentation = "https://docs.rs/rstructor_derive"
+exclude = [
+    # Tests directory
+    "tests/",
+    # Test files mixed in with source
+    "*_tests.rs",
+    "*_test.rs",
+    # Backup files from sed/editors
+    "*.orig",
+    "*.bak",
+]
 keywords = ["llm", "derive", "macros", "json-schema", "validation"]
 categories = [
   "api-bindings",

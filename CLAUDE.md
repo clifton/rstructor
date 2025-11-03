@@ -6,6 +6,7 @@
 - Doctests should not be ignored and should always be checked.
 - Do not add logic into examples that should be library features. Make the library feature instead.
 - Always assume that test environment has valid LLM provider api keys.
+- **Temporary Files**: Place all ad-hoc scripts, temporary markdown files, and other ephemeral files in the `tmp/` directory. This directory is excluded from both git and cargo packaging.
 
 ## Build & Test Commands
 - Build: `cargo build`

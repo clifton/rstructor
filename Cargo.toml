@@ -1,6 +1,6 @@
 [package]
 name = "rstructor"
-version = "0.1.21"
+version = "0.1.22"
 edition = "2024"
 description = "Rust equivalent of Python's Instructor + Pydantic: Extract structured, validated data from LLMs (OpenAI, Anthropic, Grok, Gemini) using type-safe Rust structs and enums"
 license = "MIT"
@@ -8,6 +8,29 @@ repository = "https://github.com/clifton/rstructor"
 authors = ["Clifton King <cliftonk@gmail.com>"]
 readme = "README.md"
 documentation = "https://docs.rs/rstructor"
+exclude = [
+  # Release and development scripts
+  "release.sh",
+  "*.sh",
+  # Documentation that shouldn't be in the crate
+  "CLAUDE.md",
+  "EXAMPLES.md",
+  # Examples and tests directories
+  "examples/",
+  "tests/",
+  # GitHub workflows
+  ".github/",
+  # CI/CD configs
+  ".gitignore",
+  ".gitattributes",
+  # Claude/LLM generated or temporary files
+  ".claude/",
+  # Temporary files directory (ad-hoc scripts, temporary markdown, etc.)
+  "tmp/",
+  # Backup files from sed/editors
+  "*.orig",
+  "*.bak",
+]
 keywords = [
   "llm",
   "openai",
@@ -54,7 +77,7 @@ tracing-subscriber = { version = "0.3", features = [
   "env-filter",
 ], optional = true }
 tracing-futures = { version = "0.2", optional = true }
-rstructor_derive = { version = "0.1.21", path = "./rstructor_derive", optional = true }
+rstructor_derive = { version = "0.1.22", path = "./rstructor_derive", optional = true }
 chrono = "0.4" # For date/time validation in examples
 
 # Feature flags

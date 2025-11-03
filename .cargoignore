@@ -1,0 +1,66 @@
+# Files to exclude from crates.io package
+
+# Release and development scripts
+release.sh
+*.sh
+
+# Documentation that shouldn't be in the crate
+CLAUDE.md
+EXAMPLES.md
+MARKETING.md
+HN_POST.md
+REDDIT_POST.md
+SEO_CHECKLIST.md
+
+# Examples directory (not needed in published crate)
+examples/
+
+# Tests directory (not needed in published crate)
+tests/
+
+# GitHub workflows
+.github/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+*.env
+
+# Backup files
+*.bak
+*.backup
+**/*.rs.bk
+
+# Build artifacts (shouldn't be included anyway)
+target/
+*.pdb
+
+# CI/CD configs (may contain secrets or be unnecessary)
+.gitignore
+.gitattributes
+
+# Claude/LLM generated or temporary files
+.claude/
+*.tmp
+*.temp
+
+# Any files with "test" or "example" in name that aren't needed
+*_test.rs
+*_tests.rs
+*_example.rs
+*_examples.rs
+
+# Documentation build outputs
+doc/
+target/doc/
+
+# Cargo lock file (for libraries, this shouldn't be published)
+Cargo.lock
+

@@ -165,6 +165,18 @@ fi
 # Ask for confirmation before publishing to crates.io
 read -p "Would you like to publish to crates.io? (y/N) " should_publish
 if [ "$should_publish" = "y" ] || [ "$should_publish" = "Y" ]; then
+    # Verify what will be packaged for derive crate
+    echo ""
+    echo "Verifying files to be packaged for rstructor_derive..."
+    echo "Files that will be included:"
+    (cd rstructor_derive && cargo package --list --allow-dirty 2>/dev/null | head -20)
+    echo "... (showing first 20 files)"
+    read -p "Continue with rstructor_derive publish? (y/N) " continue_derive
+    if [ "$continue_derive" != "y" ] && [ "$continue_derive" != "Y" ]; then
+        echo "Aborted publishing rstructor_derive"
+        exit 1
+    fi
+
     # Publish derive crate first
     echo "Publishing rstructor_derive v$DERIVE_VERSION to crates.io..."
     (cd rstructor_derive && cargo publish)
@@ -172,6 +184,18 @@ if [ "$should_publish" = "y" ] || [ "$should_publish" = "Y" ]; then
     # Wait a moment for crates.io to register the new version
     echo "Waiting 15 seconds for crates.io to update..."
     sleep 15
+
+    # Verify what will be packaged for main crate
+    echo ""
+    echo "Verifying files to be packaged for rstructor..."
+    echo "Files that will be included:"
+    cargo package --list --allow-dirty 2>/dev/null | head -30
+    echo "... (showing first 30 files)"
+    read -p "Continue with rstructor publish? (y/N) " continue_main
+    if [ "$continue_main" != "y" ] && [ "$continue_main" != "Y" ]; then
+        echo "Aborted publishing rstructor"
+        exit 1
+    fi
 
     # Then publish main crate
     echo "Publishing rstructor v$MAIN_VERSION to crates.io..."
