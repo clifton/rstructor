@@ -14,16 +14,6 @@ rstructor is a Rust library for extracting structured data from Large Language M
 
 Think of it as the Rust equivalent of [Instructor + Pydantic](https://github.com/jxnl/instructor) for Python, bringing the same structured output capabilities to the Rust ecosystem.
 
-## 🔍 For Python Developers
-
-If you're coming from Python and searching for:
-- **"pydantic rust"** or **"rust pydantic"** → rstructor provides similar schema validation and type safety
-- **"instructor rust"** or **"rust instructor"** → rstructor offers the same structured LLM output extraction
-- **"structured output rust"** or **"llm structured output rust"** → this is exactly what rstructor does
-- **"type-safe llm rust"** → rstructor ensures type safety from LLM responses to Rust structs
-
-rstructor brings the familiar Python patterns you know from Instructor and Pydantic to Rust, with the added benefits of Rust's type system and performance.
-
 ## ✨ Features
 
 - **📝 Type-Safe Definitions**: Define data models as standard Rust structs/enums with attributes
@@ -833,3 +823,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 👥 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 🔍 For Python Developers
+
+If you're coming from Python and searching for:
+- **"pydantic rust"** or **"rust pydantic"** → rstructor provides similar schema validation and type safety
+- **"instructor rust"** or **"rust instructor"** → rstructor offers the same structured LLM output extraction
+- **"structured output rust"** or **"llm structured output rust"** → this is exactly what rstructor does
+- **"type-safe llm rust"** → rstructor ensures type safety from LLM responses to Rust structs
+
+rstructor brings the familiar Python patterns you know from Instructor and Pydantic to Rust, with the added benefits of Rust's type system and performance.
