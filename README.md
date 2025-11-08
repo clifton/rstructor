@@ -80,8 +80,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_key = env::var("OPENAI_API_KEY")?;
 
     // Create an OpenAI client
+    // You can use enum variants or strings for model names
     let client = OpenAIClient::new(api_key)?
-        .model(OpenAIModel::Gpt4OMini)
+        .model("gpt-4o-mini")  // String model names work!
         .temperature(0.0)
         .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 
@@ -465,6 +466,57 @@ impl CustomTypeSchema for EmailAddress {
 ```
 
 The macro automatically detects these custom types and generates appropriate JSON Schema with format specifications that guide LLMs to produce correctly formatted values. The library includes built-in recognition of common date and UUID types, but you can implement the trait for any custom type.
+
+### Flexible Model Selection and Custom Endpoints
+
+rstructor supports both enum variants and string-based model selection, making it easy to:
+- Use new models without waiting for library updates
+- Work with local LLMs or OpenAI-compatible endpoints
+- Configure models from environment variables or config files
+
+#### Using String Model Names
+
+You can specify models as strings, which is especially useful for:
+- New models that haven't been added to the enum yet
+- Local LLMs running on your infrastructure
+- Custom or fine-tuned models
+
+```rust
+use rstructor::OpenAIClient;
+
+// Use a string directly - works with any model name
+let client = OpenAIClient::new("api-key")?
+    .model("gpt-4-custom");  // Custom model name
+
+// Works with environment variables
+let model_name = std::env::var("MODEL_NAME").unwrap();
+let client = OpenAIClient::new("api-key")?
+    .model(model_name);  // Dynamic model selection
+
+// Enum variants still work for convenience
+let client = OpenAIClient::new("api-key")?
+    .model(OpenAIModel::Gpt4O);  // Type-safe enum variant
+```
+
+#### Custom Endpoints for Local LLMs
+
+Use rstructor with local LLMs or proxy endpoints by setting a custom base URL:
+
+```rust
+use rstructor::OpenAIClient;
+
+// Connect to a local LLM server (e.g., Ollama, vLLM, etc.)
+let client = OpenAIClient::new("dummy-key")?  // API key may not be required for local
+    .base_url("http://localhost:1234/v1")  // Custom endpoint
+    .model("llama-3.1-70b");  // Local model name
+
+// Or use with OpenAI-compatible proxy services
+let client = OpenAIClient::new("api-key")?
+    .base_url("https://api.example.com/v1")  // Proxy endpoint
+    .model("gpt-4");
+```
+
+**Note**: All providers (OpenAI, Anthropic, Grok, Gemini) support both string model selection and custom endpoints via the `.base_url()` method.
 
 ### Configuring Different LLM Providers
 
