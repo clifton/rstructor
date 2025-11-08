@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -17,7 +18,25 @@ use crate::model::Instructor;
 /// These are convenience variants for common Grok models.
 /// For the latest available models and their identifiers, check the
 /// [xAI Models Documentation](https://docs.x.ai/docs/models).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// # Using Custom Models
+///
+/// You can specify any model name as a string using `Custom` variant or `FromStr`:
+///
+/// ```rust
+/// use rstructor::GrokModel;
+/// use std::str::FromStr;
+///
+/// // Using Custom variant
+/// let model = GrokModel::Custom("grok-custom".to_string());
+///
+/// // Using FromStr (useful for config files)
+/// let model = GrokModel::from_str("grok-custom").unwrap();
+///
+/// // Or use the convenience method
+/// let model = GrokModel::from_string("grok-custom");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
     /// Grok-4 (latest flagship model with 256k context window)
     Grok4,
@@ -35,10 +54,12 @@ pub enum Model {
     Grok21212,
     /// Grok-2 Vision (multimodal vision model)
     Grok2Vision,
+    /// Custom model name (for new models or Grok-compatible endpoints)
+    Custom(String),
 }
 
 impl Model {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Model::Grok4 => "grok-4-0709",
             Model::Grok4FastReasoning => "grok-4-fast-reasoning",
@@ -48,7 +69,47 @@ impl Model {
             Model::GrokCodeFast1 => "grok-code-fast-1",
             Model::Grok21212 => "grok-2-1212",
             Model::Grok2Vision => "grok-2-vision-1212",
+            Model::Custom(name) => name,
         }
+    }
+
+    /// Create a model from a string. This is a convenience method that always succeeds.
+    ///
+    /// If the string matches a known model variant, it returns that variant.
+    /// Otherwise, it returns `Custom(name)`.
+    pub fn from_string(name: impl Into<String>) -> Self {
+        let name = name.into();
+        match name.as_str() {
+            "grok-4-0709" => Model::Grok4,
+            "grok-4-fast-reasoning" => Model::Grok4FastReasoning,
+            "grok-4-fast-non-reasoning" => Model::Grok4FastNonReasoning,
+            "grok-3" => Model::Grok3,
+            "grok-3-mini" => Model::Grok3Mini,
+            "grok-code-fast-1" => Model::GrokCodeFast1,
+            "grok-2-1212" => Model::Grok21212,
+            "grok-2-vision-1212" => Model::Grok2Vision,
+            _ => Model::Custom(name),
+        }
+    }
+}
+
+impl FromStr for Model {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Model::from_string(s))
+    }
+}
+
+impl From<&str> for Model {
+    fn from(s: &str) -> Self {
+        Model::from_string(s)
+    }
+}
+
+impl From<String> for Model {
+    fn from(s: String) -> Self {
+        Model::from_string(s)
     }
 }
 
@@ -62,6 +123,9 @@ pub struct GrokConfig {
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
     pub include_error_feedback: Option<bool>,
+    /// Custom base URL for Grok-compatible APIs (e.g., local LLMs, proxy endpoints)
+    /// Defaults to "https://api.x.ai/v1" if not set
+    pub base_url: Option<String>,
 }
 
 /// Grok client for generating completions
@@ -157,6 +221,7 @@ impl GrokClient {
             timeout: None,     // Default: no timeout (uses reqwest's default)
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
+            base_url: None,    // Default: use official Grok API
         };
 
         debug!("Grok client created with default configuration");
@@ -198,6 +263,7 @@ impl GrokClient {
             timeout: None,     // Default: no timeout (uses reqwest's default)
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
+            base_url: None,    // Default: use official Grok API
         };
 
         debug!("Grok client created with default configuration");
@@ -251,10 +317,16 @@ impl GrokClient {
             max_tokens: self.config.max_tokens,
         };
 
-        debug!("Sending request to Grok API");
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.x.ai/v1");
+        let url = format!("{}/chat/completions", base_url);
+        debug!(url = %url, "Sending request to Grok API");
         let response = self
             .client
-            .post("https://api.x.ai/v1/chat/completions")
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(&request)
@@ -360,6 +432,25 @@ crate::impl_client_builder_methods! {
     provider_name: "Grok"
 }
 
+impl GrokClient {
+    /// Set a custom base URL for Grok-compatible APIs (e.g., local LLMs, proxy endpoints).
+    ///
+    /// # Arguments
+    ///
+    /// * `base_url` - Base URL without trailing slash (e.g., "http://localhost:1234/v1" or "https://api.example.com/v1")
+    #[tracing::instrument(skip(self, base_url))]
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        let base_url_str = base_url.into();
+        tracing::debug!(
+            previous_base_url = ?self.config.base_url,
+            new_base_url = %base_url_str,
+            "Setting custom base URL"
+        );
+        self.config.base_url = Some(base_url_str);
+        self
+    }
+}
+
 #[async_trait]
 impl LLMClient for GrokClient {
     fn from_env() -> Result<Self> {
@@ -416,10 +507,16 @@ impl LLMClient for GrokClient {
         };
 
         // Send the request to Grok/xAI API
-        debug!("Sending request to Grok API");
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.x.ai/v1");
+        let url = format!("{}/chat/completions", base_url);
+        debug!(url = %url, "Sending request to Grok API");
         let response = self
             .client
-            .post("https://api.x.ai/v1/chat/completions")
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(&request)

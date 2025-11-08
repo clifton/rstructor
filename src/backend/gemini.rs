@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -18,7 +19,25 @@ use crate::model::Instructor;
 /// [Google AI Models Documentation](https://ai.google.dev/models).
 /// Use the API endpoint `GET https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY`
 /// to get the current list of available models.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// # Using Custom Models
+///
+/// You can specify any model name as a string using `Custom` variant or `FromStr`:
+///
+/// ```rust
+/// use rstructor::GeminiModel;
+/// use std::str::FromStr;
+///
+/// // Using Custom variant
+/// let model = GeminiModel::Custom("gemini-custom".to_string());
+///
+/// // Using FromStr (useful for config files)
+/// let model = GeminiModel::from_str("gemini-custom").unwrap();
+///
+/// // Or use the convenience method
+/// let model = GeminiModel::from_string("gemini-custom");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
     /// Gemini 2.5 Pro (latest production Pro model)
     Gemini25Pro,
@@ -40,10 +59,12 @@ pub enum Model {
     GeminiProLatest,
     /// Gemini Flash Latest (alias for latest Flash model)
     GeminiFlashLatest,
+    /// Custom model name (for new models or Gemini-compatible endpoints)
+    Custom(String),
 }
 
 impl Model {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Model::Gemini25Pro => "gemini-2.5-pro",
             Model::Gemini25Flash => "gemini-2.5-flash",
@@ -55,7 +76,49 @@ impl Model {
             Model::Gemini20ProExp => "gemini-2.0-pro-exp",
             Model::GeminiProLatest => "gemini-pro-latest",
             Model::GeminiFlashLatest => "gemini-flash-latest",
+            Model::Custom(name) => name,
         }
+    }
+
+    /// Create a model from a string. This is a convenience method that always succeeds.
+    ///
+    /// If the string matches a known model variant, it returns that variant.
+    /// Otherwise, it returns `Custom(name)`.
+    pub fn from_string(name: impl Into<String>) -> Self {
+        let name = name.into();
+        match name.as_str() {
+            "gemini-2.5-pro" => Model::Gemini25Pro,
+            "gemini-2.5-flash" => Model::Gemini25Flash,
+            "gemini-2.5-flash-lite" => Model::Gemini25FlashLite,
+            "gemini-2.0-flash" => Model::Gemini20Flash,
+            "gemini-2.0-flash-001" => Model::Gemini20Flash001,
+            "gemini-2.0-flash-exp" => Model::Gemini20FlashExp,
+            "gemini-2.0-flash-lite" => Model::Gemini20FlashLite,
+            "gemini-2.0-pro-exp" => Model::Gemini20ProExp,
+            "gemini-pro-latest" => Model::GeminiProLatest,
+            "gemini-flash-latest" => Model::GeminiFlashLatest,
+            _ => Model::Custom(name),
+        }
+    }
+}
+
+impl FromStr for Model {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Model::from_string(s))
+    }
+}
+
+impl From<&str> for Model {
+    fn from(s: &str) -> Self {
+        Model::from_string(s)
+    }
+}
+
+impl From<String> for Model {
+    fn from(s: String) -> Self {
+        Model::from_string(s)
     }
 }
 
@@ -69,6 +132,9 @@ pub struct GeminiConfig {
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
     pub include_error_feedback: Option<bool>,
+    /// Custom base URL for Gemini-compatible APIs
+    /// Defaults to "https://generativelanguage.googleapis.com/v1beta" if not set
+    pub base_url: Option<String>,
 }
 
 /// Gemini client for generating completions
@@ -160,6 +226,7 @@ impl GeminiClient {
             timeout: None,     // Default: no timeout (uses reqwest's default)
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
+            base_url: None,    // Default: use official Gemini API
         };
 
         let client = reqwest::Client::new();
@@ -201,6 +268,7 @@ impl GeminiClient {
             timeout: None,     // Default: no timeout (uses reqwest's default)
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
+            base_url: None,    // Default: use official Gemini API
         };
 
         let client = reqwest::Client::new();
@@ -252,13 +320,20 @@ impl GeminiClient {
             generation_config,
         };
 
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://generativelanguage.googleapis.com/v1beta");
+        let url = format!(
+            "{}/models/{}:generateContent",
+            base_url,
+            self.config.model.as_str()
+        );
         debug!(
+            url = %url,
             model = %self.config.model.as_str(),
             "Sending request to Gemini API"
-        );
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            self.config.model.as_str()
         );
         let response = self
             .client
@@ -336,6 +411,25 @@ crate::impl_client_builder_methods! {
     provider_name: "Gemini"
 }
 
+impl GeminiClient {
+    /// Set a custom base URL for Gemini-compatible APIs.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_url` - Base URL without trailing slash (e.g., "http://localhost:1234/v1beta" or "https://api.example.com/v1beta")
+    #[tracing::instrument(skip(self, base_url))]
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        let base_url_str = base_url.into();
+        tracing::debug!(
+            previous_base_url = ?self.config.base_url,
+            new_base_url = %base_url_str,
+            "Setting custom base URL"
+        );
+        self.config.base_url = Some(base_url_str);
+        self
+    }
+}
+
 #[async_trait]
 impl LLMClient for GeminiClient {
     fn from_env() -> Result<Self> {
@@ -394,13 +488,20 @@ impl LLMClient for GeminiClient {
         };
 
         // Send the request to Gemini API
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://generativelanguage.googleapis.com/v1beta");
+        let url = format!(
+            "{}/models/{}:generateContent",
+            base_url,
+            self.config.model.as_str()
+        );
         debug!(
+            url = %url,
             model = %self.config.model.as_str(),
             "Sending request to Gemini API"
-        );
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            self.config.model.as_str()
         );
         let response = self
             .client

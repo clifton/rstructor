@@ -177,9 +177,15 @@ macro_rules! impl_client_builder_methods {
         provider_name: $provider:expr
     ) => {
         impl $client {
-            /// Set the model to use
-            #[tracing::instrument(skip(self))]
-            pub fn model(mut self, model: $model) -> Self {
+            /// Set the model to use. Accepts either a Model enum variant or a string.
+            ///
+            /// When a string is provided, it will be converted to a Model enum. If the string
+            /// matches a known model variant, that variant is used; otherwise, it becomes `Custom(name)`.
+            /// This allows using any model name, including new models or local LLMs, without needing
+            /// to update the enum.
+            #[tracing::instrument(skip(self, model))]
+            pub fn model<M: Into<$model>>(mut self, model: M) -> Self {
+                let model = model.into();
                 tracing::debug!(
                     previous_model = ?self.config.model,
                     new_model = ?model,

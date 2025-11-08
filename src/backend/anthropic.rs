@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -15,7 +16,25 @@ use crate::model::Instructor;
 ///
 /// For the latest available models and their identifiers, check the
 /// [Anthropic Models Documentation](https://docs.anthropic.com/en/docs/about-claude/models/all-models).
-#[derive(Debug, Clone)]
+///
+/// # Using Custom Models
+///
+/// You can specify any model name as a string using `Custom` variant or `FromStr`:
+///
+/// ```rust
+/// use rstructor::AnthropicModel;
+/// use std::str::FromStr;
+///
+/// // Using Custom variant
+/// let model = AnthropicModel::Custom("claude-custom".to_string());
+///
+/// // Using FromStr (useful for config files)
+/// let model = AnthropicModel::from_str("claude-custom").unwrap();
+///
+/// // Or use the convenience method
+/// let model = AnthropicModel::from_string("claude-custom");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnthropicModel {
     /// Claude Haiku 4.5 (latest fastest model)
     ClaudeHaiku45,
@@ -35,10 +54,12 @@ pub enum AnthropicModel {
     Claude3Haiku,
     /// Claude Opus 3 (most capable model for complex tasks)
     Claude3Opus,
+    /// Custom model name (for new models or Anthropic-compatible endpoints)
+    Custom(String),
 }
 
 impl AnthropicModel {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             AnthropicModel::ClaudeHaiku45 => "claude-haiku-4-5-20251001",
             AnthropicModel::ClaudeSonnet45 => "claude-sonnet-4-5-20250929",
@@ -49,7 +70,48 @@ impl AnthropicModel {
             AnthropicModel::Claude35Haiku => "claude-3-5-haiku-20241022",
             AnthropicModel::Claude3Haiku => "claude-3-haiku-20240307",
             AnthropicModel::Claude3Opus => "claude-3-opus-20240229",
+            AnthropicModel::Custom(name) => name,
         }
+    }
+
+    /// Create a model from a string. This is a convenience method that always succeeds.
+    ///
+    /// If the string matches a known model variant, it returns that variant.
+    /// Otherwise, it returns `Custom(name)`.
+    pub fn from_string(name: impl Into<String>) -> Self {
+        let name = name.into();
+        match name.as_str() {
+            "claude-haiku-4-5-20251001" => AnthropicModel::ClaudeHaiku45,
+            "claude-sonnet-4-5-20250929" => AnthropicModel::ClaudeSonnet45,
+            "claude-opus-4-1-20250805" => AnthropicModel::ClaudeOpus41,
+            "claude-opus-4-20250514" => AnthropicModel::ClaudeOpus4,
+            "claude-sonnet-4-20250514" => AnthropicModel::ClaudeSonnet4,
+            "claude-3-7-sonnet-20250219" => AnthropicModel::Claude37Sonnet,
+            "claude-3-5-haiku-20241022" => AnthropicModel::Claude35Haiku,
+            "claude-3-haiku-20240307" => AnthropicModel::Claude3Haiku,
+            "claude-3-opus-20240229" => AnthropicModel::Claude3Opus,
+            _ => AnthropicModel::Custom(name),
+        }
+    }
+}
+
+impl FromStr for AnthropicModel {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(AnthropicModel::from_string(s))
+    }
+}
+
+impl From<&str> for AnthropicModel {
+    fn from(s: &str) -> Self {
+        AnthropicModel::from_string(s)
+    }
+}
+
+impl From<String> for AnthropicModel {
+    fn from(s: String) -> Self {
+        AnthropicModel::from_string(s)
     }
 }
 
@@ -63,6 +125,9 @@ pub struct AnthropicConfig {
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
     pub include_error_feedback: Option<bool>,
+    /// Custom base URL for Anthropic-compatible APIs
+    /// Defaults to "https://api.anthropic.com/v1" if not set
+    pub base_url: Option<String>,
 }
 
 /// Anthropic client for generating completions
@@ -140,6 +205,7 @@ impl AnthropicClient {
             timeout: None,     // Default: no timeout (uses reqwest's default)
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
+            base_url: None,    // Default: use official Anthropic API
         };
 
         debug!("Anthropic client created with default configuration");
@@ -183,6 +249,7 @@ impl AnthropicClient {
             timeout: None,     // Default: no timeout (uses reqwest's default)
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
+            base_url: None,    // Default: use official Anthropic API
         };
 
         debug!("Anthropic client created with default configuration");
@@ -234,9 +301,16 @@ impl AnthropicClient {
             max_tokens = request.max_tokens,
             "Sending request to Anthropic API"
         );
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.anthropic.com/v1");
+        let url = format!("{}/messages", base_url);
+        debug!(url = %url, "Using Anthropic API endpoint");
         let response = self
             .client
-            .post("https://api.anthropic.com/v1/messages")
+            .post(&url)
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json")
@@ -316,6 +390,25 @@ crate::impl_client_builder_methods! {
     provider_name: "Anthropic"
 }
 
+impl AnthropicClient {
+    /// Set a custom base URL for Anthropic-compatible APIs.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_url` - Base URL without trailing slash (e.g., "http://localhost:1234/v1" or "https://api.example.com/v1")
+    #[tracing::instrument(skip(self, base_url))]
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        let base_url_str = base_url.into();
+        tracing::debug!(
+            previous_base_url = ?self.config.base_url,
+            new_base_url = %base_url_str,
+            "Setting custom base URL"
+        );
+        self.config.base_url = Some(base_url_str);
+        self
+    }
+}
+
 #[async_trait]
 impl LLMClient for AnthropicClient {
     fn from_env() -> Result<Self> {
@@ -375,9 +468,16 @@ impl LLMClient for AnthropicClient {
             max_tokens = request.max_tokens,
             "Sending request to Anthropic API"
         );
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.anthropic.com/v1");
+        let url = format!("{}/messages", base_url);
+        debug!(url = %url, "Using Anthropic API endpoint");
         let response = self
             .client
-            .post("https://api.anthropic.com/v1/messages")
+            .post(&url)
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json")

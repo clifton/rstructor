@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -13,7 +14,25 @@ use crate::model::Instructor;
 ///
 /// For the latest available models and their identifiers, check the
 /// [OpenAI Models Documentation](https://platform.openai.com/docs/models).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// # Using Custom Models
+///
+/// You can specify any model name as a string using `Custom` variant or `FromStr`:
+///
+/// ```rust
+/// use rstructor::OpenAIModel;
+/// use std::str::FromStr;
+///
+/// // Using Custom variant
+/// let model = OpenAIModel::Custom("gpt-4-custom".to_string());
+///
+/// // Using FromStr (useful for config files)
+/// let model = OpenAIModel::from_str("gpt-4-custom").unwrap();
+///
+/// // Or use the convenience method
+/// let model = OpenAIModel::from_string("gpt-4-custom");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
     /// GPT-5 Chat Latest (latest GPT-5 model for chat)
     Gpt5ChatLatest,
@@ -39,10 +58,12 @@ pub enum Model {
     O1Mini,
     /// O1 Pro (most capable reasoning model)
     O1Pro,
+    /// Custom model name (for new models, local LLMs, or OpenAI-compatible endpoints)
+    Custom(String),
 }
 
 impl Model {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Model::Gpt5ChatLatest => "gpt-5-chat-latest",
             Model::Gpt5Pro => "gpt-5-pro",
@@ -56,7 +77,51 @@ impl Model {
             Model::O1 => "o1",
             Model::O1Mini => "o1-mini",
             Model::O1Pro => "o1-pro",
+            Model::Custom(name) => name,
         }
+    }
+
+    /// Create a model from a string. This is a convenience method that always succeeds.
+    ///
+    /// If the string matches a known model variant, it returns that variant.
+    /// Otherwise, it returns `Custom(name)`.
+    pub fn from_string(name: impl Into<String>) -> Self {
+        let name = name.into();
+        match name.as_str() {
+            "gpt-5-chat-latest" => Model::Gpt5ChatLatest,
+            "gpt-5-pro" => Model::Gpt5Pro,
+            "gpt-5" => Model::Gpt5,
+            "gpt-5-mini" => Model::Gpt5Mini,
+            "gpt-4o" => Model::Gpt4O,
+            "gpt-4o-mini" => Model::Gpt4OMini,
+            "gpt-4-turbo" => Model::Gpt4Turbo,
+            "gpt-4" => Model::Gpt4,
+            "gpt-3.5-turbo" => Model::Gpt35Turbo,
+            "o1" => Model::O1,
+            "o1-mini" => Model::O1Mini,
+            "o1-pro" => Model::O1Pro,
+            _ => Model::Custom(name),
+        }
+    }
+}
+
+impl FromStr for Model {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Model::from_string(s))
+    }
+}
+
+impl From<&str> for Model {
+    fn from(s: &str) -> Self {
+        Model::from_string(s)
+    }
+}
+
+impl From<String> for Model {
+    fn from(s: String) -> Self {
+        Model::from_string(s)
     }
 }
 
@@ -70,6 +135,9 @@ pub struct OpenAIConfig {
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
     pub include_error_feedback: Option<bool>,
+    /// Custom base URL for OpenAI-compatible APIs (e.g., local LLMs, proxy endpoints)
+    /// Defaults to "https://api.openai.com/v1" if not set
+    pub base_url: Option<String>,
 }
 
 /// OpenAI client for generating completions
@@ -164,6 +232,7 @@ impl OpenAIClient {
             timeout: None,     // Default: no timeout (uses reqwest's default)
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
+            base_url: None,    // Default: use official OpenAI API
         };
 
         debug!("OpenAI client created with default configuration");
@@ -205,6 +274,7 @@ impl OpenAIClient {
             timeout: None,     // Default: no timeout (uses reqwest's default)
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
+            base_url: None,    // Default: use official OpenAI API
         };
 
         debug!("OpenAI client created with default configuration");
@@ -226,6 +296,36 @@ crate::impl_client_builder_methods! {
 }
 
 impl OpenAIClient {
+    /// Set a custom base URL for OpenAI-compatible APIs (e.g., local LLMs, proxy endpoints).
+    ///
+    /// # Arguments
+    ///
+    /// * `base_url` - Base URL without trailing slash (e.g., "http://localhost:1234/v1" or "https://api.example.com/v1")
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use rstructor::OpenAIClient;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::new("api-key")?
+    ///     .base_url("http://localhost:1234/v1")
+    ///     .model("llama-3.1-70b");
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[tracing::instrument(skip(self, base_url))]
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        let base_url_str = base_url.into();
+        tracing::debug!(
+            previous_base_url = ?self.config.base_url,
+            new_base_url = %base_url_str,
+            "Setting custom base URL"
+        );
+        self.config.base_url = Some(base_url_str);
+        self
+    }
+
     /// Internal implementation of materialize (without retry logic)
     async fn materialize_internal<T>(&self, prompt: &str) -> Result<T>
     where
@@ -261,10 +361,16 @@ impl OpenAIClient {
         };
 
         // Send the request to OpenAI
-        debug!("Sending request to OpenAI API");
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
+        let url = format!("{}/chat/completions", base_url);
+        debug!(url = %url, "Sending request to OpenAI API");
         let response = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(&request)
@@ -425,10 +531,16 @@ impl LLMClient for OpenAIClient {
         };
 
         // Send the request to OpenAI
-        debug!("Sending request to OpenAI API");
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
+        let url = format!("{}/chat/completions", base_url);
+        debug!(url = %url, "Sending request to OpenAI API");
         let response = self
             .client
-            .post("https://api.openai.com/v1/chat/completions")
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("Content-Type", "application/json")
             .json(&request)
