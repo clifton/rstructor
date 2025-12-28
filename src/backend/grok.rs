@@ -44,7 +44,11 @@ pub enum Model {
     Grok4FastReasoning,
     /// Grok-4 Fast Non-Reasoning (faster variant optimized for non-reasoning tasks)
     Grok4FastNonReasoning,
-    /// Grok-3 (advanced model with enhanced reasoning)
+    /// Grok-4.1 Fast Reasoning (latest frontier model with 2M context window)
+    Grok41FastReasoning,
+    /// Grok-4.1 Fast Non-Reasoning (latest frontier model with 2M context window)
+    Grok41FastNonReasoning,
+    /// Grok-3 (previous generation model with 131k context window)
     Grok3,
     /// Grok-3 Mini (efficient variant with 131k context window)
     Grok3Mini,
@@ -64,6 +68,8 @@ impl Model {
             Model::Grok4 => "grok-4-0709",
             Model::Grok4FastReasoning => "grok-4-fast-reasoning",
             Model::Grok4FastNonReasoning => "grok-4-fast-non-reasoning",
+            Model::Grok41FastReasoning => "grok-4-1-fast-reasoning",
+            Model::Grok41FastNonReasoning => "grok-4-1-fast-non-reasoning",
             Model::Grok3 => "grok-3",
             Model::Grok3Mini => "grok-3-mini",
             Model::GrokCodeFast1 => "grok-code-fast-1",
@@ -83,6 +89,8 @@ impl Model {
             "grok-4-0709" => Model::Grok4,
             "grok-4-fast-reasoning" => Model::Grok4FastReasoning,
             "grok-4-fast-non-reasoning" => Model::Grok4FastNonReasoning,
+            "grok-4-1-fast-reasoning" => Model::Grok41FastReasoning,
+            "grok-4-1-fast-non-reasoning" => Model::Grok41FastNonReasoning,
             "grok-3" => Model::Grok3,
             "grok-3-mini" => Model::Grok3Mini,
             "grok-code-fast-1" => Model::GrokCodeFast1,
