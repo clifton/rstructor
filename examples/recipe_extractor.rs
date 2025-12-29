@@ -1,11 +1,8 @@
-use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
-    RStructorError,
-};
+use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient, RStructorError};
 use serde::{Deserialize, Serialize};
 use std::{
     env,
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
 };
 
 // Define a nested data model for a recipe
@@ -38,6 +35,7 @@ struct Step {
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "A complete cooking recipe with ingredients and step-by-step instructions",
+      validate = "validate_recipe",
       examples = [
         ::serde_json::json!({
             "name": "Classic Chocolate Chip Cookies",
@@ -76,69 +74,67 @@ struct Recipe {
     steps: Vec<Step>,
 }
 
-// Add custom validation
-impl Recipe {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Recipe must have a name
-        if self.name.trim().is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Recipe must have a name".to_string(),
-            ));
-        }
-
-        // Must have at least one ingredient
-        if self.ingredients.is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Recipe must have at least one ingredient".to_string(),
-            ));
-        }
-
-        // Must have at least one step
-        if self.steps.is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Recipe must have at least one step".to_string(),
-            ));
-        }
-
-        // Validate steps are in order
-        let mut prev_number = 0;
-        for step in &self.steps {
-            if step.number <= prev_number {
-                return Err(RStructorError::ValidationError(format!(
-                    "Step numbers must be sequential, found step {} after step {}",
-                    step.number, prev_number
-                )));
-            }
-            prev_number = step.number;
-        }
-
-        // All ingredients must have positive amounts
-        for ingredient in &self.ingredients {
-            if ingredient.amount <= 0.0 {
-                return Err(RStructorError::ValidationError(format!(
-                    "Ingredient '{}' has invalid amount: {}",
-                    ingredient.name, ingredient.amount
-                )));
-            }
-
-            // Ingredient name can't be empty
-            if ingredient.name.trim().is_empty() {
-                return Err(RStructorError::ValidationError(
-                    "Ingredient name cannot be empty".to_string(),
-                ));
-            }
-
-            // Unit can't be empty
-            if ingredient.unit.trim().is_empty() {
-                return Err(RStructorError::ValidationError(format!(
-                    "Unit cannot be empty for ingredient '{}'",
-                    ingredient.name
-                )));
-            }
-        }
-
-        Ok(())
+// Custom validation function referenced by #[llm(validate = "validate_recipe")]
+fn validate_recipe(recipe: &Recipe) -> rstructor::Result<()> {
+    // Recipe must have a name
+    if recipe.name.trim().is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Recipe must have a name".to_string(),
+        ));
     }
+
+    // Must have at least one ingredient
+    if recipe.ingredients.is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Recipe must have at least one ingredient".to_string(),
+        ));
+    }
+
+    // Must have at least one step
+    if recipe.steps.is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Recipe must have at least one step".to_string(),
+        ));
+    }
+
+    // Validate steps are in order
+    let mut prev_number = 0;
+    for step in &recipe.steps {
+        if step.number <= prev_number {
+            return Err(RStructorError::ValidationError(format!(
+                "Step numbers must be sequential, found step {} after step {}",
+                step.number, prev_number
+            )));
+        }
+        prev_number = step.number;
+    }
+
+    // All ingredients must have positive amounts
+    for ingredient in &recipe.ingredients {
+        if ingredient.amount <= 0.0 {
+            return Err(RStructorError::ValidationError(format!(
+                "Ingredient '{}' has invalid amount: {}",
+                ingredient.name, ingredient.amount
+            )));
+        }
+
+        // Ingredient name can't be empty
+        if ingredient.name.trim().is_empty() {
+            return Err(RStructorError::ValidationError(
+                "Ingredient name cannot be empty".to_string(),
+            ));
+        }
+
+        // Unit can't be empty
+        if ingredient.unit.trim().is_empty() {
+            return Err(RStructorError::ValidationError(format!(
+                "Unit cannot be empty for ingredient '{}'",
+                ingredient.name
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> {
@@ -149,7 +145,6 @@ async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> 
 
     // Create OpenAI client
     let client = OpenAIClient::new(api_key)?
-        .model(OpenAIModel::Gpt4O) // Use GPT-4o for better recipes
         .temperature(0.1) // Lower temperature for more consistent results
         .max_retries(3)
         .include_error_feedback(true);
@@ -189,7 +184,6 @@ async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recip
 
     // Create Anthropic client
     let client = AnthropicClient::new(api_key)?
-        .model(AnthropicModel::ClaudeSonnet45) // Use Claude Sonnet 4.5 for better recipes
         .temperature(0.1) // Lower temperature for more consistent results
         .max_retries(3)
         .include_error_feedback(true);
@@ -292,18 +286,26 @@ async fn run_recipe_extraction(recipe_name: &str) -> Result<(), Box<dyn std::err
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    print!("What would you like a recipe for? ");
-    io::stdout().flush()?;
+    let recipe_name = if io::stdin().is_terminal() {
+        // Interactive mode - get user input
+        print!("What would you like a recipe for? ");
+        io::stdout().flush()?;
 
-    let mut recipe_name = String::new();
-    io::stdin().read_line(&mut recipe_name)?;
-    let recipe_name = recipe_name.trim();
+        let mut recipe_name = String::new();
+        io::stdin().read_line(&mut recipe_name)?;
+        let recipe_name = recipe_name.trim();
 
-    if recipe_name.is_empty() {
-        println!("No recipe name entered. Using default: chocolate chip cookies");
-        let recipe_name = "chocolate chip cookies".to_string();
-        return run_recipe_extraction(&recipe_name).await;
-    }
+        if recipe_name.is_empty() {
+            println!("No recipe name entered. Using default: chocolate chip cookies");
+            "chocolate chip cookies".to_string()
+        } else {
+            recipe_name.to_string()
+        }
+    } else {
+        // Non-interactive mode (CI, piped input, etc.) - use default
+        println!("Running in non-interactive mode. Using default: chocolate chip cookies");
+        "chocolate chip cookies".to_string()
+    };
 
-    run_recipe_extraction(recipe_name).await
+    run_recipe_extraction(&recipe_name).await
 }

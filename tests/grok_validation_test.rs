@@ -69,74 +69,21 @@ mod grok_validation_tests {
     #[cfg(feature = "grok")]
     #[tokio::test]
     async fn test_grok_validation_fails_with_negative_price() {
-        // For this test, we really just need to validate manually, but we'll
-        // skip full API validation if no API key is available
         // Test with empty string to use XAI_API_KEY env var
-        let client = match GrokClient::from_env() {
-            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0),
-            Err(_) => {
-                println!("Skipping Grok API test (no API key found)");
-                // Just test the validation logic directly
-                let invalid_product = ProductInfo {
-                    name: "Test Product".to_string(),
-                    price: -10.0, // Negative price - invalid
-                    stock: 100,
-                    category: "Electronics".to_string(),
-                };
-
-                let validation_result = invalid_product.validate();
-                assert!(
-                    validation_result.is_err(),
-                    "Validation should fail with negative price"
-                );
-
-                if let Err(RStructorError::ValidationError(msg)) = validation_result {
-                    assert!(
-                        msg.contains("Price") || msg.contains("price"),
-                        "Error should mention price: {}",
-                        msg
-                    );
-                }
-                return;
-            }
-        };
+        let client = GrokClient::from_env()
+            .expect("XAI_API_KEY must be set for this test")
+            .model(GrokModel::Grok4)
+            .temperature(0.0);
 
         // First get a valid product response
         let prompt = "Describe a smartphone product with realistic details";
         let valid_result = client.materialize::<ProductInfo>(prompt).await;
 
-        // Skip the test if we have API issues
-        if let Err(RStructorError::ApiError(_)) = &valid_result {
-            println!("Skipping due to API error: {:?}", valid_result);
-
-            // Still test the validation directly
-            let invalid_product = ProductInfo {
-                name: "Test Product".to_string(),
-                price: -10.0, // Negative price - invalid
-                stock: 100,
-                category: "Electronics".to_string(),
-            };
-
-            let validation_result = invalid_product.validate();
-            assert!(
-                validation_result.is_err(),
-                "Validation should fail with negative price"
-            );
-
-            if let Err(RStructorError::ValidationError(msg)) = validation_result {
-                assert!(
-                    msg.contains("Price") || msg.contains("price"),
-                    "Error should mention price: {}",
-                    msg
-                );
-            }
-            return;
-        }
-
-        // Make sure we can get a valid response
+        // Fail test if API call fails
         assert!(
             valid_result.is_ok(),
-            "Should be able to get valid product data"
+            "API call failed: {:?}",
+            valid_result.err()
         );
 
         // Now create a new ProductInfo with an invalid price
@@ -210,25 +157,10 @@ mod grok_validation_tests {
     async fn test_grok_validation_succeeds_with_valid_data() {
         // This test demonstrates successful validation with reasonable data
         // Test with empty string to use XAI_API_KEY env var
-        let client = match GrokClient::from_env() {
-            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0), // Use deterministic temperature for consistent results
-            Err(_) => {
-                println!("Skipping Grok API test (no API key found)");
-                // Create a valid product object to test validation directly
-                let valid_product = ProductInfo {
-                    name: "Laptop".to_string(),
-                    price: 999.99,
-                    stock: 50,
-                    category: "Electronics".to_string(),
-                };
-
-                assert!(
-                    valid_product.validate().is_ok(),
-                    "Valid product data should pass validation"
-                );
-                return;
-            }
-        };
+        let client = GrokClient::from_env()
+            .expect("XAI_API_KEY must be set for this test")
+            .model(GrokModel::Grok4)
+            .temperature(0.0); // Use deterministic temperature for consistent results
 
         // Normal prompt asking for product information
         let prompt = "Describe a laptop product with realistic details";
@@ -236,27 +168,8 @@ mod grok_validation_tests {
         // Should succeed validation
         let result = client.materialize::<ProductInfo>(prompt).await;
 
-        // If we get API errors, skip the test but still test validation directly
-        if let Err(RStructorError::ApiError(_)) = &result {
-            println!("Skipping due to API error: {:?}", result);
-
-            // Create a valid product object to test validation directly
-            let valid_product = ProductInfo {
-                name: "Laptop".to_string(),
-                price: 999.99,
-                stock: 50,
-                category: "Electronics".to_string(),
-            };
-
-            assert!(
-                valid_product.validate().is_ok(),
-                "Valid product data should pass validation"
-            );
-            return;
-        }
-
-        // Validation should pass
-        assert!(result.is_ok(), "Validation failed: {:?}", result.err());
+        // Fail test if API call fails
+        assert!(result.is_ok(), "API call failed: {:?}", result.err());
 
         // Check the data looks reasonable
         let product = result.unwrap();

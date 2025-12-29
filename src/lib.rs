@@ -69,3 +69,4 @@ pub use backend::grok::{GrokClient, Model as GrokModel};
 pub use rstructor_derive::Instructor;
 
 pub use backend::LLMClient;
+pub use backend::ThinkingLevel;

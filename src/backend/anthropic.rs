@@ -115,6 +115,8 @@ impl From<String> for AnthropicModel {
     }
 }
 
+use crate::backend::ThinkingLevel;
+
 /// Configuration for the Anthropic client
 #[derive(Debug, Clone)]
 pub struct AnthropicConfig {
@@ -128,6 +130,9 @@ pub struct AnthropicConfig {
     /// Custom base URL for Anthropic-compatible APIs
     /// Defaults to "https://api.anthropic.com/v1" if not set
     pub base_url: Option<String>,
+    /// Thinking level for Claude 4.x models (Sonnet 4, Opus 4, etc.)
+    /// When enabled, temperature is automatically set to 1.0 as required by the API
+    pub thinking_level: Option<ThinkingLevel>,
 }
 
 /// Anthropic client for generating completions
@@ -149,6 +154,15 @@ struct CompletionRequest {
     messages: Vec<Message>,
     temperature: f32,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<ClaudeThinkingConfig>,
+}
+
+#[derive(Debug, Serialize)]
+struct ClaudeThinkingConfig {
+    #[serde(rename = "type")]
+    thinking_type: String,
+    budget_tokens: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +220,7 @@ impl AnthropicClient {
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
             base_url: None,    // Default: use official Anthropic API
+            thinking_level: None, // Default: no extended thinking (faster responses)
         };
 
         debug!("Anthropic client created with default configuration");
@@ -250,6 +265,7 @@ impl AnthropicClient {
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
             base_url: None,    // Default: use official Anthropic API
+            thinking_level: None, // Default: no extended thinking (faster responses)
         };
 
         debug!("Anthropic client created with default configuration");
@@ -283,6 +299,27 @@ impl AnthropicClient {
             schema_str, prompt
         );
 
+        // Build thinking config for Claude 4.x models
+        let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
+            || self.config.model.as_str().contains("opus-4");
+        let thinking_config = self.config.thinking_level.and_then(|level| {
+            if is_thinking_model && level.claude_thinking_enabled() {
+                Some(ClaudeThinkingConfig {
+                    thinking_type: "enabled".to_string(),
+                    budget_tokens: level.claude_budget_tokens(),
+                })
+            } else {
+                None
+            }
+        });
+
+        // Claude requires temperature=1 when thinking is enabled
+        let effective_temp = if thinking_config.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+
         // Build the request
         debug!("Building Anthropic API request");
         let request = CompletionRequest {
@@ -291,8 +328,9 @@ impl AnthropicClient {
                 role: "user".to_string(),
                 content: structured_prompt,
             }],
-            temperature: self.config.temperature,
+            temperature: effective_temp,
             max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
+            thinking: thinking_config,
         };
 
         // Send the request to Anthropic
@@ -407,6 +445,41 @@ impl AnthropicClient {
         self.config.base_url = Some(base_url_str);
         self
     }
+
+    /// Set the thinking level for Claude 4.x models (Sonnet 4, Opus 4, etc.).
+    ///
+    /// When thinking is enabled, the model will engage in extended reasoning before responding.
+    /// Note: Temperature is automatically set to 1.0 when thinking is enabled, as required by the API.
+    ///
+    /// # Thinking Levels
+    ///
+    /// - `Off`: Disable extended thinking (default, fastest)
+    /// - `Minimal`: 1024 budget tokens - minimal reasoning
+    /// - `Low`: 2048 budget tokens - light reasoning
+    /// - `Medium`: 4096 budget tokens - balanced reasoning
+    /// - `High`: 8192 budget tokens - deep reasoning
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use rstructor::{AnthropicClient, ThinkingLevel};
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = AnthropicClient::from_env()?
+    ///     .thinking_level(ThinkingLevel::Low);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[tracing::instrument(skip(self))]
+    pub fn thinking_level(mut self, level: ThinkingLevel) -> Self {
+        tracing::debug!(
+            previous_level = ?self.config.thinking_level,
+            new_level = ?level,
+            "Setting thinking level"
+        );
+        self.config.thinking_level = Some(level);
+        self
+    }
 }
 
 #[async_trait]
@@ -450,6 +523,27 @@ impl LLMClient for AnthropicClient {
     async fn generate(&self, prompt: &str) -> Result<String> {
         info!("Generating raw text response with Anthropic");
 
+        // Build thinking config for Claude 4.x models
+        let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
+            || self.config.model.as_str().contains("opus-4");
+        let thinking_config = self.config.thinking_level.and_then(|level| {
+            if is_thinking_model && level.claude_thinking_enabled() {
+                Some(ClaudeThinkingConfig {
+                    thinking_type: "enabled".to_string(),
+                    budget_tokens: level.claude_budget_tokens(),
+                })
+            } else {
+                None
+            }
+        });
+
+        // Claude requires temperature=1 when thinking is enabled
+        let effective_temp = if thinking_config.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+
         // Build the request
         debug!("Building Anthropic API request for text generation");
         let request = CompletionRequest {
@@ -458,8 +552,9 @@ impl LLMClient for AnthropicClient {
                 role: "user".to_string(),
                 content: prompt.to_string(),
             }],
-            temperature: self.config.temperature,
+            temperature: effective_temp,
             max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
+            thinking: thinking_config,
         };
 
         // Send the request to Anthropic

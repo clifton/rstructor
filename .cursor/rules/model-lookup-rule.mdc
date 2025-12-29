@@ -1,0 +1,43 @@
+---
+alwaysApply: true
+---
+# LLM Provider & Model Updates
+
+## Triggers
+- **Files:** Any file containing model definitions, enums, or provider configurations (e.g., `models.py`, `providers.ts`, `llm_config.json`).
+- **User Intent:** Requests to "update models", "check for new models", or "add [Provider] support".
+
+## Mandatory Workflow
+When these triggers are active, you **MUST** follow this protocol before writing code:
+
+1.  **Search First:** Do not rely on your training data for model names. You must use the `search` tool.
+2.  **Query Pattern:** Search specifically for:
+    - "latest [Provider Name] API model names list [Current Month] [Current Year]"
+    - "[Provider Name] model deprecation schedule"
+    - **"[Provider Name] API model ID string"** ← Add this query
+3.  **Verification:**
+    - Identify the specific API string (e.g., `gpt-4o-2024-08-06` vs `gpt-4o`). Use "-latest" suffix if explicitly available.
+    - **CRITICAL: Web search often returns marketing names, not API strings. When in doubt, ask the user to confirm the exact model ID.**
+4.  **Implementation:**
+    - Update the constants/enums.
+    - Add comments with the "Last Verified" date next to the model ID.
+
+## Known Model ID Patterns (Ground Truth)
+**CRITICAL: These patterns OVERRIDE web search results. Web search returns marketing names like "Claude Sonnet 4" but the actual API string is `claude-sonnet-4-5-20250929`. ALWAYS match the pattern format below, not the search result wording.**
+
+- **Anthropic:** `claude-{tier}-{version}-{date}` (e.g., `claude-sonnet-4-5-20250929`, `claude-opus-4-20250514`)
+  - **NOTE:** Anthropic API does NOT accept `-latest` aliases. Always use dated versions.
+- **OpenAI:** `gpt-{version}` or `gpt-{version}-{date}` (e.g., `gpt-5.2`, `gpt-4o-2024-08-06`)
+
+## Standard Provider Docs
+Use these sources for verification:
+- **OpenAI:** https://platform.openai.com/docs/models
+- **Anthropic:** https://docs.anthropic.com/en/docs/about-claude/models
+- **Google/Gemini:** https://ai.google.dev/models/gemini
+- **Mistral:** https://docs.mistral.ai/getting-started/models/
+- **Grok:** https://docs.x.ai/docs/models
+
+Always assume search results are accurate and do not show future dates. If you want to make sure its not a future date, run a shell command to get the current date.
+
+## Fallback Protocol
+If search results only show marketing names (e.g., "Claude Sonnet 4" without the API string), **ask the user** for the correct API identifier before making changes.

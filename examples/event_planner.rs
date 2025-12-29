@@ -1,10 +1,11 @@
-use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, OpenAIClient, OpenAIModel, RStructorError,
-};
+use rstructor::{AnthropicClient, Instructor, OpenAIClient, RStructorError};
 type Result<T> = rstructor::Result<T>;
 use chrono::{NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
-use std::{env, io::stdin};
+use std::{
+    env,
+    io::{IsTerminal, stdin},
+};
 
 // Define data structures for event planning
 
@@ -85,6 +86,7 @@ struct Activity {
 
 #[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Information about an event to be organized",
+      validate = "validate_event_plan",
       examples = [
         ::serde_json::json!({
             "event_name": "Annual Tech Conference",
@@ -176,66 +178,64 @@ struct EventPlan {
     estimated_budget: Option<f32>,
 }
 
-// Custom validation implementation
-impl EventPlan {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Validate date format
-        if NaiveDate::parse_from_str(&self.date, "%Y-%m-%d").is_err() {
+// Custom validation function referenced by #[llm(validate = "validate_event_plan")]
+fn validate_event_plan(plan: &EventPlan) -> rstructor::Result<()> {
+    // Validate date format
+    if NaiveDate::parse_from_str(&plan.date, "%Y-%m-%d").is_err() {
+        return Err(RStructorError::ValidationError(format!(
+            "Invalid date format: {}. Expected YYYY-MM-DD",
+            plan.date
+        )));
+    }
+
+    // Validate times
+    let validate_time = |time: &str| -> rstructor::Result<()> {
+        if NaiveTime::parse_from_str(time, "%H:%M").is_err() {
             return Err(RStructorError::ValidationError(format!(
-                "Invalid date format: {}. Expected YYYY-MM-DD",
-                self.date
+                "Invalid time format: {}. Expected HH:MM",
+                time
             )));
         }
-
-        // Validate times
-        let validate_time = |time: &str| -> rstructor::Result<()> {
-            if NaiveTime::parse_from_str(time, "%H:%M").is_err() {
-                return Err(RStructorError::ValidationError(format!(
-                    "Invalid time format: {}. Expected HH:MM",
-                    time
-                )));
-            }
-            Ok(())
-        };
-
-        validate_time(&self.start_time)?;
-        validate_time(&self.end_time)?;
-
-        // Validate activity times
-        for activity in &self.activities {
-            validate_time(&activity.start_time)?;
-            validate_time(&activity.end_time)?;
-        }
-
-        // Make sure activities are within event timeframe
-        let event_start = NaiveTime::parse_from_str(&self.start_time, "%H:%M").unwrap();
-        let event_end = NaiveTime::parse_from_str(&self.end_time, "%H:%M").unwrap();
-
-        for activity in &self.activities {
-            let activity_start = NaiveTime::parse_from_str(&activity.start_time, "%H:%M").unwrap();
-            let activity_end = NaiveTime::parse_from_str(&activity.end_time, "%H:%M").unwrap();
-
-            if activity_start < event_start || activity_end > event_end {
-                return Err(RStructorError::ValidationError(format!(
-                    "Activity '{}' time ({}-{}) is outside event hours ({}-{})",
-                    activity.name,
-                    activity.start_time,
-                    activity.end_time,
-                    self.start_time,
-                    self.end_time
-                )));
-            }
-        }
-
-        // Validate contact information
-        if self.contact.email.is_none() && self.contact.phone.is_none() {
-            return Err(RStructorError::ValidationError(
-                "Contact must have either email or phone specified".to_string(),
-            ));
-        }
-
         Ok(())
+    };
+
+    validate_time(&plan.start_time)?;
+    validate_time(&plan.end_time)?;
+
+    // Validate activity times
+    for activity in &plan.activities {
+        validate_time(&activity.start_time)?;
+        validate_time(&activity.end_time)?;
     }
+
+    // Make sure activities are within event timeframe
+    let event_start = NaiveTime::parse_from_str(&plan.start_time, "%H:%M").unwrap();
+    let event_end = NaiveTime::parse_from_str(&plan.end_time, "%H:%M").unwrap();
+
+    for activity in &plan.activities {
+        let activity_start = NaiveTime::parse_from_str(&activity.start_time, "%H:%M").unwrap();
+        let activity_end = NaiveTime::parse_from_str(&activity.end_time, "%H:%M").unwrap();
+
+        if activity_start < event_start || activity_end > event_end {
+            return Err(RStructorError::ValidationError(format!(
+                "Activity '{}' time ({}-{}) is outside event hours ({}-{})",
+                activity.name,
+                activity.start_time,
+                activity.end_time,
+                plan.start_time,
+                plan.end_time
+            )));
+        }
+    }
+
+    // Validate contact information
+    if plan.contact.email.is_none() && plan.contact.phone.is_none() {
+        return Err(RStructorError::ValidationError(
+            "Contact must have either email or phone specified".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 async fn process_event_request(
@@ -264,40 +264,50 @@ Based on the following description, create a detailed event plan:\n\n{}",
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    // Get user input
-    println!("Welcome to the AI Event Planner!");
-    println!(
-        "Please describe the event you want to plan (type 'done' on a new line when finished):"
-    );
-
-    let mut description = String::new();
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        stdin().read_line(&mut line)?;
-
-        if line.trim() == "done" {
-            break;
-        }
-
-        description.push_str(&line);
-    }
-
-    if description.trim().is_empty() {
-        println!("No description provided. Using a sample description instead.");
-        description = "I need to plan a team-building retreat for my company's marketing department. \
+    let sample_description = "I need to plan a team-building retreat for my company's marketing department. \
                      We have about 20 people and want to do it next month on a Friday. \
                      We'd like some outdoor activities and team exercises, ideally at a nice location \
-                     near nature. Our budget is approximately $5000.".to_string();
-    }
+                     near nature. Our budget is approximately $5000.";
+
+    // Check if stdin is a terminal (interactive mode) or piped/CI environment
+    let description = if stdin().is_terminal() {
+        // Interactive mode - get user input
+        println!("Welcome to the AI Event Planner!");
+        println!(
+            "Please describe the event you want to plan (type 'done' on a new line when finished):"
+        );
+
+        let mut description = String::new();
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            stdin().read_line(&mut line)?;
+
+            if line.trim() == "done" {
+                break;
+            }
+
+            description.push_str(&line);
+        }
+
+        if description.trim().is_empty() {
+            println!("No description provided. Using a sample description instead.");
+            sample_description.to_string()
+        } else {
+            description
+        }
+    } else {
+        // Non-interactive mode (CI, piped input, etc.) - use sample description
+        println!("Running in non-interactive mode. Using sample description.");
+        sample_description.to_string()
+    };
 
     // Select LLM client based on available API keys
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         println!("\nProcessing your request with OpenAI...\n");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt5)
             .temperature(0.3)
             .max_retries(5)
             .include_error_feedback(true);
@@ -315,7 +325,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("\nProcessing your request with Anthropic...\n");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::ClaudeSonnet4)
             .temperature(0.3)
             .max_retries(5)
             .include_error_feedback(true);

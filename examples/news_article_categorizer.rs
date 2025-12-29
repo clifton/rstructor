@@ -1,16 +1,13 @@
 #![allow(clippy::collapsible_if)]
 
-use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
-};
+use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 use std::env;
 
 // Define an enum for article categories
 #[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "PascalCase")]
-#[llm(description = "Category for a news article. Must be one of the enum values: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.",
-      examples = ["Politics", "Technology", "Business", "Sports", "Entertainment"])]
+#[llm(description = "Category for a news article")]
 enum ArticleCategory {
     Politics,
     Technology,
@@ -27,60 +24,19 @@ enum ArticleCategory {
 
 // Define entities mentioned in the article
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(
-    description = "An entity mentioned in the article. This must be a complete object with all three fields: name, entity_type, and relevance."
-)]
+#[llm(description = "An entity mentioned in the article")]
 struct Entity {
-    #[llm(
-        description = "Name of the entity (must be a string)",
-        example = "Microsoft"
-    )]
+    #[llm(description = "Name of the entity")]
     name: String,
-
-    #[llm(
-        description = "Type of the entity (person, organization, location, etc.) (must be a string)",
-        example = "organization"
-    )]
+    #[llm(description = "Type of the entity (person, organization, location, etc.)")]
     entity_type: String,
-
-    #[llm(
-        description = "How important this entity is to the article (1-10 scale, must be a number between 1 and 10)",
-        example = 8
-    )]
+    #[llm(description = "How important this entity is to the article (1-10 scale)")]
     relevance: u8,
-}
-
-// Custom validation for Entity
-impl Entity {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Check that relevance is within the expected range (1-10)
-        if self.relevance < 1 || self.relevance > 10 {
-            return Err(rstructor::RStructorError::ValidationError(format!(
-                "Relevance must be between 1 and 10, got {}",
-                self.relevance
-            )));
-        }
-        Ok(())
-    }
 }
 
 // Define the structure for article analysis
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "Analysis of a news article",
-      examples = [
-        ::serde_json::json!({
-            "title": "Apple Unveils New iPhone 15 with Revolutionary Camera Technology",
-            "category": "Technology",
-            "summary": "Apple announced its new iPhone 15 lineup featuring a groundbreaking camera system with a periscope lens for improved zoom capabilities.",
-            "sentiment": "Positive",
-            "entities": [
-                {"name": "Apple", "entity_type": "organization", "relevance": 10},
-                {"name": "iPhone 15", "entity_type": "product", "relevance": 9}
-            ],
-            "keywords": ["Apple", "iPhone", "camera", "technology", "smartphone"],
-            "bias_assessment": "The article presents the product in a favorable light with minimal criticism of potential drawbacks or cost concerns."
-        })
-      ])]
+#[llm(description = "Analysis of a news article")]
 struct ArticleAnalysis {
     #[llm(
         description = "Title of the article",
@@ -106,7 +62,7 @@ struct ArticleAnalysis {
     sentiment: String,
 
     #[llm(
-        description = "Main entities mentioned in the article. MUST be an array of objects, not strings. Each object must have 'name' (string), 'entity_type' (string), and 'relevance' (number 1-10) fields."
+        description = "Main entities mentioned in the article as objects with 'name' (string), 'entity_type' (person/organization/location), and 'relevance' (1-10) fields"
     )]
     entities: Vec<Entity>,
 
@@ -130,7 +86,6 @@ async fn analyze_article(
         println!("Using OpenAI for article analysis...");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt5)
             .temperature(0.0)
             .max_retries(5)
             .include_error_feedback(true);
@@ -145,7 +100,6 @@ async fn analyze_article(
         println!("Using Anthropic for article analysis...");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::ClaudeSonnet4)
             .temperature(0.0)
             .max_retries(5)
             .include_error_feedback(true);

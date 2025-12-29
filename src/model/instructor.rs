@@ -10,44 +10,65 @@ use crate::schema::SchemaType;
 /// (SchemaType, DeserializeOwned, and Serialize), but you can also provide a custom
 /// implementation to add your own validation logic.
 ///
+/// # Nested Types and Schema Embedding
+///
+/// When you have nested structs or enums, they should also derive `Instructor` to ensure
+/// their full schema is embedded in the parent type. This produces complete JSON schemas
+/// that help LLMs generate correct structured output.
+///
+/// ```rust
+/// # use rstructor::Instructor;
+/// # use serde::{Serialize, Deserialize};
+/// // Parent type derives Instructor
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// struct Parent {
+///     child: Child,  // Child's schema will be embedded
+/// }
+///
+/// // Nested types should also derive Instructor for complete schema
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// struct Child {
+///     name: String,
+/// }
+/// ```
+///
+/// This ensures the generated schema includes all nested properties.
+///
 /// # Validation
 ///
 /// The `validate` method is called automatically when an LLM generates a structured response,
 /// allowing you to apply domain-specific validation logic beyond what type checking provides.
 ///
-/// To add custom validation:
+/// To add custom validation, use the `validate` attribute with a function path:
 ///
 /// ```
 /// use rstructor::{Instructor, RStructorError};
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(Instructor, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// #[llm(validate = "validate_product")]
 /// struct Product {
 ///     name: String,
 ///     price: f64,
 ///     quantity: u32,
 /// }
 ///
-/// // Recommended approach: Add validation directly to the struct
-/// // The #[derive(Instructor)] macro handles calling this method
-/// impl Product {
-///     fn validate(&self) -> rstructor::Result<()> {
-///         // Price must be positive
-///         if self.price <= 0.0 {
-///             return Err(RStructorError::ValidationError(
-///                 format!("Product price must be positive, got {}", self.price)
-///             ));
-///         }
-///
-///         // Name can't be empty
-///         if self.name.trim().is_empty() {
-///             return Err(RStructorError::ValidationError(
-///                 "Product name cannot be empty".to_string()
-///             ));
-///         }
-///
-///         Ok(())
+/// fn validate_product(product: &Product) -> rstructor::Result<()> {
+///     // Price must be positive
+///     if product.price <= 0.0 {
+///         return Err(RStructorError::ValidationError(
+///             format!("Product price must be positive, got {}", product.price)
+///         ));
 ///     }
+///
+///     // Name can't be empty
+///     if product.name.trim().is_empty() {
+///         return Err(RStructorError::ValidationError(
+///             "Product name cannot be empty".to_string()
+///         ));
+///     }
+///
+///     Ok(())
 /// }
 /// ```
 ///

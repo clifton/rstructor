@@ -1,6 +1,6 @@
 [package]
 name = "rstructor"
-version = "0.1.26"
+version = "0.2.0"
 edition = "2024"
 description = "Rust equivalent of Python's Instructor + Pydantic: Extract structured, validated data from LLMs (OpenAI, Anthropic, Grok, Gemini) using type-safe Rust structs and enums"
 license = "MIT"

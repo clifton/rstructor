@@ -5,10 +5,10 @@
 
 #[cfg(test)]
 mod timeout_tests {
+    #[cfg(feature = "gemini")]
+    use rstructor::GeminiClient;
     #[cfg(feature = "anthropic")]
     use rstructor::{AnthropicClient, AnthropicModel};
-    #[cfg(feature = "gemini")]
-    use rstructor::{GeminiClient, GeminiModel};
     #[cfg(feature = "grok")]
     use rstructor::{GrokClient, GrokModel};
     use rstructor::{Instructor, LLMClient, RStructorError};
@@ -30,13 +30,7 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_openai_timeout_configuration() {
         // Test that timeout can be set via builder pattern
-        let api_key = match env::var("OPENAI_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                println!("Skipping test: OPENAI_API_KEY not set");
-                return;
-            }
-        };
+        let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set for this test");
 
         // Test with a very short timeout (should likely timeout)
         let client = OpenAIClient::new(api_key)
@@ -63,13 +57,7 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_openai_timeout_chaining() {
         // Test that timeout can be chained with other configuration methods
-        let api_key = match env::var("OPENAI_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                println!("Skipping test: OPENAI_API_KEY not set");
-                return;
-            }
-        };
+        let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set for this test");
 
         let _client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
@@ -87,13 +75,8 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_anthropic_timeout_configuration() {
         // Test that timeout can be set via builder pattern
-        let api_key = match env::var("ANTHROPIC_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                println!("Skipping test: ANTHROPIC_API_KEY not set");
-                return;
-            }
-        };
+        let api_key =
+            env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set for this test");
 
         // Test with a very short timeout (should likely timeout)
         let client = AnthropicClient::new(api_key)
@@ -120,13 +103,8 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_anthropic_timeout_chaining() {
         // Test that timeout can be chained with other configuration methods
-        let api_key = match env::var("ANTHROPIC_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                println!("Skipping test: ANTHROPIC_API_KEY not set");
-                return;
-            }
-        };
+        let api_key =
+            env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set for this test");
 
         let _client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
@@ -144,13 +122,7 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_openai_no_timeout_default() {
         // Test that default client has no timeout
-        let api_key = match env::var("OPENAI_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                println!("Skipping test: OPENAI_API_KEY not set");
-                return;
-            }
-        };
+        let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set for this test");
 
         let _client = OpenAIClient::new(api_key).expect("Failed to create OpenAI client");
 
@@ -162,13 +134,8 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_anthropic_no_timeout_default() {
         // Test that default client has no timeout
-        let api_key = match env::var("ANTHROPIC_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                println!("Skipping test: ANTHROPIC_API_KEY not set");
-                return;
-            }
-        };
+        let api_key =
+            env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set for this test");
 
         let _client = AnthropicClient::new(api_key).expect("Failed to create Anthropic client");
 
@@ -181,19 +148,11 @@ mod timeout_tests {
     async fn test_grok_timeout_configuration() {
         // Test that timeout can be set via builder pattern
         // Test with empty string to use XAI_API_KEY env var
-        let client = match GrokClient::from_env() {
-            Ok(client) => client
-                .model(GrokModel::Grok4)
-                .temperature(0.0)
-                .timeout(Duration::from_millis(1)), // 1ms timeout - should timeout
-            Err(e) => {
-                println!(
-                    "Skipping test: Failed to create Grok client (XAI_API_KEY not set): {:?}",
-                    e
-                );
-                return;
-            }
-        };
+        let client = GrokClient::from_env()
+            .expect("XAI_API_KEY must be set for this test")
+            .model(GrokModel::Grok4)
+            .temperature(0.0)
+            .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
         // Try to make a request - it should timeout
         let result = client.materialize::<TestStruct>("test").await;
@@ -214,20 +173,12 @@ mod timeout_tests {
     async fn test_grok_timeout_chaining() {
         // Test that timeout can be chained with other configuration methods
         // Test with empty string to use XAI_API_KEY env var
-        let _client = match GrokClient::from_env() {
-            Ok(client) => client
-                .model(GrokModel::Grok4)
-                .temperature(0.5)
-                .max_tokens(100)
-                .timeout(Duration::from_secs(2)), // 2 second timeout for unit tests
-            Err(e) => {
-                println!(
-                    "Skipping test: Failed to create Grok client (XAI_API_KEY not set): {:?}",
-                    e
-                );
-                return;
-            }
-        };
+        let _client = GrokClient::from_env()
+            .expect("XAI_API_KEY must be set for this test")
+            .model(GrokModel::Grok4)
+            .temperature(0.5)
+            .max_tokens(100)
+            .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
 
         // Verify that client was created successfully with timeout
         // (We can't access config directly, but the build succeeded, so timeout was set)
@@ -239,16 +190,7 @@ mod timeout_tests {
     async fn test_grok_no_timeout_default() {
         // Test that default client has no timeout
         // Test with empty string to use XAI_API_KEY env var
-        let _client = match GrokClient::from_env() {
-            Ok(client) => client,
-            Err(e) => {
-                println!(
-                    "Skipping test: Failed to create Grok client (XAI_API_KEY not set): {:?}",
-                    e
-                );
-                return;
-            }
-        };
+        let _client = GrokClient::from_env().expect("XAI_API_KEY must be set for this test");
 
         // Verify that client was created successfully without timeout
         // (We can't access config directly, but default behavior means no timeout)
@@ -258,20 +200,11 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_gemini_timeout_configuration() {
         // Test that timeout can be set via builder pattern
-        // Test with empty string to use GEMINI_API_KEY env var
-        let client = match GeminiClient::from_env() {
-            Ok(client) => client
-                .model(GeminiModel::Gemini25Flash)
-                .temperature(0.0)
-                .timeout(Duration::from_millis(1)), // 1ms timeout - should timeout
-            Err(e) => {
-                println!(
-                    "Skipping test: Failed to create Gemini client (GEMINI_API_KEY not set): {:?}",
-                    e
-                );
-                return;
-            }
-        };
+        // Uses default model (Gemini 3 Flash Preview with Low thinking)
+        let client = GeminiClient::from_env()
+            .expect("GEMINI_API_KEY must be set for this test")
+            .temperature(0.0)
+            .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
         // Try to make a request - it should timeout
         let result = client.materialize::<TestStruct>("test").await;
@@ -291,21 +224,12 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_gemini_timeout_chaining() {
         // Test that timeout can be chained with other configuration methods
-        // Test with empty string to use GEMINI_API_KEY env var
-        let _client = match GeminiClient::from_env() {
-            Ok(client) => client
-                .model(GeminiModel::Gemini25Flash)
-                .temperature(0.5)
-                .max_tokens(100)
-                .timeout(Duration::from_secs(2)), // 2 second timeout for unit tests
-            Err(e) => {
-                println!(
-                    "Skipping test: Failed to create Gemini client (GEMINI_API_KEY not set): {:?}",
-                    e
-                );
-                return;
-            }
-        };
+        // Uses default model (Gemini 3 Flash Preview with Low thinking)
+        let _client = GeminiClient::from_env()
+            .expect("GEMINI_API_KEY must be set for this test")
+            .temperature(0.5)
+            .max_tokens(100)
+            .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
 
         // Verify that client was created successfully with timeout
         // (We can't access config directly, but the build succeeded, so timeout was set)
@@ -317,16 +241,7 @@ mod timeout_tests {
     async fn test_gemini_no_timeout_default() {
         // Test that default client has no timeout
         // Test with empty string to use GEMINI_API_KEY env var
-        let _client = match GeminiClient::from_env() {
-            Ok(client) => client,
-            Err(e) => {
-                println!(
-                    "Skipping test: Failed to create Gemini client (GEMINI_API_KEY not set): {:?}",
-                    e
-                );
-                return;
-            }
-        };
+        let _client = GeminiClient::from_env().expect("GEMINI_API_KEY must be set for this test");
 
         // Verify that client was created successfully without timeout
         // (We can't access config directly, but default behavior means no timeout)

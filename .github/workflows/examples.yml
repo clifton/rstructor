@@ -1,0 +1,75 @@
+name: Examples
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+
+jobs:
+  # Build all examples once, cache the result
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "examples-build"
+          cache-on-failure: true
+
+      - name: Build all examples
+        run: cargo build --examples
+
+  # Run examples in parallel groups (using cached build artifacts)
+  examples:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        group: [0, 1, 2, 3]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "examples-build"
+          save-if: false  # Don't save, just restore from build job
+
+      - name: Run examples for group ${{ matrix.group }}
+        shell: bash
+        run: |
+          # Get all examples sorted alphabetically
+          mapfile -t examples < <(ls examples/*.rs | sed 's|examples/||' | sed 's|\.rs$||' | sort)
+          total=${#examples[@]}
+          group=${{ matrix.group }}
+
+          echo "Total examples: $total"
+          echo "Running examples for group $group (every 4th example starting at index $group)"
+
+          for ((i=0; i<total; i++)); do
+            if (( i % 4 == group )); then
+              echo ""
+              echo "=========================================="
+              echo "Running example: ${examples[$i]}"
+              echo "=========================================="
+              cargo run --example "${examples[$i]}"
+            fi
+          done

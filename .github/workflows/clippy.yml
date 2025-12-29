@@ -12,24 +12,20 @@ env:
 jobs:
   clippy:
     runs-on: ubuntu-latest
-    container:
-      image: rust:latest
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "cmt-clippy"
-          cache-directories: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git
+          shared-key: "ci-clippy"
           cache-on-failure: true
-          
-      - name: Install Clippy
-        run: rustup component add clippy
 
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings

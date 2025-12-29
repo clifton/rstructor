@@ -86,28 +86,24 @@ fn test_struct_with_custom_date() {
     assert!(event_json["properties"].is_object());
 
     // Check the start_date property
-    // Note: CustomTypeSchema types default to "object" when used as fields
-    // because the macro can't detect CustomTypeSchema at compile time
+    // Now that schemas are properly embedded, the nested type's schema is used directly
     let start_date = &event_json["properties"]["start_date"];
-    // The macro defaults to "object" for custom types, which is correct for structs
-    // CustomTypeSchema types that need "string" type should be handled via their SchemaType impl
-    assert_eq!(start_date["type"], "object");
-    // Because of how we're using CustomTypeSchema with the derive macro, format isn't set in the struct
-    // assert_eq!(start_date["format"], "date");
+    // TestDate implements SchemaType and its schema has type: "string"
+    assert_eq!(start_date["type"], "string");
+    // The format is now properly embedded from TestDate's CustomTypeSchema
+    assert_eq!(start_date["format"], "date");
+    // The description from the #[llm] attribute is still applied
     assert_eq!(start_date["description"], "When the event starts");
 
     // Check the end_date property (which is optional)
     let end_date = &event_json["properties"]["end_date"];
-    // Same as start_date - defaults to "object" for custom types
-    assert_eq!(end_date["type"], "object");
-    // Because of how we're using CustomTypeSchema with the derive macro, format isn't set in the struct
-    // assert_eq!(end_date["format"], "date");
-    // The description includes enum info because it's an Option<T>
-    assert!(
-        end_date["description"]
-            .as_str()
-            .unwrap()
-            .contains("When the event ends (optional)")
+    // Same as start_date - the nested TestDate schema is properly embedded
+    assert_eq!(end_date["type"], "string");
+    assert_eq!(end_date["format"], "date");
+    // The description from the #[llm] attribute is applied
+    assert_eq!(
+        end_date["description"].as_str().unwrap(),
+        "When the event ends (optional)"
     );
 
     // Check required fields

@@ -12,10 +12,10 @@
 
 #[cfg(test)]
 mod llm_integration_tests {
+    #[cfg(feature = "gemini")]
+    use rstructor::GeminiClient;
     #[cfg(feature = "anthropic")]
     use rstructor::{AnthropicClient, AnthropicModel};
-    #[cfg(feature = "gemini")]
-    use rstructor::{GeminiClient, GeminiModel};
     #[cfg(feature = "grok")]
     use rstructor::{GrokClient, GrokModel};
     use rstructor::{Instructor, LLMClient, SchemaType};
@@ -72,34 +72,18 @@ mod llm_integration_tests {
     #[cfg(feature = "openai")]
     #[tokio::test]
     async fn test_openai_materialize() {
-        // Skip test if API key is not available
-        let api_key = match env::var("OPENAI_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                println!("Skipping test: OPENAI_API_KEY not set");
-                return;
-            }
-        };
+        let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set for this test");
 
-        let client = match OpenAIClient::new(api_key) {
-            Ok(client) => client.model(OpenAIModel::Gpt4O).temperature(0.0),
-            Err(e) => {
-                println!("Skipping test: Failed to create OpenAI client: {:?}", e);
-                return;
-            }
-        };
+        let client = OpenAIClient::new(api_key)
+            .expect("Failed to create OpenAI client")
+            .model(OpenAIModel::Gpt4O)
+            .temperature(0.0);
 
         let prompt = "Provide information about the movie Inception";
         let movie_result = client.materialize::<Movie>(prompt).await;
 
-        // Handle API errors gracefully
-        if let Err(e) = &movie_result {
-            println!("Skipping test due to API error: {:?}", e);
-            return;
-        }
-
-        // Only validate when we have a successful response
-        let movie = movie_result.expect("Failed to get movie info");
+        // Fail test if API call fails
+        let movie = movie_result.expect("API call failed");
 
         // Validate response
         assert_eq!(movie.title, "Inception");
@@ -115,36 +99,19 @@ mod llm_integration_tests {
     #[cfg(feature = "anthropic")]
     #[tokio::test]
     async fn test_anthropic_materialize() {
-        // Skip test if API key is not available
-        let api_key = match env::var("ANTHROPIC_API_KEY") {
-            Ok(key) => key,
-            Err(_) => {
-                println!("Skipping test: ANTHROPIC_API_KEY not set");
-                return;
-            }
-        };
+        let api_key =
+            env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set for this test");
 
-        let client = match AnthropicClient::new(api_key) {
-            Ok(client) => client
-                .model(AnthropicModel::ClaudeSonnet45)
-                .temperature(0.0),
-            Err(e) => {
-                println!("Skipping test: Failed to create Anthropic client: {:?}", e);
-                return;
-            }
-        };
+        let client = AnthropicClient::new(api_key)
+            .expect("Failed to create Anthropic client")
+            .model(AnthropicModel::ClaudeSonnet45)
+            .temperature(0.0);
 
         let prompt = "Provide information about the movie Inception";
         let movie_result = client.materialize::<Movie>(prompt).await;
 
-        // Handle API errors gracefully
-        if let Err(e) = &movie_result {
-            println!("Skipping test due to API error: {:?}", e);
-            return;
-        }
-
-        // Only validate when we have a successful response
-        let movie = movie_result.expect("Failed to get movie info");
+        // Fail test if API call fails
+        let movie = movie_result.expect("API call failed");
 
         // Validate response
         assert_eq!(movie.title, "Inception");
@@ -160,30 +127,17 @@ mod llm_integration_tests {
     #[cfg(feature = "grok")]
     #[tokio::test]
     async fn test_grok_materialize() {
-        // Skip test if API key is not available
         // Read from XAI_API_KEY env var
-        let client = match GrokClient::from_env() {
-            Ok(client) => client.model(GrokModel::Grok4).temperature(0.0),
-            Err(e) => {
-                println!(
-                    "Skipping test: Failed to create Grok client (XAI_API_KEY not set): {:?}",
-                    e
-                );
-                return;
-            }
-        };
+        let client = GrokClient::from_env()
+            .expect("XAI_API_KEY must be set for this test")
+            .model(GrokModel::Grok4)
+            .temperature(0.0);
 
         let prompt = "Provide information about the movie Inception";
         let movie_result = client.materialize::<Movie>(prompt).await;
 
-        // Handle API errors gracefully
-        if let Err(e) = &movie_result {
-            println!("Skipping test due to API error: {:?}", e);
-            return;
-        }
-
-        // Only validate when we have a successful response
-        let movie = movie_result.expect("Failed to get movie info");
+        // Fail test if API call fails
+        let movie = movie_result.expect("API call failed");
 
         // Validate response
         assert_eq!(movie.title, "Inception");
@@ -199,30 +153,17 @@ mod llm_integration_tests {
     #[cfg(feature = "gemini")]
     #[tokio::test]
     async fn test_gemini_materialize() {
-        // Skip test if API key is not available
         // Read from GEMINI_API_KEY env var
-        let client = match GeminiClient::from_env() {
-            Ok(client) => client.model(GeminiModel::Gemini25Flash).temperature(0.0),
-            Err(e) => {
-                println!(
-                    "Skipping test: Failed to create Gemini client (GEMINI_API_KEY not set): {:?}",
-                    e
-                );
-                return;
-            }
-        };
+        // Uses default model (Gemini 3 Flash Preview with Low thinking)
+        let client = GeminiClient::from_env()
+            .expect("GEMINI_API_KEY must be set for this test")
+            .temperature(0.0);
 
         let prompt = "Provide information about the movie Inception";
         let movie_result = client.materialize::<Movie>(prompt).await;
 
-        // Handle API errors gracefully
-        if let Err(e) = &movie_result {
-            println!("Skipping test due to API error: {:?}", e);
-            return;
-        }
-
-        // Only validate when we have a successful response
-        let movie = movie_result.expect("Failed to get movie info");
+        // Fail test if API call fails
+        let movie = movie_result.expect("API call failed");
 
         // Validate response
         assert_eq!(movie.title, "Inception");

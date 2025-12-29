@@ -2,11 +2,13 @@ use rstructor::{Instructor, RStructorError, SchemaType};
 use serde::{Deserialize, Serialize};
 
 // Example that demonstrates how to use custom validation with rstructor
-// without getting dead code warnings for the validate method
 
 // Define a Product type with validation
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "A product in an inventory system")]
+#[llm(
+    description = "A product in an inventory system",
+    validate = "validate_product"
+)]
 struct Product {
     #[llm(description = "Product name", example = "Laptop Pro")]
     name: String,
@@ -21,36 +23,32 @@ struct Product {
     categories: Vec<String>,
 }
 
-// Custom validation implementation - this method won't have dead code warnings
-// because the derive macro handles properly linking it to the Instructor trait
-impl Product {
-    // Note: This method will NOT be warned as dead code
-    fn validate(&self) -> rstructor::Result<()> {
-        // Price must be positive
-        if self.price <= 0.0 {
-            return Err(RStructorError::ValidationError(format!(
-                "Product price must be positive, got {}",
-                self.price
-            )));
-        }
-
-        // Name can't be empty
-        if self.name.trim().is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Product name cannot be empty".to_string(),
-            ));
-        }
-
-        // Must have at least one category
-        if self.categories.is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Product must have at least one category".to_string(),
-            ));
-        }
-
-        // All validation passed
-        Ok(())
+// Custom validation function referenced by #[llm(validate = "validate_product")]
+fn validate_product(product: &Product) -> rstructor::Result<()> {
+    // Price must be positive
+    if product.price <= 0.0 {
+        return Err(RStructorError::ValidationError(format!(
+            "Product price must be positive, got {}",
+            product.price
+        )));
     }
+
+    // Name can't be empty
+    if product.name.trim().is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Product name cannot be empty".to_string(),
+        ));
+    }
+
+    // Must have at least one category
+    if product.categories.is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Product must have at least one category".to_string(),
+        ));
+    }
+
+    // All validation passed
+    Ok(())
 }
 
 fn main() {
@@ -62,8 +60,8 @@ fn main() {
         categories: vec!["Electronics".to_string(), "Computers".to_string()],
     };
 
-    // Validate the product
-    match valid_product.validate() {
+    // Validate the product - this now goes through the Instructor trait
+    match <Product as Instructor>::validate(&valid_product) {
         Ok(_) => println!("Valid product: {:?}", valid_product),
         Err(e) => println!("Validation error: {}", e),
     }
@@ -77,7 +75,7 @@ fn main() {
     };
 
     // Validation should fail
-    match invalid_product.validate() {
+    match <Product as Instructor>::validate(&invalid_product) {
         Ok(_) => println!("Valid product: {:?}", invalid_product),
         Err(e) => println!("Validation error: {}", e),
     }
@@ -91,7 +89,7 @@ fn main() {
     };
 
     // Validation should fail
-    match invalid_product2.validate() {
+    match <Product as Instructor>::validate(&invalid_product2) {
         Ok(_) => println!("Valid product: {:?}", invalid_product2),
         Err(e) => println!("Validation error: {}", e),
     }

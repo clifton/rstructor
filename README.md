@@ -122,16 +122,49 @@ let client = client
 let movie: Movie = client.materialize::<Movie>("Tell me about Inception").await?;
 ```
 
+### Extended Thinking (GPT-5.x, Gemini 3, Claude 4.x)
+
+Configure the depth of reasoning for models that support extended thinking:
+
+```rust
+use rstructor::{OpenAIClient, GeminiClient, AnthropicClient, ThinkingLevel, LLMClient};
+
+// GPT-5.2 with Low thinking (default)
+let client = OpenAIClient::from_env()?;
+
+// Enable higher thinking for complex reasoning tasks
+let client = OpenAIClient::from_env()?
+    .thinking_level(ThinkingLevel::High);
+
+// Gemini 3 Flash Preview with Low thinking (default)
+let client = GeminiClient::from_env()?;
+
+// Disable thinking for maximum speed
+let client = GeminiClient::from_env()?
+    .thinking_level(ThinkingLevel::Off);
+
+// Claude 4.x with thinking enabled
+let client = AnthropicClient::from_env()?
+    .thinking_level(ThinkingLevel::Medium);
+```
+
+**Thinking Levels:**
+- `Off` - Disabled (fastest, no reasoning overhead)
+- `Minimal` - Minimal reasoning (Gemini Flash only)
+- `Low` - Light reasoning (default for GPT-5.x, Gemini 3)
+- `Medium` - Balanced reasoning
+- `High` - Deep reasoning for complex problem-solving
+
 ### Basic Example with Validation
 
 Add custom validation rules to enforce business logic beyond type checking:
 
 ```rust
-use rstructor::{Instructor, LLMClient, OpenAIClient, OpenAIModel, RStructorError, Result};
+use rstructor::{Instructor, LLMClient, OpenAIClient, RStructorError, Result};
 use serde::{Serialize, Deserialize};
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "Information about a movie")]
+#[llm(description = "Information about a movie", validate = "validate_movie")]
 struct Movie {
     #[llm(description = "Title of the movie")]
     title: String,
@@ -143,36 +176,31 @@ struct Movie {
     rating: f32,
 }
 
-// Add custom validation
-impl Movie {
-    fn validate(&self) -> Result<()> {
-        // Title can't be empty
-        if self.title.trim().is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Movie title cannot be empty".to_string()
-            ));
-        }
-
-        // Year must be in a reasonable range
-        if self.year < 1888 || self.year > 2030 {
-            return Err(RStructorError::ValidationError(
-                format!("Movie year must be between 1888 and 2030, got {}", self.year)
-            ));
-        }
-
-        // Rating must be between 0 and 10
-        if self.rating < 0.0 || self.rating > 10.0 {
-            return Err(RStructorError::ValidationError(
-                format!("Rating must be between 0 and 10, got {}", self.rating)
-            ));
-        }
-
-        Ok(())
+// Custom validation function referenced by the validate attribute
+fn validate_movie(movie: &Movie) -> Result<()> {
+    // Title can't be empty
+    if movie.title.trim().is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Movie title cannot be empty".to_string()
+        ));
     }
-}
 
-// The derive macro automatically wires this method into the generated implementation,
-// so you won't see `dead_code` warnings even if the method is only called by rstructor.
+    // Year must be in a reasonable range
+    if movie.year < 1888 || movie.year > 2030 {
+        return Err(RStructorError::ValidationError(
+            format!("Movie year must be between 1888 and 2030, got {}", movie.year)
+        ));
+    }
+
+    // Rating must be between 0 and 10
+    if movie.rating < 0.0 || movie.rating > 10.0 {
+        return Err(RStructorError::ValidationError(
+            format!("Rating must be between 0 and 10, got {}", movie.rating)
+        ));
+    }
+
+    Ok(())
+}
 ```
 
 ### Complex Nested Structures

@@ -19,6 +19,58 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// This macro automatically implements the SchemaType trait for a struct or enum,
 /// generating a JSON Schema representation based on the Rust type.
 ///
+/// # Nested Types and Schema Embedding
+///
+/// When you have nested structs or enums, they should also derive `Instructor`
+/// to ensure their full schema is embedded in the parent type. This produces
+/// complete JSON schemas that help LLMs generate correct structured output.
+///
+/// ```rust
+/// use rstructor::Instructor;
+/// use serde::{Serialize, Deserialize};
+///
+/// // Parent type derives Instructor
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// struct Parent {
+///     child: Child,  // Child's schema will be embedded
+/// }
+///
+/// // Nested types should also derive Instructor for complete schema
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// struct Child {
+///     name: String,
+/// }
+/// ```
+///
+/// The schema embedding happens at compile time, avoiding any runtime overhead.
+///
+/// # Validation
+///
+/// To add custom validation, use the `validate` attribute with a function path:
+///
+/// ```
+/// use rstructor::{Instructor, RStructorError};
+/// use serde::{Serialize, Deserialize};
+///
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// #[llm(validate = "validate_product")]
+/// struct Product {
+///     name: String,
+///     price: f64,
+/// }
+///
+/// fn validate_product(product: &Product) -> rstructor::Result<()> {
+///     if product.price <= 0.0 {
+///         return Err(RStructorError::ValidationError(
+///             "price must be positive".into()
+///         ));
+///     }
+///     Ok(())
+/// }
+/// ```
+///
+/// The validation function is called automatically when the LLM response is deserialized.
+///
 /// # Examples
 ///
 /// ## Field-level attributes
@@ -114,44 +166,25 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
         _ => panic!("Instructor can only be derived for structs and enums"),
     };
 
-    // Check if the type has a validate method by looking through impl blocks
-    let validate_impl = find_validate_method(&input);
-
-    // Generate the Instructor trait implementation with proper validate method calling
-    // Always generate a standard Instructor implementation
-    // We'll use a special pattern to avoid stack overflow
-    let instructor_impl = quote::quote! {
-        impl ::rstructor::model::Instructor for #name {
-            fn validate(&self) -> ::rstructor::error::Result<()> {
-                // We use this method to prevent the dead code warning
-                // and avoid stack overflow by using a different method name
-                #name::__validate_impl(self)
+    // Generate the Instructor trait implementation
+    let instructor_impl = if let Some(validate_fn) = &container_attrs.validate {
+        // Parse the validation function path
+        let validate_path: syn::Path =
+            syn::parse_str(validate_fn).expect("validate attribute must be a valid function path");
+        quote::quote! {
+            impl ::rstructor::model::Instructor for #name {
+                fn validate(&self) -> ::rstructor::error::Result<()> {
+                    #validate_path(self)
+                }
             }
         }
-
-        // This implementation provides a special hidden method that will call
-        // the actual validate method if it exists, or do nothing if it doesn't
-        impl #name {
-            #[doc(hidden)]
-            fn __validate_impl(this: &Self) -> ::rstructor::error::Result<()> {
-                // This will either call the struct's own validate method,
-                // or it will use the default implementation (do nothing)
-                #[allow(unused_variables)]
-                {
-                    #[cfg(any())]
-                    let _ignore_this = stringify!(#validate_impl);
-
-                    // Only include this code if we detected a validate method
-                    if #validate_impl {
-                        // If a validate method exists, call it directly
-                        if let ::std::result::Result::Err(err) = this.validate() {
-                            return ::std::result::Result::Err(err);
-                        }
-                    }
+    } else {
+        // Default implementation - validation passes
+        quote::quote! {
+            impl ::rstructor::model::Instructor for #name {
+                fn validate(&self) -> ::rstructor::error::Result<()> {
+                    ::rstructor::error::Result::Ok(())
                 }
-
-                // Return Ok if no validation was done or if validation succeeded
-                ::rstructor::error::Result::Ok(())
             }
         }
     };
@@ -168,79 +201,12 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
 
 use quote::ToTokens;
 
-/// Extract container level attributes like descriptions for structs and enums
-/// Check if a type has a validate method by examining the codebase
-/// This is a simple heuristic approach - we can't actually detect all validate methods
-/// during proc macro expansion due to limitations in the compiler, but this helps
-/// reduce dead code warnings in many typical cases.
-fn find_validate_method(input: &syn::DeriveInput) -> bool {
-    // Since we can't reliably detect all validate methods at compile time,
-    // we'll assume structs with certain attributes or patterns likely have validation
-
-    // Check for documentation comments that mention validation
-    for attr in &input.attrs {
-        if attr.path().is_ident("doc") {
-            let mut has_validation = false;
-            let _ = attr.parse_nested_meta(|meta| {
-                #[allow(clippy::collapsible_if)]
-                if let Ok(value) = meta.value() {
-                    if let Ok(lit_str) = value.parse::<syn::LitStr>() {
-                        let doc_str = lit_str.value().to_lowercase();
-                        if doc_str.contains("valid") || doc_str.contains("check") {
-                            has_validation = true;
-                        }
-                    }
-                }
-                Ok(())
-            });
-            if has_validation {
-                return true;
-            }
-        }
-    }
-
-    // Check if it has llm attributes, which often indicate validation will be present
-    for attr in &input.attrs {
-        if attr.path().is_ident("llm") {
-            return true;
-        }
-    }
-
-    // Check the type name for validation-related patterns
-    let type_name = input.ident.to_string().to_lowercase();
-    if type_name.contains("valid") || type_name.contains("check") || type_name.contains("rule") {
-        return true;
-    }
-
-    // For structs, check field names/types for validation-related patterns
-    if let syn::Data::Struct(data_struct) = &input.data {
-        for field in data_struct.fields.iter() {
-            if let Some(field_name) = &field.ident {
-                let name = field_name.to_string().to_lowercase();
-                if name.contains("valid") || name.contains("rule") || name.contains("constraint") {
-                    return true;
-                }
-            }
-
-            // Check field attributes for validation hints
-            for attr in &field.attrs {
-                if attr.path().is_ident("llm") {
-                    return true;
-                }
-            }
-        }
-    }
-
-    // Default to true to be safe - this will generate code that properly uses validate methods
-    // even if they're added later
-    true
-}
-
 fn extract_container_attributes(attrs: &[syn::Attribute]) -> ContainerAttributes {
     let mut description = None;
     let mut title = None;
     let mut examples = Vec::new();
     let mut serde_rename_all = None;
+    let mut validate = None;
 
     // First, check for llm-specific attributes
     for attr in attrs {
@@ -254,6 +220,10 @@ fn extract_container_attributes(attrs: &[syn::Attribute]) -> ContainerAttributes
                     let value = meta.value()?;
                     let content: syn::LitStr = value.parse()?;
                     title = Some(content.value());
+                } else if meta.path.is_ident("validate") {
+                    let value = meta.value()?;
+                    let content: syn::LitStr = value.parse()?;
+                    validate = Some(content.value());
                 } else if meta.path.is_ident("examples") {
                     // Handle array syntax like examples = ["one", "two"]
                     let value = meta.value()?;
@@ -300,5 +270,5 @@ fn extract_container_attributes(attrs: &[syn::Attribute]) -> ContainerAttributes
         }
     }
 
-    ContainerAttributes::new(description, title, examples, serde_rename_all)
+    ContainerAttributes::new(description, title, examples, serde_rename_all, validate)
 }
