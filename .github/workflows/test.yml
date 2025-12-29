@@ -16,20 +16,17 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container:
-      image: rust:latest
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "cmt-test"
-          cache-directories: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git
+          shared-key: "ci-test"
           cache-on-failure: true
 
       - name: Run tests
