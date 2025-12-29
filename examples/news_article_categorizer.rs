@@ -64,21 +64,7 @@ impl Entity {
 
 // Define the structure for article analysis
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "Analysis of a news article",
-      examples = [
-        ::serde_json::json!({
-            "title": "Apple Unveils New iPhone 15 with Revolutionary Camera Technology",
-            "category": "Technology",
-            "summary": "Apple announced its new iPhone 15 lineup featuring a groundbreaking camera system with a periscope lens for improved zoom capabilities.",
-            "sentiment": "Positive",
-            "entities": [
-                {"name": "Apple", "entity_type": "organization", "relevance": 10},
-                {"name": "iPhone 15", "entity_type": "product", "relevance": 9}
-            ],
-            "keywords": ["Apple", "iPhone", "camera", "technology", "smartphone"],
-            "bias_assessment": "The article presents the product in a favorable light with minimal criticism of potential drawbacks or cost concerns."
-        })
-      ])]
+#[llm(description = "Analysis of a news article")]
 struct ArticleAnalysis {
     #[llm(
         description = "Title of the article",
