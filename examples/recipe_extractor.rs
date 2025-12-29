@@ -5,7 +5,7 @@ use rstructor::{
 use serde::{Deserialize, Serialize};
 use std::{
     env,
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
 };
 
 // Define a nested data model for a recipe
@@ -292,18 +292,26 @@ async fn run_recipe_extraction(recipe_name: &str) -> Result<(), Box<dyn std::err
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    print!("What would you like a recipe for? ");
-    io::stdout().flush()?;
+    let recipe_name = if io::stdin().is_terminal() {
+        // Interactive mode - get user input
+        print!("What would you like a recipe for? ");
+        io::stdout().flush()?;
 
-    let mut recipe_name = String::new();
-    io::stdin().read_line(&mut recipe_name)?;
-    let recipe_name = recipe_name.trim();
+        let mut recipe_name = String::new();
+        io::stdin().read_line(&mut recipe_name)?;
+        let recipe_name = recipe_name.trim();
 
-    if recipe_name.is_empty() {
-        println!("No recipe name entered. Using default: chocolate chip cookies");
-        let recipe_name = "chocolate chip cookies".to_string();
-        return run_recipe_extraction(&recipe_name).await;
-    }
+        if recipe_name.is_empty() {
+            println!("No recipe name entered. Using default: chocolate chip cookies");
+            "chocolate chip cookies".to_string()
+        } else {
+            recipe_name.to_string()
+        }
+    } else {
+        // Non-interactive mode (CI, piped input, etc.) - use default
+        println!("Running in non-interactive mode. Using default: chocolate chip cookies");
+        "chocolate chip cookies".to_string()
+    };
 
-    run_recipe_extraction(recipe_name).await
+    run_recipe_extraction(&recipe_name).await
 }

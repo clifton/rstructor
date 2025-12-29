@@ -4,7 +4,7 @@ use rstructor::{
 type Result<T> = rstructor::Result<T>;
 use chrono::{NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
-use std::{env, io::stdin};
+use std::{env, io::{stdin, IsTerminal}};
 
 // Define data structures for event planning
 
@@ -264,33 +264,44 @@ Based on the following description, create a detailed event plan:\n\n{}",
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    // Get user input
-    println!("Welcome to the AI Event Planner!");
-    println!(
-        "Please describe the event you want to plan (type 'done' on a new line when finished):"
-    );
-
-    let mut description = String::new();
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        stdin().read_line(&mut line)?;
-
-        if line.trim() == "done" {
-            break;
-        }
-
-        description.push_str(&line);
-    }
-
-    if description.trim().is_empty() {
-        println!("No description provided. Using a sample description instead.");
-        description = "I need to plan a team-building retreat for my company's marketing department. \
+    let sample_description = "I need to plan a team-building retreat for my company's marketing department. \
                      We have about 20 people and want to do it next month on a Friday. \
                      We'd like some outdoor activities and team exercises, ideally at a nice location \
-                     near nature. Our budget is approximately $5000.".to_string();
-    }
+                     near nature. Our budget is approximately $5000.";
+
+    // Check if stdin is a terminal (interactive mode) or piped/CI environment
+    let description = if stdin().is_terminal() {
+        // Interactive mode - get user input
+        println!("Welcome to the AI Event Planner!");
+        println!(
+            "Please describe the event you want to plan (type 'done' on a new line when finished):"
+        );
+
+        let mut description = String::new();
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            stdin().read_line(&mut line)?;
+
+            if line.trim() == "done" {
+                break;
+            }
+
+            description.push_str(&line);
+        }
+
+        if description.trim().is_empty() {
+            println!("No description provided. Using a sample description instead.");
+            sample_description.to_string()
+        } else {
+            description
+        }
+    } else {
+        // Non-interactive mode (CI, piped input, etc.) - use sample description
+        println!("Running in non-interactive mode. Using sample description.");
+        sample_description.to_string()
+    };
 
     // Select LLM client based on available API keys
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
