@@ -130,6 +130,8 @@ impl From<String> for Model {
     }
 }
 
+use crate::backend::ThinkingLevel;
+
 /// Configuration for the Gemini client
 #[derive(Debug, Clone)]
 pub struct GeminiConfig {
@@ -143,6 +145,9 @@ pub struct GeminiConfig {
     /// Custom base URL for Gemini-compatible APIs
     /// Defaults to "https://generativelanguage.googleapis.com/v1beta" if not set
     pub base_url: Option<String>,
+    /// Thinking level for Gemini 3 models
+    /// Controls the depth of reasoning applied to prompts
+    pub thinking_level: Option<ThinkingLevel>,
 }
 
 /// Gemini client for generating completions
@@ -177,6 +182,14 @@ struct GenerationConfig {
     response_mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingConfig")]
+    thinking_config: Option<ThinkingConfig>,
+}
+
+#[derive(Debug, Serialize)]
+struct ThinkingConfig {
+    #[serde(rename = "thinkingLevel")]
+    thinking_level: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,12 +248,14 @@ impl GeminiClient {
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
             base_url: None,    // Default: use official Gemini API
+            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3
         };
 
         let client = reqwest::Client::new();
 
         info!(
             model = %config.model.as_str(),
+            thinking_level = ?config.thinking_level,
             "Created Gemini client"
         );
 
@@ -262,7 +277,7 @@ impl GeminiClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini25Flash))]
+    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini3FlashPreview))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
             RStructorError::ApiError("GEMINI_API_KEY environment variable is not set".to_string())
@@ -277,6 +292,7 @@ impl GeminiClient {
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
             base_url: None,    // Default: use official Gemini API
+            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3
         };
 
         let client = reqwest::Client::new();
@@ -312,11 +328,24 @@ impl GeminiClient {
             schema_str, prompt
         );
 
+        // Build thinking config only for Gemini 3 models
+        let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
+        let thinking_config = if is_gemini3 {
+            self.config.thinking_level.and_then(|level| {
+                level.gemini_level().map(|l| ThinkingConfig {
+                    thinking_level: l.to_string(),
+                })
+            })
+        } else {
+            None
+        };
+
         let generation_config = GenerationConfig {
             temperature: self.config.temperature,
             max_output_tokens: self.config.max_tokens,
             response_mime_type: Some("application/json".to_string()),
             response_schema: Some(schema.to_json()),
+            thinking_config,
         };
 
         let request = GenerateContentRequest {
@@ -436,6 +465,45 @@ impl GeminiClient {
         self.config.base_url = Some(base_url_str);
         self
     }
+
+    /// Set the thinking level for Gemini 3 models.
+    ///
+    /// Controls the depth of reasoning the model applies to prompts.
+    /// Higher thinking levels provide deeper reasoning but increase latency.
+    ///
+    /// # Thinking Levels for Gemini 3 Flash
+    ///
+    /// - `Minimal`: Engages in minimal reasoning, ideal for high-throughput applications
+    /// - `Low`: Reduces latency and cost, appropriate for straightforward tasks (default)
+    /// - `Medium`: Provides balanced reasoning for most tasks
+    /// - `High`: Offers deep reasoning, suitable for complex problem-solving
+    ///
+    /// # Thinking Levels for Gemini 3 Pro
+    ///
+    /// - `Low`: Minimizes latency and cost, suitable for simple tasks
+    /// - `High`: Maximizes reasoning depth for complex tasks
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use rstructor::{GeminiClient, ThinkingLevel};
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = GeminiClient::from_env()?
+    ///     .thinking_level(ThinkingLevel::High);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[tracing::instrument(skip(self))]
+    pub fn thinking_level(mut self, level: ThinkingLevel) -> Self {
+        tracing::debug!(
+            previous_level = ?self.config.thinking_level,
+            new_level = ?level,
+            "Setting thinking level"
+        );
+        self.config.thinking_level = Some(level);
+        self
+    }
 }
 
 #[async_trait]
@@ -479,6 +547,18 @@ impl LLMClient for GeminiClient {
     async fn generate(&self, prompt: &str) -> Result<String> {
         info!("Generating raw text response with Gemini");
 
+        // Build thinking config only for Gemini 3 models
+        let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
+        let thinking_config = if is_gemini3 {
+            self.config.thinking_level.and_then(|level| {
+                level.gemini_level().map(|l| ThinkingConfig {
+                    thinking_level: l.to_string(),
+                })
+            })
+        } else {
+            None
+        };
+
         // Build the request
         debug!("Building Gemini API request");
         let request = GenerateContentRequest {
@@ -492,6 +572,7 @@ impl LLMClient for GeminiClient {
                 max_output_tokens: self.config.max_tokens,
                 response_mime_type: None,
                 response_schema: None,
+                thinking_config,
             },
         };
 

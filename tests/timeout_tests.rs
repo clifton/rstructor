@@ -5,10 +5,10 @@
 
 #[cfg(test)]
 mod timeout_tests {
+    #[cfg(feature = "gemini")]
+    use rstructor::GeminiClient;
     #[cfg(feature = "anthropic")]
     use rstructor::{AnthropicClient, AnthropicModel};
-    #[cfg(feature = "gemini")]
-    use rstructor::{GeminiClient, GeminiModel};
     #[cfg(feature = "grok")]
     use rstructor::{GrokClient, GrokModel};
     use rstructor::{Instructor, LLMClient, RStructorError};
@@ -200,10 +200,9 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_gemini_timeout_configuration() {
         // Test that timeout can be set via builder pattern
-        // Test with empty string to use GEMINI_API_KEY env var
+        // Uses default model (Gemini 3 Flash Preview with Low thinking)
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini25Flash)
             .temperature(0.0)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
@@ -225,10 +224,9 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_gemini_timeout_chaining() {
         // Test that timeout can be chained with other configuration methods
-        // Test with empty string to use GEMINI_API_KEY env var
+        // Uses default model (Gemini 3 Flash Preview with Low thinking)
         let _client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini25Flash)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests

@@ -226,7 +226,7 @@ impl GrokClient {
 
         let config = GrokConfig {
             api_key,
-            model: Model::Grok4, // Default to Grok-4 (latest flagship model)
+            model: Model::Grok41FastNonReasoning, // Default to Grok-4.1 Fast Non-Reasoning
             temperature: 0.0,
             max_tokens: None,
             timeout: None,     // Default: no timeout (uses reqwest's default)
@@ -268,7 +268,7 @@ impl GrokClient {
 
         let config = GrokConfig {
             api_key,
-            model: Model::Grok4, // Default to Grok-4 (latest flagship model)
+            model: Model::Grok41FastNonReasoning, // Default to Grok-4.1 Fast Non-Reasoning
             temperature: 0.0,
             max_tokens: None,
             timeout: None,     // Default: no timeout (uses reqwest's default)

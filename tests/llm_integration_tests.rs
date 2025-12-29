@@ -12,10 +12,10 @@
 
 #[cfg(test)]
 mod llm_integration_tests {
+    #[cfg(feature = "gemini")]
+    use rstructor::GeminiClient;
     #[cfg(feature = "anthropic")]
     use rstructor::{AnthropicClient, AnthropicModel};
-    #[cfg(feature = "gemini")]
-    use rstructor::{GeminiClient, GeminiModel};
     #[cfg(feature = "grok")]
     use rstructor::{GrokClient, GrokModel};
     use rstructor::{Instructor, LLMClient, SchemaType};
@@ -154,9 +154,9 @@ mod llm_integration_tests {
     #[tokio::test]
     async fn test_gemini_materialize() {
         // Read from GEMINI_API_KEY env var
+        // Uses default model (Gemini 3 Flash Preview with Low thinking)
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini25Flash)
             .temperature(0.0);
 
         let prompt = "Provide information about the movie Inception";
