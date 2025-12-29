@@ -24,7 +24,7 @@ jobs:
       - name: Discover examples
         id: set-matrix
         run: |
-          examples=$(ls examples/*.rs | sed 's|examples/||' | sed 's|\.rs||' | grep -v '^$' | awk '{printf "\"%s\",", $0}' | sed 's/,$//')
+          examples=$(ls examples/*.rs | sed 's|examples/||' | sed 's|\.rs$||' | grep -v '^$' | awk '{printf "\"%s\",", $0}' | sed 's/,$//')
           echo "matrix={\"example\":[$examples]}" >> $GITHUB_OUTPUT
 
   examples:
