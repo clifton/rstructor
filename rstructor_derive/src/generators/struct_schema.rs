@@ -5,7 +5,8 @@ use syn::{DataStruct, Fields, Ident, Type};
 use crate::container_attrs::ContainerAttributes;
 use crate::parsers::field_parser::parse_field_attributes;
 use crate::type_utils::{
-    get_array_inner_type, get_schema_type_from_rust_type, is_array_type, is_option_type,
+    get_array_inner_type, get_option_inner_type, get_schema_type_from_rust_type, is_array_type,
+    is_option_type,
 };
 
 /// Generate the schema implementation for a struct
@@ -176,21 +177,19 @@ pub fn generate_struct_schema(
                                 props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
                             }
                         } else if inner_schema_type == "object" {
-                            // For arrays of nested structs, create object schema
-                            // Default to treating as nested struct (object) - correct for vast majority of cases
+                            // For arrays of nested structs, embed the inner type's schema directly
+                            // This requires the inner type to implement SchemaType
                             quote! {
                                 // Create property for this array field with nested struct items
                                 let mut props = ::serde_json::Map::new();
                                 props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
 
-                                // Create items schema for nested struct
-                                // Schema enhancement will add properties if needed
-                                let mut items_schema = ::serde_json::Map::new();
-                                items_schema.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
-                                items_schema.insert("description".to_string(),
-                                    ::serde_json::Value::String("Each item must be a complete object with all required fields. MUST be an array of objects, not strings.".to_string()));
+                                // Get the inner type's schema directly
+                                // This embeds the full schema with properties at compile time
+                                let inner_schema = <#inner_type as ::rstructor::schema::SchemaType>::schema();
+                                let items_schema = inner_schema.to_json();
 
-                                props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
+                                props.insert("items".to_string(), items_schema);
                             }
                         } else {
                             // Standard handling for primitive types
@@ -219,15 +218,26 @@ pub fn generate_struct_schema(
                         }
                     }
                 } else if type_name.is_some() && schema_type == "object" {
-                    // For custom types that are objects, default to object type
-                    // Note: Types implementing CustomTypeSchema should implement SchemaType
-                    // and their schema will be used when the type is used directly, but
-                    // when used as a field, we default to object type
+                    // For nested struct fields, embed the inner type's schema directly
+                    // This requires the inner type to implement SchemaType
+                    // If it's an Option<T>, unwrap to get T first
+                    let actual_type = if is_optional {
+                        get_option_inner_type(&field.ty)
+                    } else {
+                        &field.ty
+                    };
                     quote! {
-                        // Create property for nested struct or custom type field
-                        let mut props = ::serde_json::Map::new();
-                        // Default to object type for custom types - correct for structs
-                        props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                        // Get the nested type's schema directly
+                        let nested_schema = <#actual_type as ::rstructor::schema::SchemaType>::schema();
+                        let props_json = nested_schema.to_json();
+                        // Convert to a mutable map so we can add to it
+                        let mut props = if let ::serde_json::Value::Object(m) = props_json {
+                            m
+                        } else {
+                            let mut m = ::serde_json::Map::new();
+                            m.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                            m
+                        };
                     }
                 } else {
                     // Regular primitive type

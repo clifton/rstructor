@@ -19,31 +19,30 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// This macro automatically implements the SchemaType trait for a struct or enum,
 /// generating a JSON Schema representation based on the Rust type.
 ///
-/// # ⚠️ Important: Avoid Nested Instructor Derives
+/// # Nested Types and Schema Embedding
 ///
-/// **Only derive `Instructor` on the top-level type** you pass to `materialize()`.
-/// Nested structs and enums used as fields should NOT have `Instructor` derived
-/// on them - they only need `Serialize` and `Deserialize`.
+/// When you have nested structs or enums, they should also derive `Instructor`
+/// to ensure their full schema is embedded in the parent type. This produces
+/// complete JSON schemas that help LLMs generate correct structured output.
 ///
 /// ```rust
 /// use rstructor::Instructor;
 /// use serde::{Serialize, Deserialize};
 ///
-/// // ✅ CORRECT: Only top-level type has Instructor
+/// // Parent type derives Instructor
 /// #[derive(Instructor, Serialize, Deserialize)]
 /// struct Parent {
-///     child: Child,  // Child does NOT derive Instructor
+///     child: Child,  // Child's schema will be embedded
 /// }
 ///
-/// // Nested types only need Serialize/Deserialize
-/// #[derive(Serialize, Deserialize)]
+/// // Nested types should also derive Instructor for complete schema
+/// #[derive(Instructor, Serialize, Deserialize)]
 /// struct Child {
 ///     name: String,
 /// }
 /// ```
 ///
-/// Deriving `Instructor` on nested types can cause **stack overflow** at runtime
-/// due to deep schema generation. The macro cannot detect this at compile time.
+/// The schema embedding happens at compile time, avoiding any runtime overhead.
 ///
 /// # Examples
 ///

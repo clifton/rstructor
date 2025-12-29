@@ -4,9 +4,10 @@ use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 use std::env;
 
-// Define an enum for article categories (simple enum without Instructor to avoid deep nesting)
-#[derive(Serialize, Deserialize, Debug, Clone)]
+// Define an enum for article categories
+#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "PascalCase")]
+#[llm(description = "Category for a news article")]
 enum ArticleCategory {
     Politics,
     Technology,
@@ -21,11 +22,15 @@ enum ArticleCategory {
     Other,
 }
 
-// Define entities mentioned in the article (simple struct without Instructor to avoid deep nesting)
-#[derive(Serialize, Deserialize, Debug)]
+// Define entities mentioned in the article
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+#[llm(description = "An entity mentioned in the article")]
 struct Entity {
+    #[llm(description = "Name of the entity")]
     name: String,
+    #[llm(description = "Type of the entity (person, organization, location, etc.)")]
     entity_type: String,
+    #[llm(description = "How important this entity is to the article (1-10 scale)")]
     relevance: u8,
 }
 
