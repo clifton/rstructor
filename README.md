@@ -155,6 +155,51 @@ let client = AnthropicClient::from_env()?
 - `Medium` - Balanced reasoning
 - `High` - Deep reasoning for complex problem-solving
 
+### Token Usage / Metadata
+
+Track token usage for monitoring costs and debugging:
+
+```rust
+use rstructor::{Instructor, LLMClient, OpenAIClient};
+use serde::{Serialize, Deserialize};
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Movie { title: String }
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = OpenAIClient::from_env()?;
+
+    // Use materialize_with_metadata to get token usage
+    let result = client.materialize_with_metadata::<Movie>("Tell me about Inception").await?;
+
+    println!("Movie: {}", result.data.title);
+
+    if let Some(usage) = result.usage {
+        println!("Model: {}", usage.model);
+        println!("Input tokens: {}", usage.input_tokens);
+        println!("Output tokens: {}", usage.output_tokens);
+        println!("Total tokens: {}", usage.total_tokens());
+    }
+
+    // For text generation, use generate_with_metadata
+    let text_result = client.generate_with_metadata("Write a haiku").await?;
+    println!("Generated: {}", text_result.text);
+
+    if let Some(usage) = text_result.usage {
+        println!("Used {} tokens", usage.total_tokens());
+    }
+
+    Ok(())
+}
+```
+
+The `_with_metadata` variants return a result wrapper that includes:
+- `data` / `text` - The actual response data
+- `usage` - Optional `TokenUsage` with `model`, `input_tokens`, and `output_tokens`
+
+Use the standard `materialize()` and `generate()` methods if you don't need token tracking.
+
 ### Basic Example with Validation
 
 Add custom validation rules to enforce business logic beyond type checking:

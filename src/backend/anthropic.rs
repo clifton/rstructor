@@ -6,8 +6,8 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    LLMClient, check_response_status, extract_json_from_markdown, generate_with_retry,
-    handle_http_error,
+    GenerateResult, LLMClient, MaterializeResult, ThinkingLevel, TokenUsage, check_response_status,
+    extract_json_from_markdown, generate_with_retry, handle_http_error,
 };
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
@@ -115,8 +115,6 @@ impl From<String> for AnthropicModel {
     }
 }
 
-use crate::backend::ThinkingLevel;
-
 /// Configuration for the Anthropic client
 #[derive(Debug, Clone)]
 pub struct AnthropicConfig {
@@ -180,8 +178,17 @@ struct ResponseMessage {
 }
 
 #[derive(Debug, Deserialize)]
+struct UsageInfo {
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+#[derive(Debug, Deserialize)]
 struct CompletionResponse {
     content: Vec<ContentBlock>,
+    model: Option<String>,
+    #[serde(default)]
+    usage: Option<UsageInfo>,
 }
 
 impl AnthropicClient {
@@ -280,7 +287,8 @@ impl AnthropicClient {
 
 impl AnthropicClient {
     /// Internal implementation of materialize (without retry logic)
-    async fn materialize_internal<T>(&self, prompt: &str) -> Result<T>
+    /// Returns both the data and optional usage info
+    async fn materialize_internal<T>(&self, prompt: &str) -> Result<(T, Option<TokenUsage>)>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -366,6 +374,16 @@ impl AnthropicClient {
             e
         })?;
 
+        // Extract usage info
+        let model_name = completion
+            .model
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name.clone(), u.input_tokens, u.output_tokens));
+
         // Extract the content, assuming the first block is text containing JSON
         let content = match completion
             .content
@@ -416,7 +434,7 @@ impl AnthropicClient {
         }
 
         info!("Successfully generated and validated structured data");
-        Ok(result)
+        Ok((result, usage))
     }
 }
 
@@ -487,6 +505,7 @@ impl LLMClient for AnthropicClient {
     fn from_env() -> Result<Self> {
         Self::from_env()
     }
+
     #[instrument(
         name = "anthropic_materialize",
         skip(self, prompt),
@@ -500,7 +519,7 @@ impl LLMClient for AnthropicClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        generate_with_retry(
+        let (result, _usage) = generate_with_retry(
             |prompt_owned: String| {
                 let this = self;
                 async move { this.materialize_internal::<T>(&prompt_owned).await }
@@ -509,7 +528,34 @@ impl LLMClient for AnthropicClient {
             self.config.max_retries,
             self.config.include_error_feedback,
         )
-        .await
+        .await?;
+        Ok(result)
+    }
+
+    #[instrument(
+        name = "anthropic_materialize_with_metadata",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn materialize_with_metadata<T>(&self, prompt: &str) -> Result<MaterializeResult<T>>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let (result, usage) = generate_with_retry(
+            |prompt_owned: String| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&prompt_owned).await }
+            },
+            prompt,
+            self.config.max_retries,
+            self.config.include_error_feedback,
+        )
+        .await?;
+        Ok(MaterializeResult::new(result, usage))
     }
 
     #[instrument(
@@ -521,6 +567,19 @@ impl LLMClient for AnthropicClient {
         )
     )]
     async fn generate(&self, prompt: &str) -> Result<String> {
+        let result = self.generate_with_metadata(prompt).await?;
+        Ok(result.text)
+    }
+
+    #[instrument(
+        name = "anthropic_generate_with_metadata",
+        skip(self, prompt),
+        fields(
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         info!("Generating raw text response with Anthropic");
 
         // Build thinking config for Claude 4.x models
@@ -590,6 +649,16 @@ impl LLMClient for AnthropicClient {
             e
         })?;
 
+        // Extract usage info
+        let model_name = completion
+            .model
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name, u.input_tokens, u.output_tokens));
+
         // Extract the content
         debug!("Extracting text content from response blocks");
         let content: String = completion
@@ -611,6 +680,6 @@ impl LLMClient for AnthropicClient {
             content_len = content.len(),
             "Successfully extracted text content"
         );
-        Ok(content)
+        Ok(GenerateResult::new(content, usage))
     }
 }
