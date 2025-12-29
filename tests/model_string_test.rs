@@ -38,7 +38,7 @@ mod tests {
             _ => panic!("Expected Custom variant"),
         }
     }
-    
+
     #[test]
     fn test_grok_model_as_str() {
         let models = vec![
@@ -65,7 +65,7 @@ mod tests {
     fn test_grok_model_from_string() {
         let test_strings = vec![
             "grok-4-0709",
-            "grok-4-fast-reasoning", 
+            "grok-4-fast-reasoning",
             "grok-4-fast-non-reasoning",
             "grok-4-1-fast-reasoning",
             "grok-4-1-fast-non-reasoning",
@@ -79,10 +79,10 @@ mod tests {
         for original_string in test_strings {
             let model = GrokModel::from_string(original_string);
             let roundtrip_string = model.as_str();
-            
+
             assert_eq!(roundtrip_string, original_string);
         }
-        
+
         // Test custom model
         let model = GrokModel::from_string("grok-custom");
         match model {
