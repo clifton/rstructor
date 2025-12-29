@@ -4,7 +4,10 @@ use rstructor::{
 type Result<T> = rstructor::Result<T>;
 use chrono::{NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
-use std::{env, io::{stdin, IsTerminal}};
+use std::{
+    env,
+    io::{IsTerminal, stdin},
+};
 
 // Define data structures for event planning
 

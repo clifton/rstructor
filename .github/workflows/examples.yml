@@ -14,10 +14,28 @@ env:
   XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 
 jobs:
-  examples:
+  # Build all examples once, cache the result
+  build:
     runs-on: ubuntu-latest
-    container:
-      image: rust:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "examples-build"
+          cache-on-failure: true
+
+      - name: Build all examples
+        run: cargo build --examples
+
+  # Run examples in parallel groups (using cached build artifacts)
+  examples:
+    needs: build
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         group: [0, 1, 2, 3]
@@ -26,15 +44,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "cmt-examples-group-${{ matrix.group }}"
-          cache-directories: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git
-          cache-on-failure: true
+          shared-key: "examples-build"
+          save-if: false  # Don't save, just restore from build job
 
       - name: Run examples for group ${{ matrix.group }}
         shell: bash
