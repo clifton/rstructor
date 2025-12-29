@@ -14,28 +14,14 @@ env:
   XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 
 jobs:
-  discover-examples:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Discover examples
-        id: set-matrix
-        run: |
-          examples=$(ls examples/*.rs | sed 's|examples/||' | sed 's|\.rs$||' | grep -v '^$' | awk '{printf "\"%s\",", $0}' | sed 's/,$//')
-          echo "matrix={\"example\":[$examples]}" >> $GITHUB_OUTPUT
-
   examples:
-    needs: discover-examples
     runs-on: ubuntu-latest
     container:
       image: rust:latest
     strategy:
-      matrix: ${{ fromJson(needs.discover-examples.outputs.matrix) }}
+      matrix:
+        group: [0, 1, 2, 3]
       fail-fast: false
-      max-parallel: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -43,12 +29,29 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "cmt-examples-${{ matrix.example }}"
+          shared-key: "cmt-examples-group-${{ matrix.group }}"
           cache-directories: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git
           cache-on-failure: true
 
-      - name: Run example ${{ matrix.example }}
-        run: cargo run --example ${{ matrix.example }}
+      - name: Run examples for group ${{ matrix.group }}
+        run: |
+          # Get all examples sorted alphabetically
+          mapfile -t examples < <(ls examples/*.rs | sed 's|examples/||' | sed 's|\.rs$||' | sort)
+          total=${#examples[@]}
+          group=${{ matrix.group }}
+
+          echo "Total examples: $total"
+          echo "Running examples for group $group (every 4th example starting at index $group)"
+
+          for ((i=0; i<total; i++)); do
+            if (( i % 4 == group )); then
+              echo ""
+              echo "=========================================="
+              echo "Running example: ${examples[$i]}"
+              echo "=========================================="
+              cargo run --example "${examples[$i]}"
+            fi
+          done
