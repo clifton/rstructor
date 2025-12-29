@@ -122,19 +122,22 @@ let client = client
 let movie: Movie = client.materialize::<Movie>("Tell me about Inception").await?;
 ```
 
-### Extended Thinking (Gemini 3, Claude 4.x)
+### Extended Thinking (GPT-5.x, Gemini 3, Claude 4.x)
 
 Configure the depth of reasoning for models that support extended thinking:
 
 ```rust
-use rstructor::{GeminiClient, AnthropicClient, ThinkingLevel, LLMClient};
+use rstructor::{OpenAIClient, GeminiClient, AnthropicClient, ThinkingLevel, LLMClient};
+
+// GPT-5.2 with Low thinking (default)
+let client = OpenAIClient::from_env()?;
+
+// Enable higher thinking for complex reasoning tasks
+let client = OpenAIClient::from_env()?
+    .thinking_level(ThinkingLevel::High);
 
 // Gemini 3 Flash Preview with Low thinking (default)
 let client = GeminiClient::from_env()?;
-
-// Enable higher thinking for complex reasoning tasks
-let client = GeminiClient::from_env()?
-    .thinking_level(ThinkingLevel::High);
 
 // Disable thinking for maximum speed
 let client = GeminiClient::from_env()?
@@ -148,7 +151,7 @@ let client = AnthropicClient::from_env()?
 **Thinking Levels:**
 - `Off` - Disabled (fastest, no reasoning overhead)
 - `Minimal` - Minimal reasoning (Gemini Flash only)
-- `Low` - Light reasoning (default for Gemini 3)
+- `Low` - Light reasoning (default for GPT-5.x, Gemini 3)
 - `Medium` - Balanced reasoning
 - `High` - Deep reasoning for complex problem-solving
 

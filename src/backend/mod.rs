@@ -22,23 +22,26 @@ pub(crate) use utils::{
 ///
 /// # Provider Support
 ///
+/// - **OpenAI (GPT-5.x)**: Uses `reasoning_effort` parameter ("none", "low", "medium", "high")
 /// - **Gemini 3**: Supports `Minimal`, `Low`, `Medium`, `High` (Flash) or `Low`, `High` (Pro)
 /// - **Anthropic (Claude 4.x)**: Thinking is enabled via budget tokens when level is not `Off`
-/// - **OpenAI (O-series)**: Has built-in reasoning, but not configurable via this parameter
 ///
 /// # Examples
 ///
 /// ```rust
-/// use rstructor::{GeminiClient, ThinkingLevel};
+/// use rstructor::{OpenAIClient, GeminiClient, ThinkingLevel};
 ///
 /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// # let client = GeminiClient::new("key")?;
-/// // Use low thinking for fast responses
-/// let client = client.thinking_level(ThinkingLevel::Low);
+/// // OpenAI with low thinking (default)
+/// let client = OpenAIClient::new("key")?;
 ///
-/// // Use high thinking for complex reasoning tasks
-/// # let client = GeminiClient::new("key")?;
+/// // Enable high thinking for complex tasks
+/// # let client = OpenAIClient::new("key")?;
 /// let client = client.thinking_level(ThinkingLevel::High);
+///
+/// // Gemini with custom thinking level
+/// # let client = GeminiClient::new("key")?;
+/// let client = client.thinking_level(ThinkingLevel::Medium);
 /// # Ok(())
 /// # }
 /// ```
@@ -83,6 +86,18 @@ impl ThinkingLevel {
             ThinkingLevel::Low => 2048,
             ThinkingLevel::Medium => 4096,
             ThinkingLevel::High => 8192,
+        }
+    }
+
+    /// Returns the OpenAI reasoning_effort string for GPT-5.x models
+    /// Maps: Off -> "none", Minimal -> "low", Low -> "low", Medium -> "medium", High -> "high"
+    pub fn openai_reasoning_effort(&self) -> Option<&'static str> {
+        match self {
+            ThinkingLevel::Off => Some("none"),
+            ThinkingLevel::Minimal => Some("low"),
+            ThinkingLevel::Low => Some("low"),
+            ThinkingLevel::Medium => Some("medium"),
+            ThinkingLevel::High => Some("high"),
         }
     }
 }

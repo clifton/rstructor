@@ -129,6 +129,8 @@ impl From<String> for Model {
     }
 }
 
+use crate::backend::ThinkingLevel;
+
 /// Configuration for the OpenAI client
 #[derive(Debug, Clone)]
 pub struct OpenAIConfig {
@@ -142,6 +144,9 @@ pub struct OpenAIConfig {
     /// Custom base URL for OpenAI-compatible APIs (e.g., local LLMs, proxy endpoints)
     /// Defaults to "https://api.openai.com/v1" if not set
     pub base_url: Option<String>,
+    /// Thinking level for GPT-5.x models (reasoning effort)
+    /// Controls the depth of reasoning applied to prompts
+    pub thinking_level: Option<ThinkingLevel>,
 }
 
 /// OpenAI client for generating completions
@@ -175,6 +180,9 @@ struct ChatCompletionRequest {
     temperature: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    /// Reasoning effort for GPT-5.x models
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -220,7 +228,7 @@ impl OpenAIClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt5ChatLatest))]
+    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt52))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -240,6 +248,7 @@ impl OpenAIClient {
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
             base_url: None,    // Default: use official OpenAI API
+            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for GPT-5.x
         };
 
         debug!("OpenAI client created with default configuration");
@@ -264,7 +273,7 @@ impl OpenAIClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt5ChatLatest))]
+    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt52))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
             RStructorError::ApiError("OPENAI_API_KEY environment variable is not set".to_string())
@@ -282,6 +291,7 @@ impl OpenAIClient {
             max_retries: None, // Default: no retries (configure via .max_retries())
             include_error_feedback: None, // Default: include error feedback in retry prompts
             base_url: None,    // Default: use official OpenAI API
+            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for GPT-5.x
         };
 
         debug!("OpenAI client created with default configuration");
@@ -333,6 +343,44 @@ impl OpenAIClient {
         self
     }
 
+    /// Set the thinking level for GPT-5.x models (reasoning effort).
+    ///
+    /// Controls the depth of reasoning the model applies to prompts.
+    /// Higher thinking levels provide deeper reasoning but increase latency and cost.
+    ///
+    /// Note: When reasoning is enabled (any level except `Off`), temperature is
+    /// automatically set to 1.0 as required by the API.
+    ///
+    /// # Reasoning Effort Levels
+    ///
+    /// - `Off`: No extended reasoning (maps to "none")
+    /// - `Minimal`: Light reasoning (maps to "low")
+    /// - `Low`: Standard reasoning (maps to "low", default)
+    /// - `Medium`: Balanced reasoning (maps to "medium")
+    /// - `High`: Deep reasoning (maps to "high")
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use rstructor::{OpenAIClient, ThinkingLevel};
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?
+    ///     .thinking_level(ThinkingLevel::High);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[tracing::instrument(skip(self))]
+    pub fn thinking_level(mut self, level: ThinkingLevel) -> Self {
+        tracing::debug!(
+            previous_level = ?self.config.thinking_level,
+            new_level = ?level,
+            "Setting thinking level"
+        );
+        self.config.thinking_level = Some(level);
+        self
+    }
+
     /// Internal implementation of materialize (without retry logic)
     async fn materialize_internal<T>(&self, prompt: &str) -> Result<T>
     where
@@ -353,6 +401,23 @@ impl OpenAIClient {
             parameters: schema.to_json(),
         };
 
+        // Build reasoning_effort for GPT-5.x models
+        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
+        let reasoning_effort = if is_gpt5 {
+            self.config
+                .thinking_level
+                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
+        } else {
+            None
+        };
+
+        // GPT-5.x with reasoning requires temperature=1.0
+        let effective_temp = if reasoning_effort.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+
         // Build the request
         debug!("Building OpenAI API request with function calling");
         let request = ChatCompletionRequest {
@@ -363,8 +428,9 @@ impl OpenAIClient {
             }],
             functions: Some(vec![function]),
             function_call: Some(json!({ "name": schema_name })),
-            temperature: self.config.temperature,
+            temperature: effective_temp,
             max_tokens: self.config.max_tokens,
+            reasoning_effort,
         };
 
         // Send the request to OpenAI
@@ -523,6 +589,23 @@ impl LLMClient for OpenAIClient {
     async fn generate(&self, prompt: &str) -> Result<String> {
         info!("Generating raw text response with OpenAI");
 
+        // Build reasoning_effort for GPT-5.x models
+        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
+        let reasoning_effort = if is_gpt5 {
+            self.config
+                .thinking_level
+                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
+        } else {
+            None
+        };
+
+        // GPT-5.x with reasoning requires temperature=1.0
+        let effective_temp = if reasoning_effort.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+
         // Build the request without functions
         debug!("Building OpenAI API request for text generation");
         let request = ChatCompletionRequest {
@@ -533,8 +616,9 @@ impl LLMClient for OpenAIClient {
             }],
             functions: None,
             function_call: None,
-            temperature: self.config.temperature,
+            temperature: effective_temp,
             max_tokens: self.config.max_tokens,
+            reasoning_effort,
         };
 
         // Send the request to OpenAI
