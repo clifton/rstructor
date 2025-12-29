@@ -164,9 +164,12 @@ struct FunctionDef {
 struct ChatCompletionRequest {
     model: String,
     messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     functions: Option<Vec<FunctionDef>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     function_call: Option<Value>,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
 }
 
