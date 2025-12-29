@@ -4,11 +4,9 @@ use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 use std::env;
 
-// Define an enum for article categories
-#[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
+// Define an enum for article categories (simple enum without Instructor to avoid deep nesting)
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "PascalCase")]
-#[llm(description = "Category for a news article. Must be one of the enum values: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.",
-      examples = ["Politics", "Technology", "Business", "Sports", "Entertainment"])]
 enum ArticleCategory {
     Politics,
     Technology,
@@ -23,43 +21,12 @@ enum ArticleCategory {
     Other,
 }
 
-// Define entities mentioned in the article
-#[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(
-    description = "An entity mentioned in the article. This must be a complete object with all three fields: name, entity_type, and relevance."
-)]
+// Define entities mentioned in the article (simple struct without Instructor to avoid deep nesting)
+#[derive(Serialize, Deserialize, Debug)]
 struct Entity {
-    #[llm(
-        description = "Name of the entity (must be a string)",
-        example = "Microsoft"
-    )]
     name: String,
-
-    #[llm(
-        description = "Type of the entity (person, organization, location, etc.) (must be a string)",
-        example = "organization"
-    )]
     entity_type: String,
-
-    #[llm(
-        description = "How important this entity is to the article (1-10 scale, must be a number between 1 and 10)",
-        example = 8
-    )]
     relevance: u8,
-}
-
-// Custom validation for Entity
-impl Entity {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Check that relevance is within the expected range (1-10)
-        if self.relevance < 1 || self.relevance > 10 {
-            return Err(rstructor::RStructorError::ValidationError(format!(
-                "Relevance must be between 1 and 10, got {}",
-                self.relevance
-            )));
-        }
-        Ok(())
-    }
 }
 
 // Define the structure for article analysis
@@ -90,7 +57,7 @@ struct ArticleAnalysis {
     sentiment: String,
 
     #[llm(
-        description = "Main entities mentioned in the article. MUST be an array of objects, not strings. Each object must have 'name' (string), 'entity_type' (string), and 'relevance' (number 1-10) fields."
+        description = "Main entities mentioned in the article as objects with 'name' (string), 'entity_type' (person/organization/location), and 'relevance' (1-10) fields"
     )]
     entities: Vec<Entity>,
 
