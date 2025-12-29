@@ -6,7 +6,10 @@ use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::backend::{LLMClient, check_response_status, generate_with_retry, handle_http_error};
+use crate::backend::{
+    GenerateResult, LLMClient, MaterializeResult, ThinkingLevel, TokenUsage, check_response_status,
+    generate_with_retry, handle_http_error,
+};
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 
@@ -129,8 +132,6 @@ impl From<String> for Model {
     }
 }
 
-use crate::backend::ThinkingLevel;
-
 /// Configuration for the OpenAI client
 #[derive(Debug, Clone)]
 pub struct OpenAIConfig {
@@ -208,8 +209,20 @@ struct ChatCompletionChoice {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct UsageInfo {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    #[serde(default)]
+    total_tokens: u64,
+}
+
+#[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<ChatCompletionChoice>,
+    #[serde(default)]
+    usage: Option<UsageInfo>,
+    model: Option<String>,
 }
 
 impl OpenAIClient {
@@ -382,7 +395,8 @@ impl OpenAIClient {
     }
 
     /// Internal implementation of materialize (without retry logic)
-    async fn materialize_internal<T>(&self, prompt: &str) -> Result<T>
+    /// Returns both the data and optional usage info
+    async fn materialize_internal<T>(&self, prompt: &str) -> Result<(T, Option<TokenUsage>)>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -467,6 +481,16 @@ impl OpenAIClient {
             ));
         }
 
+        // Extract usage info
+        let model_name = completion
+            .model
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name.clone(), u.prompt_tokens, u.completion_tokens));
+
         let message = &completion.choices[0].message;
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
 
@@ -502,7 +526,7 @@ impl OpenAIClient {
             }
 
             info!("Successfully generated and validated structured data");
-            Ok(result)
+            Ok((result, usage))
         } else {
             // If no function call, try to extract from content if available
             if let Some(content) = &message.content {
@@ -537,7 +561,7 @@ impl OpenAIClient {
                 }
 
                 info!("Successfully generated and validated structured data from content");
-                Ok(result)
+                Ok((result, usage))
             } else {
                 error!("No function call or content in OpenAI response");
                 Err(RStructorError::ApiError(
@@ -553,6 +577,7 @@ impl LLMClient for OpenAIClient {
     fn from_env() -> Result<Self> {
         Self::from_env()
     }
+
     #[instrument(
         name = "openai_materialize",
         skip(self, prompt),
@@ -566,7 +591,7 @@ impl LLMClient for OpenAIClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        generate_with_retry(
+        let (result, _usage) = generate_with_retry(
             |prompt_owned: String| {
                 let this = self;
                 async move { this.materialize_internal::<T>(&prompt_owned).await }
@@ -575,7 +600,34 @@ impl LLMClient for OpenAIClient {
             self.config.max_retries,
             self.config.include_error_feedback,
         )
-        .await
+        .await?;
+        Ok(result)
+    }
+
+    #[instrument(
+        name = "openai_materialize_with_metadata",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn materialize_with_metadata<T>(&self, prompt: &str) -> Result<MaterializeResult<T>>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let (result, usage) = generate_with_retry(
+            |prompt_owned: String| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&prompt_owned).await }
+            },
+            prompt,
+            self.config.max_retries,
+            self.config.include_error_feedback,
+        )
+        .await?;
+        Ok(MaterializeResult::new(result, usage))
     }
 
     #[instrument(
@@ -587,6 +639,19 @@ impl LLMClient for OpenAIClient {
         )
     )]
     async fn generate(&self, prompt: &str) -> Result<String> {
+        let result = self.generate_with_metadata(prompt).await?;
+        Ok(result.text)
+    }
+
+    #[instrument(
+        name = "openai_generate_with_metadata",
+        skip(self, prompt),
+        fields(
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         info!("Generating raw text response with OpenAI");
 
         // Build reasoning_effort for GPT-5.x models
@@ -655,6 +720,16 @@ impl LLMClient for OpenAIClient {
             ));
         }
 
+        // Extract usage info
+        let model_name = completion
+            .model
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name, u.prompt_tokens, u.completion_tokens));
+
         let message = &completion.choices[0].message;
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
 
@@ -663,7 +738,7 @@ impl LLMClient for OpenAIClient {
                 content_len = content.len(),
                 "Successfully extracted content from response"
             );
-            Ok(content.clone())
+            Ok(GenerateResult::new(content.clone(), usage))
         } else {
             error!("No content in OpenAI response");
             Err(RStructorError::ApiError(

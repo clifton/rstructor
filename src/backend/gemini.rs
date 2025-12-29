@@ -7,8 +7,8 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    LLMClient, check_response_status, extract_json_from_markdown, generate_with_retry,
-    handle_http_error,
+    GenerateResult, LLMClient, MaterializeResult, ThinkingLevel, TokenUsage, check_response_status,
+    extract_json_from_markdown, generate_with_retry, handle_http_error,
 };
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
@@ -130,8 +130,6 @@ impl From<String> for Model {
     }
 }
 
-use crate::backend::ThinkingLevel;
-
 /// Configuration for the Gemini client
 #[derive(Debug, Clone)]
 pub struct GeminiConfig {
@@ -193,8 +191,20 @@ struct ThinkingConfig {
 }
 
 #[derive(Debug, Deserialize)]
+struct UsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    prompt_token_count: u64,
+    #[serde(rename = "candidatesTokenCount", default)]
+    candidates_token_count: u64,
+}
+
+#[derive(Debug, Deserialize)]
 struct GenerateContentResponse {
     candidates: Vec<Candidate>,
+    #[serde(rename = "usageMetadata", default)]
+    usage_metadata: Option<UsageMetadata>,
+    #[serde(rename = "modelVersion", default)]
+    model_version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -310,7 +320,8 @@ impl GeminiClient {
 
 impl GeminiClient {
     /// Internal implementation of materialize (without retry logic)
-    async fn materialize_internal<T>(&self, prompt: &str) -> Result<T>
+    /// Returns both the data and optional usage info
+    async fn materialize_internal<T>(&self, prompt: &str) -> Result<(T, Option<TokenUsage>)>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -397,6 +408,19 @@ impl GeminiClient {
             ));
         }
 
+        // Extract usage info
+        let model_name = completion
+            .model_version
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion.usage_metadata.as_ref().map(|u| {
+            TokenUsage::new(
+                model_name.clone(),
+                u.prompt_token_count,
+                u.candidates_token_count,
+            )
+        });
+
         let candidate = &completion.candidates[0];
         trace!(finish_reason = ?candidate.finish_reason, "Completion finish reason");
 
@@ -429,7 +453,7 @@ impl GeminiClient {
                 }
 
                 info!("Successfully generated and validated structured data");
-                return Ok(result);
+                return Ok((result, usage));
             }
         }
 
@@ -511,6 +535,7 @@ impl LLMClient for GeminiClient {
     fn from_env() -> Result<Self> {
         Self::from_env()
     }
+
     #[instrument(
         name = "gemini_materialize",
         skip(self, prompt),
@@ -524,7 +549,7 @@ impl LLMClient for GeminiClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        generate_with_retry(
+        let (result, _usage) = generate_with_retry(
             |prompt_owned: String| {
                 let this = self;
                 async move { this.materialize_internal::<T>(&prompt_owned).await }
@@ -533,7 +558,34 @@ impl LLMClient for GeminiClient {
             self.config.max_retries,
             self.config.include_error_feedback,
         )
-        .await
+        .await?;
+        Ok(result)
+    }
+
+    #[instrument(
+        name = "gemini_materialize_with_metadata",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn materialize_with_metadata<T>(&self, prompt: &str) -> Result<MaterializeResult<T>>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let (result, usage) = generate_with_retry(
+            |prompt_owned: String| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&prompt_owned).await }
+            },
+            prompt,
+            self.config.max_retries,
+            self.config.include_error_feedback,
+        )
+        .await?;
+        Ok(MaterializeResult::new(result, usage))
     }
 
     #[instrument(
@@ -545,6 +597,19 @@ impl LLMClient for GeminiClient {
         )
     )]
     async fn generate(&self, prompt: &str) -> Result<String> {
+        let result = self.generate_with_metadata(prompt).await?;
+        Ok(result.text)
+    }
+
+    #[instrument(
+        name = "gemini_generate_with_metadata",
+        skip(self, prompt),
+        fields(
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         info!("Generating raw text response with Gemini");
 
         // Build thinking config only for Gemini 3 models
@@ -618,6 +683,16 @@ impl LLMClient for GeminiClient {
             ));
         }
 
+        // Extract usage info
+        let model_name = completion
+            .model_version
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage_metadata
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name, u.prompt_token_count, u.candidates_token_count));
+
         let candidate = &completion.candidates[0];
         trace!(finish_reason = %candidate.finish_reason, "Completion finish reason");
 
@@ -633,7 +708,7 @@ impl LLMClient for GeminiClient {
                     content_len = text.len(),
                     "Successfully extracted text content from response"
                 );
-                Ok(text.clone())
+                Ok(GenerateResult::new(text.clone(), usage))
             }
             None => {
                 error!("No text content in Gemini response");

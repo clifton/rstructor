@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 
+use crate::backend::usage::{GenerateResult, MaterializeResult};
 use crate::error::Result;
 use crate::model::Instructor;
 
@@ -98,14 +99,57 @@ use crate::model::Instructor;
 pub trait LLMClient {
     /// Materialize a structured object of type T from a prompt.
     ///
-    /// This method takes a text prompt and returns a structured object
-    /// of type T, where T implements the `Instructor` trait. The LLM is guided
-    /// to produce output that conforms to the JSON schema defined by T.
-    ///
+    /// This method takes a text prompt and returns the structured object.
+    /// The LLM is guided to produce output that conforms to the JSON schema defined by T.
     /// If the returned data doesn't match the expected schema or fails validation,
     /// an error is returned. Configure retry behavior using `.max_retries()` and
     /// `.include_error_feedback()` builder methods.
+    ///
+    /// For token usage information, use [`materialize_with_metadata`](Self::materialize_with_metadata).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{LLMClient, OpenAIClient, Instructor};
+    /// # use serde::{Serialize, Deserialize};
+    /// # #[derive(Instructor, Serialize, Deserialize)]
+    /// # struct Movie { title: String }
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// let movie: Movie = client.materialize("Describe Inception").await?;
+    /// println!("Title: {}", movie.title);
+    /// # Ok(())
+    /// # }
+    /// ```
     async fn materialize<T>(&self, prompt: &str) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static;
+
+    /// Materialize a structured object with metadata (token usage).
+    ///
+    /// Like [`materialize`](Self::materialize), but returns a [`MaterializeResult<T>`]
+    /// that includes token usage information for monitoring and cost tracking.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{LLMClient, OpenAIClient, Instructor};
+    /// # use serde::{Serialize, Deserialize};
+    /// # #[derive(Instructor, Serialize, Deserialize)]
+    /// # struct Movie { title: String }
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// let result = client.materialize_with_metadata::<Movie>("Describe Inception").await?;
+    ///
+    /// println!("Title: {}", result.data.title);
+    /// if let Some(usage) = result.usage {
+    ///     println!("Model: {}", usage.model);
+    ///     println!("Tokens: {} in, {} out", usage.input_tokens, usage.output_tokens);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn materialize_with_metadata<T>(&self, prompt: &str) -> Result<MaterializeResult<T>>
     where
         T: Instructor + DeserializeOwned + Send + 'static;
 
@@ -113,7 +157,43 @@ pub trait LLMClient {
     ///
     /// This method provides a simpler interface for getting raw text completions
     /// from the LLM without enforcing any structure.
+    ///
+    /// For token usage information, use [`generate_with_metadata`](Self::generate_with_metadata).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{LLMClient, OpenAIClient};
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// let text = client.generate("Write a haiku").await?;
+    /// println!("{}", text);
+    /// # Ok(())
+    /// # }
+    /// ```
     async fn generate(&self, prompt: &str) -> Result<String>;
+
+    /// Raw completion with metadata (token usage).
+    ///
+    /// Like [`generate`](Self::generate), but returns a [`GenerateResult`]
+    /// that includes token usage information.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{LLMClient, OpenAIClient};
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// let result = client.generate_with_metadata("Write a haiku").await?;
+    ///
+    /// println!("{}", result.text);
+    /// if let Some(usage) = result.usage {
+    ///     println!("Used {} total tokens", usage.total_tokens());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult>;
 
     /// Create a new client by reading the API key from an environment variable.
     ///

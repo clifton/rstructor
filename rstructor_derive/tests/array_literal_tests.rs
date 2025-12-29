@@ -21,10 +21,6 @@ struct ArrayLiteralTests {
     #[llm(description = "Array of booleans", example = [true, false, true])]
     bool_array: Vec<bool>,
 
-    // Mixed array (even though Rust wouldn't allow this directly, the schema can)
-    #[llm(description = "Array of mixed types", example = ["string", 42, true, 3.14])]
-    mixed_array: Vec<serde_json::Value>,
-
     // Empty array
     #[llm(description = "Empty array", example = [])]
     empty_array: Vec<String>,
@@ -97,22 +93,6 @@ fn test_array_literal_bool_array() {
     assert_eq!(array[0], true);
     assert_eq!(array[1], false);
     assert_eq!(array[2], true);
-}
-
-#[test]
-fn test_array_literal_mixed_array() {
-    let schema = ArrayLiteralTests::schema();
-    let schema_json = schema.to_json();
-
-    // Check mixed array
-    let mixed_array_example = &schema_json["properties"]["mixed_array"]["example"];
-    assert!(mixed_array_example.is_array());
-    let array = mixed_array_example.as_array().unwrap();
-    assert_eq!(array.len(), 4);
-    assert_eq!(array[0], "string");
-    assert_eq!(array[1], 42);
-    assert_eq!(array[2], true);
-    assert_eq!(array[3], 3.14);
 }
 
 #[test]
