@@ -40,10 +40,48 @@ mod tests {
     }
 
     #[test]
+    fn test_grok_model_as_str() {
+        let models = vec![
+            GrokModel::Grok4,
+            GrokModel::Grok4FastReasoning,
+            GrokModel::Grok4FastNonReasoning,
+            GrokModel::Grok41FastReasoning,
+            GrokModel::Grok41FastNonReasoning,
+            GrokModel::Grok3,
+            GrokModel::Grok3Mini,
+            GrokModel::GrokCodeFast1,
+            GrokModel::Grok21212,
+            GrokModel::Grok2Vision,
+        ];
+
+        for model in models {
+            let model_str = model.as_str();
+            let roundtrip_model = GrokModel::from_string(model_str);
+            assert_eq!(model, roundtrip_model);
+        }
+    }
+
+    #[test]
     fn test_grok_model_from_string() {
-        // Test known model
-        let model = GrokModel::from_string("grok-4-0709");
-        assert_eq!(model, GrokModel::Grok4);
+        let test_strings = vec![
+            "grok-4-0709",
+            "grok-4-fast-reasoning",
+            "grok-4-fast-non-reasoning",
+            "grok-4-1-fast-reasoning",
+            "grok-4-1-fast-non-reasoning",
+            "grok-3",
+            "grok-3-mini",
+            "grok-code-fast-1",
+            "grok-2-1212",
+            "grok-2-vision-1212",
+        ];
+
+        for original_string in test_strings {
+            let model = GrokModel::from_string(original_string);
+            let roundtrip_string = model.as_str();
+
+            assert_eq!(roundtrip_string, original_string);
+        }
 
         // Test custom model
         let model = GrokModel::from_string("grok-custom");
