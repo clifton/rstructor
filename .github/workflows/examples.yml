@@ -37,6 +37,7 @@ jobs:
           cache-on-failure: true
 
       - name: Run examples for group ${{ matrix.group }}
+        shell: bash
         run: |
           # Get all examples sorted alphabetically
           mapfile -t examples < <(ls examples/*.rs | sed 's|examples/||' | sed 's|\.rs$||' | sort)
