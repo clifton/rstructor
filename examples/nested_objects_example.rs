@@ -1,9 +1,6 @@
 #![allow(clippy::collapsible_if)]
 
-use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
-    RStructorError,
-};
+use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient, RStructorError};
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -189,7 +186,6 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
         println!("Using OpenAI to generate recipe...");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt5) // More capable model for complex nested structures
             .temperature(0.2)
             .max_retries(5)
             .include_error_feedback(true);
@@ -202,7 +198,6 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
         println!("Using Anthropic to generate recipe...");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::ClaudeSonnet4) // Using more capable model for complex structure
             .temperature(0.2)
             .max_retries(5)
             .include_error_feedback(true);

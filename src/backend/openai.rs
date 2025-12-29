@@ -34,6 +34,8 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
+    /// GPT-5.2 (latest GPT-5 model)
+    Gpt52,
     /// GPT-5 Chat Latest (latest GPT-5 model for chat)
     Gpt5ChatLatest,
     /// GPT-5 Pro (most capable GPT-5 model)
@@ -65,6 +67,7 @@ pub enum Model {
 impl Model {
     pub fn as_str(&self) -> &str {
         match self {
+            Model::Gpt52 => "gpt-5.2",
             Model::Gpt5ChatLatest => "gpt-5-chat-latest",
             Model::Gpt5Pro => "gpt-5-pro",
             Model::Gpt5 => "gpt-5",
@@ -88,6 +91,7 @@ impl Model {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
+            "gpt-5.2" => Model::Gpt52,
             "gpt-5-chat-latest" => Model::Gpt5ChatLatest,
             "gpt-5-pro" => Model::Gpt5Pro,
             "gpt-5" => Model::Gpt5,
@@ -229,7 +233,7 @@ impl OpenAIClient {
 
         let config = OpenAIConfig {
             api_key,
-            model: Model::Gpt5ChatLatest, // Default to GPT-5 Chat Latest (latest flagship)
+            model: Model::Gpt52, // Default to GPT-5.2 (latest GPT-5)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,     // Default: no timeout (uses reqwest's default)
@@ -271,7 +275,7 @@ impl OpenAIClient {
 
         let config = OpenAIConfig {
             api_key,
-            model: Model::Gpt5ChatLatest, // Default to GPT-5 Chat Latest (latest flagship)
+            model: Model::Gpt52, // Default to GPT-5.2 (latest GPT-5)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,     // Default: no timeout (uses reqwest's default)

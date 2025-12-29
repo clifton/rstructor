@@ -1,6 +1,4 @@
-use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
-};
+use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -81,7 +79,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Using OpenAI...");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt4OMini)
             .temperature(0.0)
             .max_retries(3)
             .include_error_feedback(true);
@@ -107,7 +104,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\nUsing Anthropic...");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::ClaudeSonnet4) // Best price/performance model
             .temperature(0.0)
             .max_retries(3)
             .include_error_feedback(true);

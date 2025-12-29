@@ -39,6 +39,10 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
+    /// Gemini 3 Pro Preview (latest preview Pro model)
+    Gemini3ProPreview,
+    /// Gemini 3 Flash Preview (latest preview Flash model)
+    Gemini3FlashPreview,
     /// Gemini 2.5 Pro (latest production Pro model)
     Gemini25Pro,
     /// Gemini 2.5 Flash (latest production Flash model, best price/performance)
@@ -66,6 +70,8 @@ pub enum Model {
 impl Model {
     pub fn as_str(&self) -> &str {
         match self {
+            Model::Gemini3ProPreview => "gemini-3-pro-preview",
+            Model::Gemini3FlashPreview => "gemini-3-flash-preview",
             Model::Gemini25Pro => "gemini-2.5-pro",
             Model::Gemini25Flash => "gemini-2.5-flash",
             Model::Gemini25FlashLite => "gemini-2.5-flash-lite",
@@ -87,6 +93,8 @@ impl Model {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
+            "gemini-3-pro-preview" => Model::Gemini3ProPreview,
+            "gemini-3-flash-preview" => Model::Gemini3FlashPreview,
             "gemini-2.5-pro" => Model::Gemini25Pro,
             "gemini-2.5-flash" => Model::Gemini25Flash,
             "gemini-2.5-flash-lite" => Model::Gemini25FlashLite,
@@ -220,7 +228,7 @@ impl GeminiClient {
 
         let config = GeminiConfig {
             api_key,
-            model: Model::Gemini25Flash, // Default to Gemini 2.5 Flash (best price/performance for structured outputs)
+            model: Model::Gemini3FlashPreview, // Default to Gemini 3 Flash Preview (latest)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,     // Default: no timeout (uses reqwest's default)
@@ -262,7 +270,7 @@ impl GeminiClient {
 
         let config = GeminiConfig {
             api_key,
-            model: Model::Gemini25Flash, // Default to Gemini 2.5 Flash (best price/performance for structured outputs)
+            model: Model::Gemini3FlashPreview, // Default to Gemini 3 Flash Preview (latest)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,     // Default: no timeout (uses reqwest's default)

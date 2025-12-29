@@ -73,11 +73,10 @@ async fn main() -> rstructor::Result<()> {
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
         println!("\nAPI key found! Trying an actual weather query with OpenAI...");
 
-        use rstructor::{LLMClient, OpenAIClient, OpenAIModel};
+        use rstructor::{LLMClient, OpenAIClient};
 
         // Create an OpenAI client
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt4OMini)
             .temperature(0.0)
             .max_retries(3)
             .include_error_feedback(true);

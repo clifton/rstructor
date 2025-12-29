@@ -1,5 +1,5 @@
 use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, LLMClient,
+    AnthropicClient, Instructor, LLMClient,
     logging::{LogLevel, init_logging},
 };
 use serde::{Deserialize, Serialize};
@@ -141,7 +141,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a client with higher temperature to increase chances of validation errors
     let client = AnthropicClient::new(api_key)?
-        .model(AnthropicModel::ClaudeSonnet4)
         .temperature(0.7) // Higher temperature = more creativity = more validation errors
         .max_retries(3)
         .include_error_feedback(true);

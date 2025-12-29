@@ -1,8 +1,6 @@
 #![allow(clippy::collapsible_if)]
 
-use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, LLMClient, OpenAIClient, OpenAIModel,
-};
+use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -130,7 +128,6 @@ async fn analyze_article(
         println!("Using OpenAI for article analysis...");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt5)
             .temperature(0.0)
             .max_retries(5)
             .include_error_feedback(true);
@@ -145,7 +142,6 @@ async fn analyze_article(
         println!("Using Anthropic for article analysis...");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::ClaudeSonnet4)
             .temperature(0.0)
             .max_retries(5)
             .include_error_feedback(true);

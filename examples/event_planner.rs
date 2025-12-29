@@ -1,6 +1,4 @@
-use rstructor::{
-    AnthropicClient, AnthropicModel, Instructor, OpenAIClient, OpenAIModel, RStructorError,
-};
+use rstructor::{AnthropicClient, Instructor, OpenAIClient, RStructorError};
 type Result<T> = rstructor::Result<T>;
 use chrono::{NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
@@ -311,7 +309,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("\nProcessing your request with OpenAI...\n");
 
         let client = OpenAIClient::new(api_key)?
-            .model(OpenAIModel::Gpt5)
             .temperature(0.3)
             .max_retries(5)
             .include_error_feedback(true);
@@ -329,7 +326,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("\nProcessing your request with Anthropic...\n");
 
         let client = AnthropicClient::new(api_key)?
-            .model(AnthropicModel::ClaudeSonnet4)
             .temperature(0.3)
             .max_retries(5)
             .include_error_feedback(true);
