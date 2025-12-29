@@ -62,8 +62,8 @@ mod anthropic_validation_tests {
     // Test validation catching an invalid temperature
     #[tokio::test]
     async fn test_anthropic_validation_fails_with_extreme_temperature() {
-        let api_key = env::var("ANTHROPIC_API_KEY")
-            .expect("ANTHROPIC_API_KEY must be set for this test");
+        let api_key =
+            env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set for this test");
 
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
@@ -149,8 +149,8 @@ mod anthropic_validation_tests {
     #[tokio::test]
     async fn test_anthropic_validation_succeeds_with_valid_data() {
         // This test demonstrates successful validation with reasonable data
-        let api_key = env::var("ANTHROPIC_API_KEY")
-            .expect("ANTHROPIC_API_KEY must be set for this test");
+        let api_key =
+            env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set for this test");
 
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
