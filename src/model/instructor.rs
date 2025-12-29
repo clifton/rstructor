@@ -39,39 +39,36 @@ use crate::schema::SchemaType;
 /// The `validate` method is called automatically when an LLM generates a structured response,
 /// allowing you to apply domain-specific validation logic beyond what type checking provides.
 ///
-/// To add custom validation:
+/// To add custom validation, use the `validate` attribute with a function path:
 ///
 /// ```
 /// use rstructor::{Instructor, RStructorError};
 /// use serde::{Serialize, Deserialize};
 ///
-/// #[derive(Instructor, Serialize, Deserialize, Debug)]
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// #[llm(validate = "validate_product")]
 /// struct Product {
 ///     name: String,
 ///     price: f64,
 ///     quantity: u32,
 /// }
 ///
-/// // Recommended approach: Add validation directly to the struct
-/// // The #[derive(Instructor)] macro handles calling this method
-/// impl Product {
-///     fn validate(&self) -> rstructor::Result<()> {
-///         // Price must be positive
-///         if self.price <= 0.0 {
-///             return Err(RStructorError::ValidationError(
-///                 format!("Product price must be positive, got {}", self.price)
-///             ));
-///         }
-///
-///         // Name can't be empty
-///         if self.name.trim().is_empty() {
-///             return Err(RStructorError::ValidationError(
-///                 "Product name cannot be empty".to_string()
-///             ));
-///         }
-///
-///         Ok(())
+/// fn validate_product(product: &Product) -> rstructor::Result<()> {
+///     // Price must be positive
+///     if product.price <= 0.0 {
+///         return Err(RStructorError::ValidationError(
+///             format!("Product price must be positive, got {}", product.price)
+///         ));
 ///     }
+///
+///     // Name can't be empty
+///     if product.name.trim().is_empty() {
+///         return Err(RStructorError::ValidationError(
+///             "Product name cannot be empty".to_string()
+///         ));
+///     }
+///
+///     Ok(())
 /// }
 /// ```
 ///

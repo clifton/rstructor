@@ -64,6 +64,7 @@ struct Nutrition {
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "A cooking recipe with ingredients and instructions",
+      validate = "validate_recipe",
       examples = [
         ::serde_json::json!({
             "name": "Chocolate Chip Cookies",
@@ -128,45 +129,43 @@ struct Recipe {
     nutrition: Nutrition,
 }
 
-// Custom validation implementation
-impl Recipe {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Check that we have at least one ingredient
-        if self.ingredients.is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Recipe must have at least one ingredient".to_string(),
-            ));
-        }
+// Custom validation function referenced by #[llm(validate = "validate_recipe")]
+fn validate_recipe(recipe: &Recipe) -> rstructor::Result<()> {
+    // Check that we have at least one ingredient
+    if recipe.ingredients.is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Recipe must have at least one ingredient".to_string(),
+        ));
+    }
 
-        // Check that we have at least one step
-        if self.steps.is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Recipe must have at least one step".to_string(),
-            ));
-        }
+    // Check that we have at least one step
+    if recipe.steps.is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Recipe must have at least one step".to_string(),
+        ));
+    }
 
-        // Check that steps are numbered correctly (1-based, sequential)
-        for (i, step) in self.steps.iter().enumerate() {
-            if step.number != (i + 1) as u16 {
-                return Err(RStructorError::ValidationError(format!(
-                    "Step numbers must be sequential, expected {} but got {}",
-                    i + 1,
-                    step.number
-                )));
-            }
-        }
-
-        // Check that difficulty is one of the expected values
-        let valid_difficulties = vec!["Easy", "Medium", "Hard"];
-        if !valid_difficulties.contains(&self.difficulty.as_str()) {
+    // Check that steps are numbered correctly (1-based, sequential)
+    for (i, step) in recipe.steps.iter().enumerate() {
+        if step.number != (i + 1) as u16 {
             return Err(RStructorError::ValidationError(format!(
-                "Difficulty must be one of {:?}, got {}",
-                valid_difficulties, self.difficulty
+                "Step numbers must be sequential, expected {} but got {}",
+                i + 1,
+                step.number
             )));
         }
-
-        Ok(())
     }
+
+    // Check that difficulty is one of the expected values
+    let valid_difficulties = vec!["Easy", "Medium", "Hard"];
+    if !valid_difficulties.contains(&recipe.difficulty.as_str()) {
+        return Err(RStructorError::ValidationError(format!(
+            "Difficulty must be one of {:?}, got {}",
+            valid_difficulties, recipe.difficulty
+        )));
+    }
+
+    Ok(())
 }
 
 #[tokio::main]

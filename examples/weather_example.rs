@@ -2,6 +2,7 @@ use rstructor::{Instructor, RStructorError, SchemaType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Instructor, Serialize, Deserialize)]
+#[llm(validate = "validate_weather")]
 struct WeatherInfo {
     #[llm(description = "City name to get weather for")]
     city: String,
@@ -13,27 +14,25 @@ struct WeatherInfo {
     description: Option<String>,
 }
 
-// Custom validation implementation
-impl WeatherInfo {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Validate city name isn't empty
-        if self.city.trim().is_empty() {
-            return Err(RStructorError::ValidationError(
-                "City name cannot be empty".to_string(),
-            ));
-        }
-
-        // Validate temperature is within a reasonable range
-        // Reasonable range for Earth temperatures in Celsius
-        if self.temperature < -100.0 || self.temperature > 70.0 {
-            return Err(RStructorError::ValidationError(format!(
-                "Temperature must be between -100°C and 70°C, got {}°C",
-                self.temperature
-            )));
-        }
-
-        Ok(())
+// Custom validation function referenced by #[llm(validate = "validate_weather")]
+fn validate_weather(info: &WeatherInfo) -> rstructor::Result<()> {
+    // Validate city name isn't empty
+    if info.city.trim().is_empty() {
+        return Err(RStructorError::ValidationError(
+            "City name cannot be empty".to_string(),
+        ));
     }
+
+    // Validate temperature is within a reasonable range
+    // Reasonable range for Earth temperatures in Celsius
+    if info.temperature < -100.0 || info.temperature > 70.0 {
+        return Err(RStructorError::ValidationError(format!(
+            "Temperature must be between -100°C and 70°C, got {}°C",
+            info.temperature
+        )));
+    }
+
+    Ok(())
 }
 
 #[tokio::main]

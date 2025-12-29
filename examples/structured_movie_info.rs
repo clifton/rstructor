@@ -6,6 +6,7 @@ use std::env;
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "Detailed information about a movie",
       title = "MovieDetails",
+      validate = "validate_movie",
       examples = [
         ::serde_json::json!({
             "title": "The Matrix",
@@ -40,29 +41,25 @@ struct Movie {
     plot_summary: String,
 }
 
-// Custom validation logic
-// Manually provide the validate method with custom validation logic
-impl Movie {
-    // Custom validation method
-    fn validate(&self) -> rstructor::Result<()> {
-        // Check that the rating is between 0 and 10
-        if self.rating < 0.0 || self.rating > 10.0 {
-            return Err(rstructor::RStructorError::ValidationError(format!(
-                "Rating must be between 0 and 10, got {}",
-                self.rating
-            )));
-        }
-
-        // Check that the release year is reasonable
-        if self.release_year < 1888 || self.release_year > 2030 {
-            return Err(rstructor::RStructorError::ValidationError(format!(
-                "Release year must be between 1888 and 2030, got {}",
-                self.release_year
-            )));
-        }
-
-        Ok(())
+// Custom validation function referenced by #[llm(validate = "validate_movie")]
+fn validate_movie(movie: &Movie) -> rstructor::Result<()> {
+    // Check that the rating is between 0 and 10
+    if movie.rating < 0.0 || movie.rating > 10.0 {
+        return Err(rstructor::RStructorError::ValidationError(format!(
+            "Rating must be between 0 and 10, got {}",
+            movie.rating
+        )));
     }
+
+    // Check that the release year is reasonable
+    if movie.release_year < 1888 || movie.release_year > 2030 {
+        return Err(rstructor::RStructorError::ValidationError(format!(
+            "Release year must be between 1888 and 2030, got {}",
+            movie.release_year
+        )));
+    }
+
+    Ok(())
 }
 
 #[tokio::main]

@@ -5,7 +5,10 @@ use rstructor::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "Weather forecast for a location")]
+#[llm(
+    description = "Weather forecast for a location",
+    validate = "validate_weather_forecast"
+)]
 struct WeatherForecast {
     #[llm(description = "Location/city name")]
     location: String,
@@ -18,7 +21,10 @@ struct WeatherForecast {
 }
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-#[llm(description = "Weather forecast for a specific day")]
+#[llm(
+    description = "Weather forecast for a specific day",
+    validate = "validate_day_forecast"
+)]
 struct DayForecast {
     #[llm(description = "Day of the week", example = "Monday")]
     day: String,
@@ -31,89 +37,58 @@ struct DayForecast {
     conditions: String,
 }
 
-// Implement custom validation directly on the WeatherForecast struct
-// The Instructor derive macro will call this method
-impl WeatherForecast {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Check that location is not empty
-        if self.location.trim().is_empty() {
-            return Err(rstructor::RStructorError::ValidationError(
-                "Location cannot be empty".to_string(),
-            ));
-        }
-
-        // Check temperature is in reasonable range
-        if self.current_temperature < -100.0 || self.current_temperature > 70.0 {
-            return Err(rstructor::RStructorError::ValidationError(format!(
-                "Current temperature must be between -100 and 70°C, got {}",
-                self.current_temperature
-            )));
-        }
-
-        // Check that we have at least one forecast day
-        if self.forecast.is_empty() {
-            return Err(rstructor::RStructorError::ValidationError(
-                "Forecast must include at least one day".to_string(),
-            ));
-        }
-
-        // Validate each day forecast
-        for day_forecast in &self.forecast {
-            // Check that day is not empty
-            if day_forecast.day.trim().is_empty() {
-                return Err(rstructor::RStructorError::ValidationError(
-                    "Day cannot be empty".to_string(),
-                ));
-            }
-
-            // Check temperature is in reasonable range
-            if day_forecast.temperature < -100.0 || day_forecast.temperature > 70.0 {
-                return Err(rstructor::RStructorError::ValidationError(format!(
-                    "Forecast temperature must be between -100 and 70°C, got {}",
-                    day_forecast.temperature
-                )));
-            }
-
-            // Check that conditions is not empty
-            if day_forecast.conditions.trim().is_empty() {
-                return Err(rstructor::RStructorError::ValidationError(
-                    "Weather conditions cannot be empty".to_string(),
-                ));
-            }
-        }
-
-        Ok(())
+// Custom validation function referenced by #[llm(validate = "validate_weather_forecast")]
+fn validate_weather_forecast(forecast: &WeatherForecast) -> rstructor::Result<()> {
+    // Check that location is not empty
+    if forecast.location.trim().is_empty() {
+        return Err(rstructor::RStructorError::ValidationError(
+            "Location cannot be empty".to_string(),
+        ));
     }
+
+    // Check temperature is in reasonable range
+    if forecast.current_temperature < -100.0 || forecast.current_temperature > 70.0 {
+        return Err(rstructor::RStructorError::ValidationError(format!(
+            "Current temperature must be between -100 and 70°C, got {}",
+            forecast.current_temperature
+        )));
+    }
+
+    // Check that we have at least one forecast day
+    if forecast.forecast.is_empty() {
+        return Err(rstructor::RStructorError::ValidationError(
+            "Forecast must include at least one day".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
-// Implement validation for DayForecast
-// This will be called by the derived Instructor implementation
-impl DayForecast {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Check that day is not empty
-        if self.day.trim().is_empty() {
-            return Err(rstructor::RStructorError::ValidationError(
-                "Day cannot be empty".to_string(),
-            ));
-        }
-
-        // Check temperature is in reasonable range
-        if self.temperature < -100.0 || self.temperature > 70.0 {
-            return Err(rstructor::RStructorError::ValidationError(format!(
-                "Forecast temperature must be between -100 and 70°C, got {}",
-                self.temperature
-            )));
-        }
-
-        // Check that conditions is not empty
-        if self.conditions.trim().is_empty() {
-            return Err(rstructor::RStructorError::ValidationError(
-                "Weather conditions cannot be empty".to_string(),
-            ));
-        }
-
-        Ok(())
+// Custom validation function referenced by #[llm(validate = "validate_day_forecast")]
+fn validate_day_forecast(day: &DayForecast) -> rstructor::Result<()> {
+    // Check that day is not empty
+    if day.day.trim().is_empty() {
+        return Err(rstructor::RStructorError::ValidationError(
+            "Day cannot be empty".to_string(),
+        ));
     }
+
+    // Check temperature is in reasonable range
+    if day.temperature < -100.0 || day.temperature > 70.0 {
+        return Err(rstructor::RStructorError::ValidationError(format!(
+            "Forecast temperature must be between -100 and 70°C, got {}",
+            day.temperature
+        )));
+    }
+
+    // Check that conditions is not empty
+    if day.conditions.trim().is_empty() {
+        return Err(rstructor::RStructorError::ValidationError(
+            "Weather conditions cannot be empty".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 #[tokio::main]

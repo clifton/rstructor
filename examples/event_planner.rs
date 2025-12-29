@@ -86,6 +86,7 @@ struct Activity {
 
 #[derive(Instructor, Serialize, Deserialize, Debug, Clone)]
 #[llm(description = "Information about an event to be organized",
+      validate = "validate_event_plan",
       examples = [
         ::serde_json::json!({
             "event_name": "Annual Tech Conference",
@@ -177,66 +178,64 @@ struct EventPlan {
     estimated_budget: Option<f32>,
 }
 
-// Custom validation implementation
-impl EventPlan {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Validate date format
-        if NaiveDate::parse_from_str(&self.date, "%Y-%m-%d").is_err() {
+// Custom validation function referenced by #[llm(validate = "validate_event_plan")]
+fn validate_event_plan(plan: &EventPlan) -> rstructor::Result<()> {
+    // Validate date format
+    if NaiveDate::parse_from_str(&plan.date, "%Y-%m-%d").is_err() {
+        return Err(RStructorError::ValidationError(format!(
+            "Invalid date format: {}. Expected YYYY-MM-DD",
+            plan.date
+        )));
+    }
+
+    // Validate times
+    let validate_time = |time: &str| -> rstructor::Result<()> {
+        if NaiveTime::parse_from_str(time, "%H:%M").is_err() {
             return Err(RStructorError::ValidationError(format!(
-                "Invalid date format: {}. Expected YYYY-MM-DD",
-                self.date
+                "Invalid time format: {}. Expected HH:MM",
+                time
             )));
         }
-
-        // Validate times
-        let validate_time = |time: &str| -> rstructor::Result<()> {
-            if NaiveTime::parse_from_str(time, "%H:%M").is_err() {
-                return Err(RStructorError::ValidationError(format!(
-                    "Invalid time format: {}. Expected HH:MM",
-                    time
-                )));
-            }
-            Ok(())
-        };
-
-        validate_time(&self.start_time)?;
-        validate_time(&self.end_time)?;
-
-        // Validate activity times
-        for activity in &self.activities {
-            validate_time(&activity.start_time)?;
-            validate_time(&activity.end_time)?;
-        }
-
-        // Make sure activities are within event timeframe
-        let event_start = NaiveTime::parse_from_str(&self.start_time, "%H:%M").unwrap();
-        let event_end = NaiveTime::parse_from_str(&self.end_time, "%H:%M").unwrap();
-
-        for activity in &self.activities {
-            let activity_start = NaiveTime::parse_from_str(&activity.start_time, "%H:%M").unwrap();
-            let activity_end = NaiveTime::parse_from_str(&activity.end_time, "%H:%M").unwrap();
-
-            if activity_start < event_start || activity_end > event_end {
-                return Err(RStructorError::ValidationError(format!(
-                    "Activity '{}' time ({}-{}) is outside event hours ({}-{})",
-                    activity.name,
-                    activity.start_time,
-                    activity.end_time,
-                    self.start_time,
-                    self.end_time
-                )));
-            }
-        }
-
-        // Validate contact information
-        if self.contact.email.is_none() && self.contact.phone.is_none() {
-            return Err(RStructorError::ValidationError(
-                "Contact must have either email or phone specified".to_string(),
-            ));
-        }
-
         Ok(())
+    };
+
+    validate_time(&plan.start_time)?;
+    validate_time(&plan.end_time)?;
+
+    // Validate activity times
+    for activity in &plan.activities {
+        validate_time(&activity.start_time)?;
+        validate_time(&activity.end_time)?;
     }
+
+    // Make sure activities are within event timeframe
+    let event_start = NaiveTime::parse_from_str(&plan.start_time, "%H:%M").unwrap();
+    let event_end = NaiveTime::parse_from_str(&plan.end_time, "%H:%M").unwrap();
+
+    for activity in &plan.activities {
+        let activity_start = NaiveTime::parse_from_str(&activity.start_time, "%H:%M").unwrap();
+        let activity_end = NaiveTime::parse_from_str(&activity.end_time, "%H:%M").unwrap();
+
+        if activity_start < event_start || activity_end > event_end {
+            return Err(RStructorError::ValidationError(format!(
+                "Activity '{}' time ({}-{}) is outside event hours ({}-{})",
+                activity.name,
+                activity.start_time,
+                activity.end_time,
+                plan.start_time,
+                plan.end_time
+            )));
+        }
+    }
+
+    // Validate contact information
+    if plan.contact.email.is_none() && plan.contact.phone.is_none() {
+        return Err(RStructorError::ValidationError(
+            "Contact must have either email or phone specified".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 async fn process_event_request(

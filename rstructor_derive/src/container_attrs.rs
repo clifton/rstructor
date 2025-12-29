@@ -12,6 +12,9 @@ pub struct ContainerAttributes {
 
     /// Serde rename_all case style (from serde attribute)
     pub serde_rename_all: Option<String>,
+
+    /// Custom validation function path (e.g., "validate_product" or "my_module::validate")
+    pub validate: Option<String>,
 }
 
 impl ContainerAttributes {
@@ -21,12 +24,14 @@ impl ContainerAttributes {
         title: Option<String>,
         examples: Vec<proc_macro2::TokenStream>,
         serde_rename_all: Option<String>,
+        validate: Option<String>,
     ) -> Self {
         Self {
             description,
             title,
             examples,
             serde_rename_all,
+            validate,
         }
     }
 
@@ -37,5 +42,6 @@ impl ContainerAttributes {
             && self.title.is_none()
             && self.examples.is_empty()
             && self.serde_rename_all.is_none()
+            && self.validate.is_none()
     }
 }

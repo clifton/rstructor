@@ -35,6 +35,7 @@ struct Step {
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 #[llm(description = "A complete cooking recipe with ingredients and step-by-step instructions",
+      validate = "validate_recipe",
       examples = [
         ::serde_json::json!({
             "name": "Classic Chocolate Chip Cookies",
@@ -73,69 +74,67 @@ struct Recipe {
     steps: Vec<Step>,
 }
 
-// Add custom validation
-impl Recipe {
-    fn validate(&self) -> rstructor::Result<()> {
-        // Recipe must have a name
-        if self.name.trim().is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Recipe must have a name".to_string(),
-            ));
-        }
-
-        // Must have at least one ingredient
-        if self.ingredients.is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Recipe must have at least one ingredient".to_string(),
-            ));
-        }
-
-        // Must have at least one step
-        if self.steps.is_empty() {
-            return Err(RStructorError::ValidationError(
-                "Recipe must have at least one step".to_string(),
-            ));
-        }
-
-        // Validate steps are in order
-        let mut prev_number = 0;
-        for step in &self.steps {
-            if step.number <= prev_number {
-                return Err(RStructorError::ValidationError(format!(
-                    "Step numbers must be sequential, found step {} after step {}",
-                    step.number, prev_number
-                )));
-            }
-            prev_number = step.number;
-        }
-
-        // All ingredients must have positive amounts
-        for ingredient in &self.ingredients {
-            if ingredient.amount <= 0.0 {
-                return Err(RStructorError::ValidationError(format!(
-                    "Ingredient '{}' has invalid amount: {}",
-                    ingredient.name, ingredient.amount
-                )));
-            }
-
-            // Ingredient name can't be empty
-            if ingredient.name.trim().is_empty() {
-                return Err(RStructorError::ValidationError(
-                    "Ingredient name cannot be empty".to_string(),
-                ));
-            }
-
-            // Unit can't be empty
-            if ingredient.unit.trim().is_empty() {
-                return Err(RStructorError::ValidationError(format!(
-                    "Unit cannot be empty for ingredient '{}'",
-                    ingredient.name
-                )));
-            }
-        }
-
-        Ok(())
+// Custom validation function referenced by #[llm(validate = "validate_recipe")]
+fn validate_recipe(recipe: &Recipe) -> rstructor::Result<()> {
+    // Recipe must have a name
+    if recipe.name.trim().is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Recipe must have a name".to_string(),
+        ));
     }
+
+    // Must have at least one ingredient
+    if recipe.ingredients.is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Recipe must have at least one ingredient".to_string(),
+        ));
+    }
+
+    // Must have at least one step
+    if recipe.steps.is_empty() {
+        return Err(RStructorError::ValidationError(
+            "Recipe must have at least one step".to_string(),
+        ));
+    }
+
+    // Validate steps are in order
+    let mut prev_number = 0;
+    for step in &recipe.steps {
+        if step.number <= prev_number {
+            return Err(RStructorError::ValidationError(format!(
+                "Step numbers must be sequential, found step {} after step {}",
+                step.number, prev_number
+            )));
+        }
+        prev_number = step.number;
+    }
+
+    // All ingredients must have positive amounts
+    for ingredient in &recipe.ingredients {
+        if ingredient.amount <= 0.0 {
+            return Err(RStructorError::ValidationError(format!(
+                "Ingredient '{}' has invalid amount: {}",
+                ingredient.name, ingredient.amount
+            )));
+        }
+
+        // Ingredient name can't be empty
+        if ingredient.name.trim().is_empty() {
+            return Err(RStructorError::ValidationError(
+                "Ingredient name cannot be empty".to_string(),
+            ));
+        }
+
+        // Unit can't be empty
+        if ingredient.unit.trim().is_empty() {
+            return Err(RStructorError::ValidationError(format!(
+                "Unit cannot be empty for ingredient '{}'",
+                ingredient.name
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> {
