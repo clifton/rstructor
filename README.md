@@ -794,6 +794,26 @@ rstructor currently focuses on single-turn, synchronous structured output genera
 - **Response Modes**: Different validation strategies (strict, partial, etc.)
 - **Rate Limiting**: Built-in rate limit handling and backoff strategies
 
+### ⚠️ Avoid Nested Instructor Derives
+
+**Only derive `Instructor` on the top-level type** you pass to `materialize()`. Nested structs and enums used as fields should NOT have `Instructor` derived on them - they only need `Serialize` and `Deserialize`.
+
+```rust
+// ✅ CORRECT: Only top-level type has Instructor
+#[derive(Instructor, Serialize, Deserialize)]
+struct Parent {
+    child: Child,  // Child does NOT derive Instructor
+}
+
+// Nested types only need Serialize/Deserialize
+#[derive(Serialize, Deserialize)]
+struct Child {
+    name: String,
+}
+```
+
+Deriving `Instructor` on nested types can cause **stack overflow** at runtime due to deep schema generation. The macro cannot detect this at compile time.
+
 ## 🛣️ Roadmap
 
 - [x] Core traits and interfaces

@@ -10,6 +10,30 @@ use crate::schema::SchemaType;
 /// (SchemaType, DeserializeOwned, and Serialize), but you can also provide a custom
 /// implementation to add your own validation logic.
 ///
+/// # ⚠️ Important: Avoid Nested Instructor Derives
+///
+/// **Only derive `Instructor` on the top-level type** you pass to `materialize()`.
+/// Nested structs and enums used as fields should NOT have `Instructor` derived -
+/// they only need `Serialize` and `Deserialize`.
+///
+/// ```rust
+/// # use rstructor::Instructor;
+/// # use serde::{Serialize, Deserialize};
+/// // ✅ CORRECT: Only top-level type has Instructor
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// struct Parent {
+///     child: Child,  // Child does NOT derive Instructor
+/// }
+///
+/// // Nested types only need Serialize/Deserialize
+/// #[derive(Serialize, Deserialize)]
+/// struct Child {
+///     name: String,
+/// }
+/// ```
+///
+/// Deriving `Instructor` on nested types can cause stack overflow at runtime.
+///
 /// # Validation
 ///
 /// The `validate` method is called automatically when an LLM generates a structured response,

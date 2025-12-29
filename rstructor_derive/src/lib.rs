@@ -19,6 +19,32 @@ use syn::{Data, DeriveInput, parse_macro_input};
 /// This macro automatically implements the SchemaType trait for a struct or enum,
 /// generating a JSON Schema representation based on the Rust type.
 ///
+/// # ⚠️ Important: Avoid Nested Instructor Derives
+///
+/// **Only derive `Instructor` on the top-level type** you pass to `materialize()`.
+/// Nested structs and enums used as fields should NOT have `Instructor` derived
+/// on them - they only need `Serialize` and `Deserialize`.
+///
+/// ```rust
+/// use rstructor::Instructor;
+/// use serde::{Serialize, Deserialize};
+///
+/// // ✅ CORRECT: Only top-level type has Instructor
+/// #[derive(Instructor, Serialize, Deserialize)]
+/// struct Parent {
+///     child: Child,  // Child does NOT derive Instructor
+/// }
+///
+/// // Nested types only need Serialize/Deserialize
+/// #[derive(Serialize, Deserialize)]
+/// struct Child {
+///     name: String,
+/// }
+/// ```
+///
+/// Deriving `Instructor` on nested types can cause **stack overflow** at runtime
+/// due to deep schema generation. The macro cannot detect this at compile time.
+///
 /// # Examples
 ///
 /// ## Field-level attributes
