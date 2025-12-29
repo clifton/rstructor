@@ -1,0 +1,54 @@
+name: Examples
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+
+jobs:
+  discover-examples:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover examples
+        id: set-matrix
+        run: |
+          examples=$(ls examples/*.rs | sed 's|examples/||' | sed 's|\.rs||' | grep -v '^$' | awk '{printf "\"%s\",", $0}' | sed 's/,$//')
+          echo "matrix={\"example\":[$examples]}" >> $GITHUB_OUTPUT
+
+  examples:
+    needs: discover-examples
+    runs-on: ubuntu-latest
+    container:
+      image: rust:latest
+    strategy:
+      matrix: ${{ fromJson(needs.discover-examples.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "cmt-examples-${{ matrix.example }}"
+          cache-directories: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git
+          cache-on-failure: true
+
+      - name: Run example ${{ matrix.example }}
+        run: cargo run --example ${{ matrix.example }}
