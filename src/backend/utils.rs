@@ -538,7 +538,7 @@ mod tests {
     fn truncate_message_mixed_utf8() {
         let msg = "Error: 无效的请求";
         // "Error: " is 7 bytes, then Chinese characters are 3 bytes each
-        // Truncating at 10 bytes falls in middle of first Chinese char
+        // Truncating at 10 bytes falls at the boundary after the first Chinese char
         // floor_char_boundary(10) should return 10 (end of first Chinese char after "Error: ")
         let result = truncate_message(msg, 10);
         assert_eq!(result, "Error: 无...");
