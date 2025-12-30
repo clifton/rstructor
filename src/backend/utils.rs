@@ -137,25 +137,28 @@ fn extract_model_from_error(error_text: &str) -> Option<String> {
 /// Suggest an alternative model based on error context.
 fn suggest_model(error_text: &str) -> Option<String> {
     // Common model name patterns and their suggestions
-    if error_text.contains("gpt-4") {
-        Some("gpt-4o or gpt-4o-mini".to_string())
-    } else if error_text.contains("gpt-3") {
-        Some("gpt-4o-mini".to_string())
-    } else if error_text.contains("claude-2") {
+    if error_text.contains("gpt") {
+        Some("gpt-5.2".to_string())
+    } else if error_text.contains("claude") || error_text.contains("sonnet") {
         Some("claude-sonnet-4-5-20250929".to_string())
-    } else if error_text.contains("gemini-pro") {
-        Some("gemini-2.5-flash or gemini-3-flash-preview".to_string())
+    } else if error_text.contains("gemini") {
+        Some("gemini-3-flash-preview".to_string())
     } else {
         None
     }
 }
 
 /// Truncate a message to a maximum length.
+///
+/// Uses `floor_char_boundary` to ensure we don't slice in the middle of a
+/// multi-byte UTF-8 character, which would cause a panic.
 fn truncate_message(msg: &str, max_len: usize) -> String {
     if msg.len() <= max_len {
         msg.to_string()
     } else {
-        format!("{}...", &msg[..max_len])
+        // Find a valid UTF-8 character boundary at or before max_len
+        let boundary = msg.floor_char_boundary(max_len);
+        format!("{}...", &msg[..boundary])
     }
 }
 
@@ -473,4 +476,84 @@ macro_rules! impl_client_builder_methods {
             }
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_message_ascii_within_limit() {
+        let msg = "Hello, world!";
+        assert_eq!(truncate_message(msg, 20), "Hello, world!");
+    }
+
+    #[test]
+    fn truncate_message_ascii_exact_limit() {
+        let msg = "Hello";
+        assert_eq!(truncate_message(msg, 5), "Hello");
+    }
+
+    #[test]
+    fn truncate_message_ascii_exceeds_limit() {
+        let msg = "Hello, world!";
+        assert_eq!(truncate_message(msg, 5), "Hello...");
+    }
+
+    #[test]
+    fn truncate_message_utf8_within_limit() {
+        let msg = "你好世界"; // 12 bytes (3 bytes per character)
+        assert_eq!(truncate_message(msg, 20), "你好世界");
+    }
+
+    #[test]
+    fn truncate_message_utf8_boundary_safe() {
+        // "你好世界" is 12 bytes total (3 bytes per character)
+        // Truncating at 5 bytes would fall in the middle of the second character
+        // floor_char_boundary(5) should return 3 (end of first character)
+        let msg = "你好世界";
+        let result = truncate_message(msg, 5);
+        assert_eq!(result, "你...");
+    }
+
+    #[test]
+    fn truncate_message_utf8_exact_boundary() {
+        // Truncating at exactly 6 bytes should include first two characters
+        let msg = "你好世界";
+        let result = truncate_message(msg, 6);
+        assert_eq!(result, "你好...");
+    }
+
+    #[test]
+    fn truncate_message_emoji() {
+        // Emojis are typically 4 bytes each
+        let msg = "🎉🎊🎈";
+        // Truncating at 5 bytes falls in the middle of second emoji
+        // floor_char_boundary(5) should return 4 (end of first emoji)
+        let result = truncate_message(msg, 5);
+        assert_eq!(result, "🎉...");
+    }
+
+    #[test]
+    fn truncate_message_mixed_utf8() {
+        let msg = "Error: 无效的请求";
+        // "Error: " is 7 bytes, then Chinese characters are 3 bytes each
+        // Truncating at 10 bytes falls in middle of first Chinese char
+        // floor_char_boundary(10) should return 10 (end of first Chinese char after "Error: ")
+        let result = truncate_message(msg, 10);
+        assert_eq!(result, "Error: 无...");
+    }
+
+    #[test]
+    fn truncate_message_empty_string() {
+        let msg = "";
+        assert_eq!(truncate_message(msg, 10), "");
+    }
+
+    #[test]
+    fn truncate_message_zero_limit() {
+        let msg = "Hello";
+        // floor_char_boundary(0) returns 0, so we get just "..."
+        assert_eq!(truncate_message(msg, 0), "...");
+    }
 }
