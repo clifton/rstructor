@@ -184,13 +184,6 @@ struct ContentBlock {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ResponseMessage {
-    role: String,
-    content: Vec<ContentBlock>,
-}
-
-#[derive(Debug, Deserialize)]
 struct UsageInfo {
     input_tokens: u64,
     output_tokens: u64,
