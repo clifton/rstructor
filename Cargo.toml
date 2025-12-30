@@ -47,7 +47,7 @@ tokio = { version = "1.0", features = [
   "rt-multi-thread",
   "io-std",
 ], optional = true }
-reqwest = { version = "0.12.15", features = ["json"], optional = true }
+reqwest = { version = "0.12.15", default-features = false, features = ["json", "rustls-tls"], optional = true }
 thiserror = "2.0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
