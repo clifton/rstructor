@@ -122,6 +122,19 @@ let client = client
 let movie: Movie = client.materialize::<Movie>("Tell me about Inception").await?;
 ```
 
+**Conversation History for Retries**
+
+The retry logic uses conversation history instead of modifying the prompt string. This provides several benefits:
+
+- **Prompt Caching**: Providers like Anthropic and OpenAI can cache the conversation prefix, reducing token costs and latency on retries
+- **Better Error Correction**: The model sees its previous (failed) response and the specific error, making it more likely to produce a correct response
+- **Context Preservation**: The original prompt is preserved exactly, maximizing cache hit rates
+
+When a validation error occurs, the retry sends:
+1. The original user prompt (unchanged - enables caching)
+2. The model's failed response (as an assistant message)
+3. The error feedback (as a user message asking for correction)
+
 ### Extended Thinking (GPT-5.x, Gemini 3, Claude 4.x)
 
 Configure the depth of reasoning for models that support extended thinking:
@@ -950,7 +963,7 @@ cargo run --example news_article_categorizer
 rstructor currently focuses on single-turn, synchronous structured output generation. The following features are planned but not yet implemented:
 
 - **Streaming Responses**: Real-time streaming of partial results as they're generated
-- **Conversation History**: Multi-turn conversations with message history (currently only single prompts supported)
+- **Multi-turn Conversations**: While conversation history is used internally for retry optimization, the public API focuses on single prompts
 - **System Messages**: Explicit system prompts for role-based interactions
 - **Response Modes**: Different validation strategies (strict, partial, etc.)
 - **Rate Limiting**: Built-in rate limit handling and backoff strategies
@@ -969,8 +982,9 @@ rstructor currently focuses on single-turn, synchronous structured output genera
 - [x] Support for custom types (dates, UUIDs, etc.)
 - [x] Structured logging and tracing
 - [x] Automatic retry with validation error feedback
+- [x] Conversation history for retry optimization (prompt caching benefits)
 - [ ] Streaming responses
-- [ ] Conversation history / multi-turn support
+- [ ] Multi-turn conversation API
 - [ ] System messages and role-based prompts
 - [ ] Response modes (strict, partial, retry)
 - [ ] Rate limiting and backoff strategies

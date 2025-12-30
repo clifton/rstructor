@@ -7,8 +7,9 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    GenerateResult, LLMClient, MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage,
-    check_response_status, generate_with_retry, handle_http_error,
+    ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
+    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
+    generate_with_retry_with_history, handle_http_error,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -158,7 +159,7 @@ pub struct OpenAIClient {
 
 // OpenAI API request and response structures
 #[derive(Debug, Serialize)]
-struct ChatMessage {
+struct OpenAIChatMessage {
     role: String,
     content: String,
 }
@@ -173,7 +174,7 @@ struct FunctionDef {
 #[derive(Debug, Serialize)]
 struct ChatCompletionRequest {
     model: String,
-    messages: Vec<ChatMessage>,
+    messages: Vec<OpenAIChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     functions: Option<Vec<FunctionDef>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -395,8 +396,18 @@ impl OpenAIClient {
     }
 
     /// Internal implementation of materialize (without retry logic)
-    /// Returns both the data and optional usage info
-    async fn materialize_internal<T>(&self, prompt: &str) -> Result<(T, Option<TokenUsage>)>
+    /// Accepts conversation history for multi-turn interactions.
+    /// Returns the data, raw response, and optional usage info.
+    ///
+    /// The raw response is included to enable conversation history tracking for retries,
+    /// which improves prompt caching efficiency.
+    async fn materialize_internal<T>(
+        &self,
+        messages: &[ChatMessage],
+    ) -> std::result::Result<
+        MaterializeInternalOutput<T>,
+        (RStructorError, Option<ValidationFailureContext>),
+    >
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -432,14 +443,23 @@ impl OpenAIClient {
             self.config.temperature
         };
 
+        // Convert ChatMessage to OpenAI's format
+        let api_messages: Vec<OpenAIChatMessage> = messages
+            .iter()
+            .map(|msg| OpenAIChatMessage {
+                role: msg.role.as_str().to_string(),
+                content: msg.content.clone(),
+            })
+            .collect();
+
         // Build the request
-        debug!("Building OpenAI API request with function calling");
+        debug!(
+            "Building OpenAI API request with function calling (history_len={})",
+            api_messages.len()
+        );
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: prompt.to_string(),
-            }],
+            messages: api_messages,
             functions: Some(vec![function]),
             function_call: Some(json!({ "name": schema_name })),
             temperature: effective_temp,
@@ -463,24 +483,29 @@ impl OpenAIClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| handle_http_error(e, "OpenAI"))?;
+            .map_err(|e| (handle_http_error(e, "OpenAI"), None))?;
 
         // Parse the response
-        let response = check_response_status(response, "OpenAI").await?;
+        let response = check_response_status(response, "OpenAI")
+            .await
+            .map_err(|e| (e, None))?;
 
         debug!("Successfully received response from OpenAI");
         let completion: ChatCompletionResponse = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse JSON response from OpenAI");
-            e
+            (RStructorError::from(e), None)
         })?;
 
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
-            return Err(RStructorError::api_error(
-                "OpenAI",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No completion choices returned".to_string(),
-                },
+            return Err((
+                RStructorError::api_error(
+                    "OpenAI",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No completion choices returned".to_string(),
+                    },
+                ),
+                None,
             ));
         }
 
@@ -499,48 +524,57 @@ impl OpenAIClient {
 
         // Extract the function arguments JSON
         if let Some(function_call) = &message.function_call {
+            let raw_response = function_call.arguments.clone();
             debug!(
                 function_name = %function_call.name,
-                args_len = function_call.arguments.len(),
+                args_len = raw_response.len(),
                 "Function call received from OpenAI"
             );
 
             // Parse the arguments JSON string into our target type
-            let result: T = match serde_json::from_str(&function_call.arguments) {
+            let result: T = match serde_json::from_str(&raw_response) {
                 Ok(parsed) => parsed,
                 Err(e) => {
                     let error_msg = format!(
                         "Failed to parse response: {}\nPartial JSON: {}",
-                        e, &function_call.arguments
+                        e, &raw_response
                     );
                     error!(
                         error = %e,
-                        partial_json = %function_call.arguments,
+                        partial_json = %raw_response,
                         "JSON parsing error"
                     );
-                    return Err(RStructorError::ValidationError(error_msg));
+                    return Err((
+                        RStructorError::ValidationError(error_msg.clone()),
+                        Some(ValidationFailureContext::new(error_msg, raw_response)),
+                    ));
                 }
             };
 
             // Apply any custom validation
             if let Err(e) = result.validate() {
                 error!(error = ?e, "Custom validation failed");
-                return Err(e);
+                let error_msg = e.to_string();
+                return Err((
+                    e,
+                    Some(ValidationFailureContext::new(error_msg, raw_response)),
+                ));
             }
 
             info!("Successfully generated and validated structured data");
-            Ok((result, usage))
+            Ok(MaterializeInternalOutput::new(result, raw_response, usage))
         } else {
             // If no function call, try to extract from content if available
             if let Some(content) = &message.content {
+                let raw_response = content.clone();
                 warn!(
-                    content_len = content.len(),
+                    content_len = raw_response.len(),
                     "No function call in response, attempting to parse content as JSON"
                 );
 
                 // Try to extract JSON from the content (assuming the model might have returned JSON directly)
                 use crate::backend::extract_json_from_markdown;
-                let json_content = extract_json_from_markdown(content);
+                let json_content = extract_json_from_markdown(&raw_response);
                 let result: T = match serde_json::from_str(&json_content) {
                     Ok(parsed) => parsed,
                     Err(e) => {
@@ -553,25 +587,35 @@ impl OpenAIClient {
                             content = %json_content,
                             "Failed to parse content as JSON"
                         );
-                        return Err(RStructorError::ValidationError(error_msg));
+                        return Err((
+                            RStructorError::ValidationError(error_msg.clone()),
+                            Some(ValidationFailureContext::new(error_msg, raw_response)),
+                        ));
                     }
                 };
 
                 // Apply any custom validation
                 if let Err(e) = result.validate() {
                     error!(error = ?e, "Custom validation failed");
-                    return Err(e);
+                    let error_msg = e.to_string();
+                    return Err((
+                        e,
+                        Some(ValidationFailureContext::new(error_msg, raw_response)),
+                    ));
                 }
 
                 info!("Successfully generated and validated structured data from content");
-                Ok((result, usage))
+                Ok(MaterializeInternalOutput::new(result, raw_response, usage))
             } else {
                 error!("No function call or content in OpenAI response");
-                Err(RStructorError::api_error(
-                    "OpenAI",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No function call or content in response".to_string(),
-                    },
+                Err((
+                    RStructorError::api_error(
+                        "OpenAI",
+                        ApiErrorKind::UnexpectedResponse {
+                            details: "No function call or content in response".to_string(),
+                        },
+                    ),
+                    None,
                 ))
             }
         }
@@ -597,17 +641,17 @@ impl LLMClient for OpenAIClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let (result, _usage) = generate_with_retry(
-            |prompt_owned: String| {
+        let output = generate_with_retry_with_history(
+            |messages: Vec<ChatMessage>| {
                 let this = self;
-                async move { this.materialize_internal::<T>(&prompt_owned).await }
+                async move { this.materialize_internal::<T>(&messages).await }
             },
             prompt,
             self.config.max_retries,
             self.config.include_error_feedback,
         )
         .await?;
-        Ok(result)
+        Ok(output.data)
     }
 
     #[instrument(
@@ -623,17 +667,17 @@ impl LLMClient for OpenAIClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let (result, usage) = generate_with_retry(
-            |prompt_owned: String| {
+        let output = generate_with_retry_with_history(
+            |messages: Vec<ChatMessage>| {
                 let this = self;
-                async move { this.materialize_internal::<T>(&prompt_owned).await }
+                async move { this.materialize_internal::<T>(&messages).await }
             },
             prompt,
             self.config.max_retries,
             self.config.include_error_feedback,
         )
         .await?;
-        Ok(MaterializeResult::new(result, usage))
+        Ok(MaterializeResult::new(output.data, output.usage))
     }
 
     #[instrument(
@@ -681,7 +725,7 @@ impl LLMClient for OpenAIClient {
         debug!("Building OpenAI API request for text generation");
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
-            messages: vec![ChatMessage {
+            messages: vec![OpenAIChatMessage {
                 role: "user".to_string(),
                 content: prompt.to_string(),
             }],

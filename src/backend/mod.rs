@@ -1,4 +1,5 @@
 pub mod client;
+mod messages;
 pub mod usage;
 mod utils;
 
@@ -12,6 +13,7 @@ pub mod grok;
 pub mod openai;
 
 pub use client::LLMClient;
+pub use messages::{ChatMessage, ChatRole, MaterializeInternalOutput, ValidationFailureContext};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
 /// Information about an available model from an LLM provider.
@@ -43,7 +45,8 @@ pub struct ModelInfo {
     pub description: Option<String>,
 }
 pub(crate) use utils::{
-    check_response_status, extract_json_from_markdown, generate_with_retry, handle_http_error,
+    check_response_status, extract_json_from_markdown, generate_with_retry_with_history,
+    handle_http_error,
 };
 
 /// Thinking level configuration for models that support extended reasoning.
