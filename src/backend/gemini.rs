@@ -7,8 +7,9 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    GenerateResult, LLMClient, MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage,
-    check_response_status, extract_json_from_markdown, generate_with_retry, handle_http_error,
+    ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
+    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
+    extract_json_from_markdown, generate_with_retry_with_history, handle_http_error,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -157,6 +158,8 @@ pub struct GeminiClient {
 // Gemini API request and response structures
 #[derive(Debug, Serialize)]
 struct Content {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
     parts: Vec<Part>,
 }
 
@@ -320,8 +323,18 @@ impl GeminiClient {
 
 impl GeminiClient {
     /// Internal implementation of materialize (without retry logic)
-    /// Returns both the data and optional usage info
-    async fn materialize_internal<T>(&self, prompt: &str) -> Result<(T, Option<TokenUsage>)>
+    /// Accepts conversation history for multi-turn interactions.
+    /// Returns the data, raw response, and optional usage info.
+    ///
+    /// The raw response is included to enable conversation history tracking for retries,
+    /// which improves prompt caching efficiency.
+    async fn materialize_internal<T>(
+        &self,
+        messages: &[ChatMessage],
+    ) -> std::result::Result<
+        MaterializeInternalOutput<T>,
+        (RStructorError, Option<ValidationFailureContext>),
+    >
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -333,11 +346,34 @@ impl GeminiClient {
 
         let schema_str =
             serde_json::to_string(&schema.to_json()).unwrap_or_else(|_| "{}".to_string());
-        debug!("Building structured prompt with schema");
-        let structured_prompt = format!(
-            "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
-            schema_str, prompt
-        );
+
+        // Build API contents from conversation history
+        // The first message gets the schema instructions prepended
+        let contents: Vec<Content> = messages
+            .iter()
+            .enumerate()
+            .map(|(i, msg)| {
+                let text = if i == 0 && msg.role.as_str() == "user" {
+                    // First user message gets schema instructions
+                    format!(
+                        "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
+                        schema_str, msg.content
+                    )
+                } else {
+                    msg.content.clone()
+                };
+                // Gemini uses "user" and "model" (not "assistant")
+                let role = if msg.role.as_str() == "assistant" {
+                    "model"
+                } else {
+                    msg.role.as_str()
+                };
+                Content {
+                    role: Some(role.to_string()),
+                    parts: vec![Part { text }],
+                }
+            })
+            .collect();
 
         // Build thinking config only for Gemini 3 models
         let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
@@ -360,11 +396,7 @@ impl GeminiClient {
         };
 
         let request = GenerateContentRequest {
-            contents: vec![Content {
-                parts: vec![Part {
-                    text: structured_prompt,
-                }],
-            }],
+            contents,
             generation_config,
         };
 
@@ -381,6 +413,7 @@ impl GeminiClient {
         debug!(
             url = %url,
             model = %self.config.model.as_str(),
+            history_len = messages.len(),
             "Sending request to Gemini API"
         );
         let response = self
@@ -391,23 +424,28 @@ impl GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| handle_http_error(e, "Gemini"))?;
+            .map_err(|e| (handle_http_error(e, "Gemini"), None))?;
 
-        let response = check_response_status(response, "Gemini").await?;
+        let response = check_response_status(response, "Gemini")
+            .await
+            .map_err(|e| (e, None))?;
 
         debug!("Successfully received response from Gemini API");
         let completion: GenerateContentResponse = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse JSON response from Gemini API");
-            e
+            (RStructorError::from(e), None)
         })?;
 
         if completion.candidates.is_empty() {
             error!("Gemini API returned empty candidates array");
-            return Err(RStructorError::api_error(
-                "Gemini",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No completion candidates returned".to_string(),
-                },
+            return Err((
+                RStructorError::api_error(
+                    "Gemini",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No completion candidates returned".to_string(),
+                    },
+                ),
+                None,
             ));
         }
 
@@ -431,8 +469,9 @@ impl GeminiClient {
         debug!(parts = parts.len(), "Processing candidate content parts");
         for part in parts {
             if let Some(text) = &part.text {
-                debug!(content_len = text.len(), "Processing text part");
-                let json_content = extract_json_from_markdown(text);
+                let raw_response = text.clone();
+                debug!(content_len = raw_response.len(), "Processing text part");
+                let json_content = extract_json_from_markdown(&raw_response);
                 trace!(json = %json_content, "Attempting to parse response as JSON");
                 let result: T = match serde_json::from_str(&json_content) {
                     Ok(parsed) => parsed,
@@ -446,26 +485,36 @@ impl GeminiClient {
                             partial_json = %json_content,
                             "JSON parsing error"
                         );
-                        return Err(RStructorError::ValidationError(error_msg));
+                        return Err((
+                            RStructorError::ValidationError(error_msg.clone()),
+                            Some(ValidationFailureContext::new(error_msg, raw_response)),
+                        ));
                     }
                 };
 
                 if let Err(e) = result.validate() {
                     error!(error = ?e, "Custom validation failed");
-                    return Err(e);
+                    let error_msg = e.to_string();
+                    return Err((
+                        e,
+                        Some(ValidationFailureContext::new(error_msg, raw_response)),
+                    ));
                 }
 
                 info!("Successfully generated and validated structured data");
-                return Ok((result, usage));
+                return Ok(MaterializeInternalOutput::new(result, raw_response, usage));
             }
         }
 
         error!("No text content in Gemini response");
-        Err(RStructorError::api_error(
-            "Gemini",
-            ApiErrorKind::UnexpectedResponse {
-                details: "No text content in response".to_string(),
-            },
+        Err((
+            RStructorError::api_error(
+                "Gemini",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No text content in response".to_string(),
+                },
+            ),
+            None,
         ))
     }
 }
@@ -555,17 +604,17 @@ impl LLMClient for GeminiClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let (result, _usage) = generate_with_retry(
-            |prompt_owned: String| {
+        let output = generate_with_retry_with_history(
+            |messages: Vec<ChatMessage>| {
                 let this = self;
-                async move { this.materialize_internal::<T>(&prompt_owned).await }
+                async move { this.materialize_internal::<T>(&messages).await }
             },
             prompt,
             self.config.max_retries,
             self.config.include_error_feedback,
         )
         .await?;
-        Ok(result)
+        Ok(output.data)
     }
 
     #[instrument(
@@ -581,17 +630,17 @@ impl LLMClient for GeminiClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let (result, usage) = generate_with_retry(
-            |prompt_owned: String| {
+        let output = generate_with_retry_with_history(
+            |messages: Vec<ChatMessage>| {
                 let this = self;
-                async move { this.materialize_internal::<T>(&prompt_owned).await }
+                async move { this.materialize_internal::<T>(&messages).await }
             },
             prompt,
             self.config.max_retries,
             self.config.include_error_feedback,
         )
         .await?;
-        Ok(MaterializeResult::new(result, usage))
+        Ok(MaterializeResult::new(output.data, output.usage))
     }
 
     #[instrument(
@@ -634,6 +683,7 @@ impl LLMClient for GeminiClient {
         debug!("Building Gemini API request");
         let request = GenerateContentRequest {
             contents: vec![Content {
+                role: Some("user".to_string()),
                 parts: vec![Part {
                     text: prompt.to_string(),
                 }],

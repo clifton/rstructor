@@ -1,3 +1,4 @@
+use crate::backend::{ChatMessage, MaterializeInternalOutput, ValidationFailureContext};
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use reqwest::Response;
 use std::time::Duration;
@@ -193,92 +194,126 @@ pub async fn check_response_status(response: Response, provider_name: &str) -> R
     Ok(response)
 }
 
-/// Helper function to execute generation with retry logic.
+/// Helper function to execute generation with retry logic using conversation history.
 ///
-/// This function handles automatic retries for:
-/// - Validation errors (with optional error feedback in prompts)
-/// - Retryable API errors (rate limits, service unavailable, gateway errors)
+/// This function maintains a conversation history across retry attempts, which enables:
+/// - **Prompt caching**: Providers like Anthropic and OpenAI can cache the prefix of the
+///   conversation, reducing token costs and latency on retries.
+/// - **Better error correction**: The model sees its previous (failed) response and the
+///   specific error, making it more likely to produce a correct response.
 ///
-/// It will retry up to `max_retries` times. For validation errors, the error message
-/// can be included in subsequent prompts. For API errors, it respects `retry_after`
-/// headers when available.
-pub async fn generate_with_retry<F, Fut, T>(
+/// # How it works
+///
+/// 1. On first attempt: Sends `[User(prompt)]`
+/// 2. On validation failure: Appends `[Assistant(failed_response), User(error_feedback)]`
+/// 3. On retry: Sends the full conversation history
+///
+/// This approach preserves the original prompt exactly, maximizing cache hit rates.
+///
+/// # Arguments
+///
+/// * `generate_fn` - Function that takes a conversation history and returns the result plus raw response
+/// * `prompt` - The initial user prompt
+/// * `max_retries` - Maximum number of retry attempts (None or 0 means no retries)
+/// * `include_error_feedback` - Whether to include validation errors in retry prompts (default: true)
+pub async fn generate_with_retry_with_history<F, Fut, T>(
     mut generate_fn: F,
     prompt: &str,
     max_retries: Option<usize>,
     include_error_feedback: Option<bool>,
-) -> Result<T>
+) -> Result<MaterializeInternalOutput<T>>
 where
-    F: FnMut(String) -> Fut,
-    Fut: std::future::Future<Output = Result<T>>,
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<
+                MaterializeInternalOutput<T>,
+                (RStructorError, Option<ValidationFailureContext>),
+            >,
+        >,
 {
     let Some(max_retries) = max_retries.filter(|&n| n > 0) else {
-        return generate_fn(prompt.to_string()).await;
+        // No retries configured - just run once with a single user message
+        let messages = vec![ChatMessage::user(prompt)];
+        return generate_fn(messages).await.map_err(|(err, _)| err);
     };
 
     let max_attempts = max_retries + 1; // +1 for initial attempt
     let include_error_feedback = include_error_feedback.unwrap_or(true);
-    let base_prompt = prompt.to_string();
-    let mut current_prompt = base_prompt.clone();
-    let mut validation_errors: Option<String> = None;
+
+    // Initialize conversation history with the original user prompt
+    let mut messages = vec![ChatMessage::user(prompt)];
 
     trace!(
-        "Starting structured generation with retry: max_attempts={}, include_error_feedback={}",
+        "Starting structured generation with conversation history: max_attempts={}, include_error_feedback={}",
         max_attempts, include_error_feedback
     );
 
     for attempt in 0..max_attempts {
-        if attempt > 0 {
-            current_prompt = base_prompt.clone();
-
-            if include_error_feedback && let Some(error_msg) = validation_errors.as_ref() {
-                debug!(
-                    attempt,
-                    error = error_msg,
-                    "Retrying with validation error feedback"
-                );
-
-                current_prompt = format!(
-                    "{}\n\nYour previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
-                    base_prompt, error_msg
-                );
-            }
-        }
-
         // Log attempt information
         info!(
             attempt = attempt + 1,
             total_attempts = max_attempts,
-            "Generation attempt"
+            history_len = messages.len(),
+            "Generation attempt with conversation history"
         );
 
         // Attempt to generate structured data
-        match generate_fn(current_prompt.clone()).await {
+        match generate_fn(messages.clone()).await {
             Ok(result) => {
                 if attempt > 0 {
-                    // If we succeeded after retries
                     info!(
                         attempts_used = attempt + 1,
-                        "Successfully generated after {} retries", attempt
+                        "Successfully generated after {} retries (with conversation history)",
+                        attempt
                     );
                 } else {
                     debug!("Successfully generated on first attempt");
                 }
                 return Ok(result);
             }
-            Err(err) => {
+            Err((err, validation_ctx)) => {
                 let is_last_attempt = attempt >= max_attempts - 1;
 
-                // Handle validation errors (include feedback in next prompt)
-                if let RStructorError::ValidationError(msg) = &err {
+                // Handle validation errors with conversation history
+                if let RStructorError::ValidationError(ref msg) = err {
                     if !is_last_attempt {
                         warn!(
                             attempt = attempt + 1,
                             error = msg,
                             "Validation error in generation attempt"
                         );
-                        // Store error for next attempt
-                        validation_errors = Some(msg.clone());
+
+                        // Build conversation history for retry
+                        if include_error_feedback {
+                            if let Some(ctx) = validation_ctx {
+                                // Add the failed assistant response to history
+                                messages.push(ChatMessage::assistant(&ctx.raw_response));
+
+                                // Add user message with error feedback
+                                let error_feedback = format!(
+                                    "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
+                                    ctx.error_message
+                                );
+                                messages.push(ChatMessage::user(error_feedback));
+
+                                debug!(
+                                    history_len = messages.len(),
+                                    "Updated conversation history for retry"
+                                );
+                            } else {
+                                // Fallback: no raw response context available.
+                                // We cannot add error feedback without the raw response because:
+                                // 1. Adding only a user message would create consecutive user messages,
+                                //    violating the alternating user/assistant pattern expected by LLM APIs
+                                // 2. The error message references "your previous response" but we can't show it
+                                // Instead, we retry with the original conversation (no history modification)
+                                warn!(
+                                    "Validation error occurred but no raw response context available. \
+                                     Retrying without error feedback in conversation history."
+                                );
+                            }
+                        }
+
                         // Wait briefly before retrying
                         sleep(Duration::from_millis(500)).await;
                         continue;
@@ -299,6 +334,8 @@ where
                         delay_ms = delay.as_millis(),
                         "Retryable API error, waiting before retry"
                     );
+                    // For API errors, we don't modify the conversation history
+                    // Just retry with the same messages
                     sleep(delay).await;
                     continue;
                 }

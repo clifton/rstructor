@@ -6,8 +6,9 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    GenerateResult, LLMClient, MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage,
-    check_response_status, extract_json_from_markdown, generate_with_retry, handle_http_error,
+    ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
+    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
+    extract_json_from_markdown, generate_with_retry_with_history, handle_http_error,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -141,7 +142,7 @@ pub struct AnthropicClient {
 
 // Anthropic API request and response structures
 #[derive(Debug, Serialize)]
-struct Message {
+struct AnthropicMessage {
     role: String,
     content: String,
 }
@@ -149,7 +150,7 @@ struct Message {
 #[derive(Debug, Serialize)]
 struct CompletionRequest {
     model: String,
-    messages: Vec<Message>,
+    messages: Vec<AnthropicMessage>,
     temperature: f32,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -286,8 +287,18 @@ impl AnthropicClient {
 
 impl AnthropicClient {
     /// Internal implementation of materialize (without retry logic)
-    /// Returns both the data and optional usage info
-    async fn materialize_internal<T>(&self, prompt: &str) -> Result<(T, Option<TokenUsage>)>
+    /// Accepts conversation history for multi-turn interactions.
+    /// Returns the data, raw response, and optional usage info.
+    ///
+    /// The raw response is included to enable conversation history tracking for retries,
+    /// which improves prompt caching efficiency.
+    async fn materialize_internal<T>(
+        &self,
+        messages: &[ChatMessage],
+    ) -> std::result::Result<
+        MaterializeInternalOutput<T>,
+        (RStructorError, Option<ValidationFailureContext>),
+    >
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -300,11 +311,28 @@ impl AnthropicClient {
         // Get schema as JSON string - avoid Display impl which might cause recursion
         let schema_str =
             serde_json::to_string(&schema.to_json()).unwrap_or_else(|_| "{}".to_string());
-        debug!("Building structured prompt with schema");
-        let structured_prompt = format!(
-            "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
-            schema_str, prompt
-        );
+
+        // Build API messages from conversation history
+        // The first message gets the schema instructions prepended
+        let api_messages: Vec<AnthropicMessage> = messages
+            .iter()
+            .enumerate()
+            .map(|(i, msg)| {
+                let content = if i == 0 && msg.role.as_str() == "user" {
+                    // First user message gets schema instructions
+                    format!(
+                        "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
+                        schema_str, msg.content
+                    )
+                } else {
+                    msg.content.clone()
+                };
+                AnthropicMessage {
+                    role: msg.role.as_str().to_string(),
+                    content,
+                }
+            })
+            .collect();
 
         // Build thinking config for Claude 4.x models
         let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
@@ -328,13 +356,13 @@ impl AnthropicClient {
         };
 
         // Build the request
-        debug!("Building Anthropic API request");
+        debug!(
+            "Building Anthropic API request (history_len={})",
+            api_messages.len()
+        );
         let request = CompletionRequest {
             model: self.config.model.as_str().to_string(),
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: structured_prompt,
-            }],
+            messages: api_messages,
             temperature: effective_temp,
             max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
             thinking: thinking_config,
@@ -362,15 +390,17 @@ impl AnthropicClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| handle_http_error(e, "Anthropic"))?;
+            .map_err(|e| (handle_http_error(e, "Anthropic"), None))?;
 
         // Parse the response
-        let response = check_response_status(response, "Anthropic").await?;
+        let response = check_response_status(response, "Anthropic")
+            .await
+            .map_err(|e| (e, None))?;
 
         debug!("Successfully received response from Anthropic");
         let completion: CompletionResponse = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse JSON response from Anthropic");
-            e
+            (RStructorError::from(e), None)
         })?;
 
         // Extract usage info
@@ -384,11 +414,11 @@ impl AnthropicClient {
             .map(|u| TokenUsage::new(model_name.clone(), u.input_tokens, u.output_tokens));
 
         // Extract the content, assuming the first block is text containing JSON
-        let content = match completion
+        let raw_response = match completion
             .content
             .iter()
             .find(|block| block.block_type == "text")
-            .map(|block| &block.text)
+            .map(|block| block.text.clone())
         {
             Some(text) => {
                 debug!(
@@ -399,18 +429,21 @@ impl AnthropicClient {
             }
             None => {
                 error!("No text content in Anthropic response");
-                return Err(RStructorError::api_error(
-                    "Anthropic",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No text content in response".to_string(),
-                    },
+                return Err((
+                    RStructorError::api_error(
+                        "Anthropic",
+                        ApiErrorKind::UnexpectedResponse {
+                            details: "No text content in response".to_string(),
+                        },
+                    ),
+                    None,
                 ));
             }
         };
 
         // Try to parse the content as JSON
         // First, try to extract JSON from markdown code blocks if present
-        let json_content = extract_json_from_markdown(content);
+        let json_content = extract_json_from_markdown(&raw_response);
         trace!(json = %json_content, "Attempting to parse response as JSON");
         let result: T = match serde_json::from_str(&json_content) {
             Ok(parsed) => parsed,
@@ -424,7 +457,10 @@ impl AnthropicClient {
                     content = %json_content,
                     "JSON parsing error"
                 );
-                return Err(RStructorError::ValidationError(error_msg));
+                return Err((
+                    RStructorError::ValidationError(error_msg.clone()),
+                    Some(ValidationFailureContext::new(error_msg, raw_response)),
+                ));
             }
         };
 
@@ -432,11 +468,15 @@ impl AnthropicClient {
         debug!("Applying custom validation");
         if let Err(e) = result.validate() {
             error!(error = ?e, "Custom validation failed");
-            return Err(e);
+            let error_msg = e.to_string();
+            return Err((
+                e,
+                Some(ValidationFailureContext::new(error_msg, raw_response)),
+            ));
         }
 
         info!("Successfully generated and validated structured data");
-        Ok((result, usage))
+        Ok(MaterializeInternalOutput::new(result, raw_response, usage))
     }
 }
 
@@ -521,17 +561,17 @@ impl LLMClient for AnthropicClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let (result, _usage) = generate_with_retry(
-            |prompt_owned: String| {
+        let output = generate_with_retry_with_history(
+            |messages: Vec<ChatMessage>| {
                 let this = self;
-                async move { this.materialize_internal::<T>(&prompt_owned).await }
+                async move { this.materialize_internal::<T>(&messages).await }
             },
             prompt,
             self.config.max_retries,
             self.config.include_error_feedback,
         )
         .await?;
-        Ok(result)
+        Ok(output.data)
     }
 
     #[instrument(
@@ -547,17 +587,17 @@ impl LLMClient for AnthropicClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let (result, usage) = generate_with_retry(
-            |prompt_owned: String| {
+        let output = generate_with_retry_with_history(
+            |messages: Vec<ChatMessage>| {
                 let this = self;
-                async move { this.materialize_internal::<T>(&prompt_owned).await }
+                async move { this.materialize_internal::<T>(&messages).await }
             },
             prompt,
             self.config.max_retries,
             self.config.include_error_feedback,
         )
         .await?;
-        Ok(MaterializeResult::new(result, usage))
+        Ok(MaterializeResult::new(output.data, output.usage))
     }
 
     #[instrument(
@@ -609,7 +649,7 @@ impl LLMClient for AnthropicClient {
         debug!("Building Anthropic API request for text generation");
         let request = CompletionRequest {
             model: self.config.model.as_str().to_string(),
-            messages: vec![Message {
+            messages: vec![AnthropicMessage {
                 role: "user".to_string(),
                 content: prompt.to_string(),
             }],

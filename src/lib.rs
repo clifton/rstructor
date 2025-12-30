@@ -71,4 +71,4 @@ pub use rstructor_derive::Instructor;
 pub use backend::LLMClient;
 pub use backend::ModelInfo;
 pub use backend::ThinkingLevel;
-pub use backend::{GenerateResult, MaterializeResult, TokenUsage};
+pub use backend::{ChatMessage, ChatRole, GenerateResult, MaterializeResult, TokenUsage};
