@@ -13,6 +13,35 @@ pub mod openai;
 
 pub use client::LLMClient;
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
+
+/// Information about an available model from an LLM provider.
+///
+/// This struct is returned by [`LLMClient::list_models()`] to provide
+/// information about models available through the provider's API.
+///
+/// # Example
+///
+/// ```no_run
+/// # use rstructor::{OpenAIClient, LLMClient};
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = OpenAIClient::from_env()?;
+/// let models = client.list_models().await?;
+///
+/// for model in models {
+///     println!("{}: {}", model.id, model.description.unwrap_or_default());
+/// }
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelInfo {
+    /// The model identifier used in API requests
+    pub id: String,
+    /// Human-readable display name (if different from id)
+    pub name: Option<String>,
+    /// Description of the model's capabilities
+    pub description: Option<String>,
+}
 pub(crate) use utils::{
     check_response_status, extract_json_from_markdown, generate_with_retry, handle_http_error,
 };

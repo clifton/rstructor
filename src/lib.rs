@@ -49,7 +49,7 @@ pub mod model;
 pub mod schema;
 
 // Re-exports for convenience
-pub use error::{RStructorError, Result};
+pub use error::{ApiErrorKind, RStructorError, Result};
 pub use model::Instructor;
 pub use schema::{CustomTypeSchema, Schema, SchemaBuilder, SchemaType};
 
@@ -69,5 +69,6 @@ pub use backend::grok::{GrokClient, Model as GrokModel};
 pub use rstructor_derive::Instructor;
 
 pub use backend::LLMClient;
+pub use backend::ModelInfo;
 pub use backend::ThinkingLevel;
 pub use backend::{GenerateResult, MaterializeResult, TokenUsage};

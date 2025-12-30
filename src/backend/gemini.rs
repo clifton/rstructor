@@ -7,10 +7,10 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    GenerateResult, LLMClient, MaterializeResult, ThinkingLevel, TokenUsage, check_response_status,
-    extract_json_from_markdown, generate_with_retry, handle_http_error,
+    GenerateResult, LLMClient, MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage,
+    check_response_status, extract_json_from_markdown, generate_with_retry, handle_http_error,
 };
-use crate::error::{RStructorError, Result};
+use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
 /// Gemini models available for completion
@@ -244,8 +244,9 @@ impl GeminiClient {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
-            return Err(RStructorError::ApiError(
-                "API key cannot be empty. Use GeminiClient::from_env() to read from GEMINI_API_KEY environment variable.".to_string(),
+            return Err(RStructorError::api_error(
+                "Gemini",
+                ApiErrorKind::AuthenticationFailed,
             ));
         }
 
@@ -289,9 +290,8 @@ impl GeminiClient {
     /// ```
     #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini3FlashPreview))]
     pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| {
-            RStructorError::ApiError("GEMINI_API_KEY environment variable is not set".to_string())
-        })?;
+        let api_key = std::env::var("GEMINI_API_KEY")
+            .map_err(|_| RStructorError::api_error("Gemini", ApiErrorKind::AuthenticationFailed))?;
 
         let config = GeminiConfig {
             api_key,
@@ -403,8 +403,11 @@ impl GeminiClient {
 
         if completion.candidates.is_empty() {
             error!("Gemini API returned empty candidates array");
-            return Err(RStructorError::ApiError(
-                "No completion candidates returned".to_string(),
+            return Err(RStructorError::api_error(
+                "Gemini",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion candidates returned".to_string(),
+                },
             ));
         }
 
@@ -458,8 +461,11 @@ impl GeminiClient {
         }
 
         error!("No text content in Gemini response");
-        Err(RStructorError::ApiError(
-            "No text content in response".to_string(),
+        Err(RStructorError::api_error(
+            "Gemini",
+            ApiErrorKind::UnexpectedResponse {
+                details: "No text content in response".to_string(),
+            },
         ))
     }
 }
@@ -678,8 +684,11 @@ impl LLMClient for GeminiClient {
 
         if completion.candidates.is_empty() {
             error!("Gemini API returned empty candidates array");
-            return Err(RStructorError::ApiError(
-                "No completion candidates returned".to_string(),
+            return Err(RStructorError::api_error(
+                "Gemini",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion candidates returned".to_string(),
+                },
             ));
         }
 
@@ -712,10 +721,89 @@ impl LLMClient for GeminiClient {
             }
             None => {
                 error!("No text content in Gemini response");
-                Err(RStructorError::ApiError(
-                    "No text content in response".to_string(),
+                Err(RStructorError::api_error(
+                    "Gemini",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No text content in response".to_string(),
+                    },
                 ))
             }
         }
+    }
+
+    /// Fetch available models from Gemini's API.
+    ///
+    /// Returns a list of Gemini models that support content generation.
+    async fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://generativelanguage.googleapis.com/v1beta/");
+        let url = format!("{}models?key={}", base_url, self.config.api_key);
+
+        debug!("Fetching available models from Gemini");
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .map_err(|e| handle_http_error(e, "Gemini"))?;
+
+        let response = check_response_status(response, "Gemini").await?;
+
+        let json: serde_json::Value = response.json().await.map_err(|e| {
+            error!(error = %e, "Failed to parse models response from Gemini");
+            e
+        })?;
+
+        let models = json
+            .get("models")
+            .and_then(|data| data.as_array())
+            .map(|models_array| {
+                models_array
+                    .iter()
+                    .filter_map(|model| {
+                        let name = model.get("name").and_then(|n| n.as_str())?;
+                        // Strip "models/" prefix to get just the model ID
+                        let id = name.strip_prefix("models/").unwrap_or(name);
+
+                        // Filter to only Gemini models that support generateContent
+                        let supports_generate = model
+                            .get("supportedGenerationMethods")
+                            .and_then(|m| m.as_array())
+                            .map(|methods| {
+                                methods
+                                    .iter()
+                                    .any(|m| m.as_str().is_some_and(|s| s == "generateContent"))
+                            })
+                            .unwrap_or(false);
+
+                        if id.starts_with("gemini") && supports_generate {
+                            let display_name = model
+                                .get("displayName")
+                                .and_then(|n| n.as_str())
+                                .map(|s| s.to_string());
+                            let description = model
+                                .get("description")
+                                .and_then(|n| n.as_str())
+                                .map(|s| s.to_string());
+                            Some(ModelInfo {
+                                id: id.to_string(),
+                                name: display_name,
+                                description,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        debug!(count = models.len(), "Fetched Gemini models");
+        Ok(models)
     }
 }

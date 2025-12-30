@@ -200,6 +200,94 @@ The `_with_metadata` variants return a result wrapper that includes:
 
 Use the standard `materialize()` and `generate()` methods if you don't need token tracking.
 
+### Error Handling
+
+rstructor provides rich, actionable error types to help you handle API failures gracefully:
+
+```rust
+use rstructor::{ApiErrorKind, RStructorError, LLMClient, OpenAIClient};
+use std::time::Duration;
+
+async fn example() -> rstructor::Result<()> {
+    let client = OpenAIClient::from_env()?;
+
+    match client.materialize::<Movie>("Tell me about Inception").await {
+        Ok(movie) => println!("Got movie: {}", movie.title),
+        Err(e) => {
+            // Check if error is retryable
+            if e.is_retryable() {
+                println!("Transient error, can retry: {}", e);
+                if let Some(delay) = e.retry_delay() {
+                    println!("Suggested wait: {:?}", delay);
+                }
+            }
+
+            // Match on specific error kinds
+            if let Some(kind) = e.api_error_kind() {
+                match kind {
+                    ApiErrorKind::RateLimited { retry_after } => {
+                        println!("Rate limited! Wait {:?}", retry_after);
+                    }
+                    ApiErrorKind::AuthenticationFailed => {
+                        println!("Check your API key");
+                    }
+                    ApiErrorKind::InvalidModel { model, suggestion } => {
+                        println!("Model '{}' not found", model);
+                        if let Some(s) = suggestion {
+                            println!("Try: {}", s);
+                        }
+                    }
+                    _ => println!("API error: {}", e),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+```
+
+**Retryable errors** (automatically retried when `.max_retries()` is configured):
+- `RateLimited` - 429 errors with optional `retry_after` duration
+- `ServiceUnavailable` - 503 errors
+- `GatewayError` - 520-524 Cloudflare errors
+- `ServerError` - 500/502 errors
+- `Timeout` - Request timeout
+
+**Non-retryable errors**:
+- `AuthenticationFailed` - Invalid/missing API key (401)
+- `PermissionDenied` - Access denied (403)
+- `InvalidModel` - Model not found (404)
+- `RequestTooLarge` - Payload too large (413)
+- `BadRequest` - Malformed request (400)
+
+### Model Discovery
+
+Query available models from any provider's API:
+
+```rust
+use rstructor::{OpenAIClient, LLMClient};
+
+async fn list_available_models() -> rstructor::Result<()> {
+    let client = OpenAIClient::from_env()?;
+    let models = client.list_models().await?;
+
+    println!("Available models:");
+    for model in models {
+        println!("  - {}", model.id);
+        if let Some(desc) = model.description {
+            println!("    {}", desc);
+        }
+    }
+    Ok(())
+}
+```
+
+Each provider filters to relevant chat completion models:
+- **OpenAI**: GPT models (`gpt-*`, `o1-*`, `o3-*`)
+- **Anthropic**: Claude models (`claude-*`)
+- **Gemini**: Models supporting `generateContent`
+- **Grok**: Grok models (`grok-*`)
+
 ### Basic Example with Validation
 
 Add custom validation rules to enforce business logic beyond type checking:

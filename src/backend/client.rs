@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 
+use crate::backend::ModelInfo;
 use crate::backend::usage::{GenerateResult, MaterializeResult};
 use crate::error::Result;
 use crate::model::Instructor;
@@ -210,4 +211,27 @@ pub trait LLMClient {
     fn from_env() -> Result<Self>
     where
         Self: Sized;
+
+    /// Fetch available models from the provider's API.
+    ///
+    /// This method queries the provider's models endpoint to return a list of
+    /// models available for use. The results are filtered to include only
+    /// chat/completion models relevant to this library.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{LLMClient, OpenAIClient};
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// let models = client.list_models().await?;
+    ///
+    /// println!("Available models:");
+    /// for model in models {
+    ///     println!("  - {}", model.id);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn list_models(&self) -> Result<Vec<ModelInfo>>;
 }

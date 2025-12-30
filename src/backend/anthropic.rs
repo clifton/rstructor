@@ -6,10 +6,10 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    GenerateResult, LLMClient, MaterializeResult, ThinkingLevel, TokenUsage, check_response_status,
-    extract_json_from_markdown, generate_with_retry, handle_http_error,
+    GenerateResult, LLMClient, MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage,
+    check_response_status, extract_json_from_markdown, generate_with_retry, handle_http_error,
 };
-use crate::error::{RStructorError, Result};
+use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
 /// Anthropic models available for completion
@@ -211,8 +211,9 @@ impl AnthropicClient {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
-            return Err(RStructorError::ApiError(
-                "API key cannot be empty. Use AnthropicClient::from_env() to read from ANTHROPIC_API_KEY environment variable.".to_string(),
+            return Err(RStructorError::api_error(
+                "Anthropic",
+                ApiErrorKind::AuthenticationFailed,
             ));
         }
         info!("Creating new Anthropic client");
@@ -255,9 +256,7 @@ impl AnthropicClient {
     #[instrument(name = "anthropic_client_from_env", fields(model = ?AnthropicModel::ClaudeSonnet45))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
-            RStructorError::ApiError(
-                "ANTHROPIC_API_KEY environment variable is not set".to_string(),
-            )
+            RStructorError::api_error("Anthropic", ApiErrorKind::AuthenticationFailed)
         })?;
 
         info!("Creating new Anthropic client from environment variable");
@@ -400,8 +399,11 @@ impl AnthropicClient {
             }
             None => {
                 error!("No text content in Anthropic response");
-                return Err(RStructorError::ApiError(
-                    "No text content in response".to_string(),
+                return Err(RStructorError::api_error(
+                    "Anthropic",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No text content in response".to_string(),
+                    },
                 ));
             }
         };
@@ -671,8 +673,11 @@ impl LLMClient for AnthropicClient {
 
         if content.is_empty() {
             error!("No text content in Anthropic response");
-            return Err(RStructorError::ApiError(
-                "No text content in response".to_string(),
+            return Err(RStructorError::api_error(
+                "Anthropic",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No text content in response".to_string(),
+                },
             ));
         }
 
@@ -681,5 +686,66 @@ impl LLMClient for AnthropicClient {
             "Successfully extracted text content"
         );
         Ok(GenerateResult::new(content, usage))
+    }
+
+    /// Fetch available models from Anthropic's API.
+    ///
+    /// Returns a list of Claude models available for chat completions.
+    async fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.anthropic.com/v1");
+        let url = format!("{}/models", base_url);
+
+        debug!(url = %url, "Fetching available models from Anthropic");
+
+        let response = self
+            .client
+            .get(&url)
+            .header("x-api-key", &self.config.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .map_err(|e| handle_http_error(e, "Anthropic"))?;
+
+        let response = check_response_status(response, "Anthropic").await?;
+
+        let json: serde_json::Value = response.json().await.map_err(|e| {
+            error!(error = %e, "Failed to parse models response from Anthropic");
+            e
+        })?;
+
+        let models = json
+            .get("data")
+            .and_then(|data| data.as_array())
+            .map(|models_array| {
+                models_array
+                    .iter()
+                    .filter_map(|model| {
+                        let id = model.get("id").and_then(|id| id.as_str())?;
+                        // Filter to only Claude models
+                        if id.starts_with("claude-") {
+                            let display_name = model
+                                .get("display_name")
+                                .and_then(|n| n.as_str())
+                                .map(|s| s.to_string());
+                            Some(ModelInfo {
+                                id: id.to_string(),
+                                name: display_name,
+                                description: None,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        debug!(count = models.len(), "Fetched Anthropic models");
+        Ok(models)
     }
 }
