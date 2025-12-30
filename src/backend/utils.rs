@@ -301,12 +301,16 @@ where
                                     "Updated conversation history for retry"
                                 );
                             } else {
-                                // Fallback: no raw response context, just add error feedback
-                                let error_feedback = format!(
-                                    "Your previous response contained validation errors. Please provide a complete, valid JSON response.\n\nError details:\n{}",
-                                    msg
+                                // Fallback: no raw response context available.
+                                // We cannot add error feedback without the raw response because:
+                                // 1. Adding only a user message would create consecutive user messages,
+                                //    violating the alternating user/assistant pattern expected by LLM APIs
+                                // 2. The error message references "your previous response" but we can't show it
+                                // Instead, we retry with the original conversation (no history modification)
+                                warn!(
+                                    "Validation error occurred but no raw response context available. \
+                                     Retrying without error feedback in conversation history."
                                 );
-                                messages.push(ChatMessage::user(error_feedback));
                             }
                         }
 
