@@ -47,10 +47,7 @@ fn add_additional_properties_false(schema: &mut Value) {
         let has_properties = obj.contains_key("properties");
 
         if is_object_type || has_properties {
-            obj.insert(
-                "additionalProperties".to_string(),
-                serde_json::json!(false),
-            );
+            obj.insert("additionalProperties".to_string(), serde_json::json!(false));
 
             // Add `required` array with all property keys if not already present
             // OpenAI strict mode requires ALL properties to be listed in `required`
@@ -995,7 +992,9 @@ mod tests {
         });
         add_additional_properties_false(&mut schema);
 
-        let required = schema["required"].as_array().expect("required should be an array");
+        let required = schema["required"]
+            .as_array()
+            .expect("required should be an array");
         assert_eq!(required.len(), 2);
         assert!(required.contains(&serde_json::json!("name")));
         assert!(required.contains(&serde_json::json!("age")));
@@ -1014,7 +1013,9 @@ mod tests {
         });
         add_additional_properties_false(&mut schema);
 
-        let required = schema["required"].as_array().expect("required should be an array");
+        let required = schema["required"]
+            .as_array()
+            .expect("required should be an array");
         assert_eq!(required.len(), 1);
         assert_eq!(required[0], serde_json::json!("name"));
     }
@@ -1040,7 +1041,9 @@ mod tests {
         add_additional_properties_false(&mut schema);
 
         // Top-level should have required
-        let required = schema["required"].as_array().expect("required should be an array");
+        let required = schema["required"]
+            .as_array()
+            .expect("required should be an array");
         assert!(required.contains(&serde_json::json!("steps")));
 
         // Nested array items should also have required
