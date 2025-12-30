@@ -45,8 +45,7 @@ pub struct ModelInfo {
     pub description: Option<String>,
 }
 pub(crate) use utils::{
-    check_response_status, extract_json_from_markdown, generate_with_retry_with_history,
-    handle_http_error,
+    check_response_status, generate_with_retry_with_history, handle_http_error,
 };
 
 /// Thinking level configuration for models that support extended reasoning.

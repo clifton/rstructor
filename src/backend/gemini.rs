@@ -9,7 +9,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    extract_json_from_markdown, generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_with_history, handle_http_error,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -326,6 +326,9 @@ impl GeminiClient {
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
     ///
+    /// Uses Gemini's native Structured Outputs with `response_schema`
+    /// for guaranteed schema compliance via constrained decoding.
+    ///
     /// The raw response is included to enable conversation history tracking for retries,
     /// which improves prompt caching efficiency.
     async fn materialize_internal<T>(
@@ -344,24 +347,11 @@ impl GeminiClient {
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
-        let schema_str =
-            serde_json::to_string(&schema.to_json()).unwrap_or_else(|_| "{}".to_string());
-
         // Build API contents from conversation history
-        // The first message gets the schema instructions prepended
+        // With native response_schema, we don't need to include schema instructions in the prompt
         let contents: Vec<Content> = messages
             .iter()
-            .enumerate()
-            .map(|(i, msg)| {
-                let text = if i == 0 && msg.role.as_str() == "user" {
-                    // First user message gets schema instructions
-                    format!(
-                        "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
-                        schema_str, msg.content
-                    )
-                } else {
-                    msg.content.clone()
-                };
+            .map(|msg| {
                 // Gemini uses "user" and "model" (not "assistant")
                 let role = if msg.role.as_str() == "assistant" {
                     "model"
@@ -370,7 +360,9 @@ impl GeminiClient {
                 };
                 Content {
                     role: Some(role.to_string()),
-                    parts: vec![Part { text }],
+                    parts: vec![Part {
+                        text: msg.content.clone(),
+                    }],
                 }
             })
             .collect();
@@ -471,19 +463,19 @@ impl GeminiClient {
             if let Some(text) = &part.text {
                 let raw_response = text.clone();
                 debug!(content_len = raw_response.len(), "Processing text part");
-                let json_content = extract_json_from_markdown(&raw_response);
-                trace!(json = %json_content, "Attempting to parse response as JSON");
-                let result: T = match serde_json::from_str(&json_content) {
+                // With native response_schema, the response is guaranteed to be valid JSON
+                trace!(json = %raw_response, "Parsing structured output response");
+                let result: T = match serde_json::from_str(&raw_response) {
                     Ok(parsed) => parsed,
                     Err(e) => {
                         let error_msg = format!(
-                            "Failed to parse response: {}\nPartial JSON: {}",
-                            e, json_content
+                            "Failed to parse response as JSON: {}\nPartial JSON: {}",
+                            e, raw_response
                         );
                         error!(
                             error = %e,
-                            partial_json = %json_content,
-                            "JSON parsing error"
+                            content = %raw_response,
+                            "JSON parsing error (unexpected with structured outputs)"
                         );
                         return Err((
                             RStructorError::ValidationError(error_msg.clone()),
@@ -492,6 +484,7 @@ impl GeminiClient {
                     }
                 };
 
+                // Apply any custom validation (business logic beyond schema)
                 if let Err(e) = result.validate() {
                     error!(error = ?e, "Custom validation failed");
                     let error_msg = e.to_string();

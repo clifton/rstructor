@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -8,7 +9,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    extract_json_from_markdown, generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_with_history, handle_http_error,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -147,6 +148,14 @@ struct AnthropicMessage {
     content: String,
 }
 
+/// Output format for structured outputs (native Anthropic structured outputs)
+#[derive(Debug, Serialize)]
+struct OutputFormat {
+    #[serde(rename = "type")]
+    format_type: String,
+    schema: Value,
+}
+
 #[derive(Debug, Serialize)]
 struct CompletionRequest {
     model: String,
@@ -155,6 +164,8 @@ struct CompletionRequest {
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     thinking: Option<ClaudeThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_format: Option<OutputFormat>,
 }
 
 #[derive(Debug, Serialize)]
@@ -290,6 +301,9 @@ impl AnthropicClient {
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
     ///
+    /// Uses Anthropic's native Structured Outputs with `output_format: json_schema`
+    /// for guaranteed schema compliance.
+    ///
     /// The raw response is included to enable conversation history tracking for retries,
     /// which improves prompt caching efficiency.
     async fn materialize_internal<T>(
@@ -302,35 +316,25 @@ impl AnthropicClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        info!("Generating structured response with Anthropic");
+        info!("Generating structured response with Anthropic (native structured outputs)");
 
         // Get the schema for type T
         let schema = T::schema();
-        // Avoid calling to_string() to prevent potential stack overflow with complex schemas
         trace!("Retrieved JSON schema for type");
-        // Get schema as JSON string - avoid Display impl which might cause recursion
-        let schema_str =
-            serde_json::to_string(&schema.to_json()).unwrap_or_else(|_| "{}".to_string());
+
+        // Get the schema JSON and ensure additionalProperties is false (required for strict mode)
+        let mut schema_json = schema.to_json();
+        if let Some(obj) = schema_json.as_object_mut() {
+            obj.insert("additionalProperties".to_string(), serde_json::json!(false));
+        }
 
         // Build API messages from conversation history
-        // The first message gets the schema instructions prepended
+        // With native structured outputs, we don't need to include schema instructions in the prompt
         let api_messages: Vec<AnthropicMessage> = messages
             .iter()
-            .enumerate()
-            .map(|(i, msg)| {
-                let content = if i == 0 && msg.role.as_str() == "user" {
-                    // First user message gets schema instructions
-                    format!(
-                        "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
-                        schema_str, msg.content
-                    )
-                } else {
-                    msg.content.clone()
-                };
-                AnthropicMessage {
-                    role: msg.role.as_str().to_string(),
-                    content,
-                }
+            .map(|msg| AnthropicMessage {
+                role: msg.role.as_str().to_string(),
+                content: msg.content.clone(),
             })
             .collect();
 
@@ -355,9 +359,15 @@ impl AnthropicClient {
             self.config.temperature
         };
 
-        // Build the request
+        // Create output format for native structured outputs
+        let output_format = OutputFormat {
+            format_type: "json_schema".to_string(),
+            schema: schema_json,
+        };
+
+        // Build the request with native structured outputs
         debug!(
-            "Building Anthropic API request (history_len={})",
+            "Building Anthropic API request with structured outputs (history_len={})",
             api_messages.len()
         );
         let request = CompletionRequest {
@@ -366,13 +376,14 @@ impl AnthropicClient {
             temperature: effective_temp,
             max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
             thinking: thinking_config,
+            output_format: Some(output_format),
         };
 
-        // Send the request to Anthropic
+        // Send the request to Anthropic with structured outputs beta header
         debug!(
             model = %self.config.model.as_str(),
             max_tokens = request.max_tokens,
-            "Sending request to Anthropic API"
+            "Sending request to Anthropic API with structured outputs"
         );
         let base_url = self
             .config
@@ -386,6 +397,7 @@ impl AnthropicClient {
             .post(&url)
             .header("x-api-key", &self.config.api_key)
             .header("anthropic-version", "2023-06-01")
+            .header("anthropic-beta", "structured-outputs-2025-11-13")
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
@@ -441,21 +453,20 @@ impl AnthropicClient {
             }
         };
 
-        // Try to parse the content as JSON
-        // First, try to extract JSON from markdown code blocks if present
-        let json_content = extract_json_from_markdown(&raw_response);
-        trace!(json = %json_content, "Attempting to parse response as JSON");
-        let result: T = match serde_json::from_str(&json_content) {
+        // Parse the JSON content directly
+        // With native structured outputs, the response is guaranteed to be valid JSON
+        trace!(json = %raw_response, "Parsing structured output response");
+        let result: T = match serde_json::from_str(&raw_response) {
             Ok(parsed) => parsed,
             Err(e) => {
                 let error_msg = format!(
                     "Failed to parse response as JSON: {}\nPartial JSON: {}",
-                    e, json_content
+                    e, raw_response
                 );
                 error!(
                     error = %e,
-                    content = %json_content,
-                    "JSON parsing error"
+                    content = %raw_response,
+                    "JSON parsing error (unexpected with structured outputs)"
                 );
                 return Err((
                     RStructorError::ValidationError(error_msg.clone()),
@@ -464,7 +475,7 @@ impl AnthropicClient {
             }
         };
 
-        // Apply any custom validation
+        // Apply any custom validation (business logic beyond schema)
         debug!("Applying custom validation");
         if let Err(e) = result.validate() {
             error!(error = ?e, "Custom validation failed");
@@ -645,7 +656,7 @@ impl LLMClient for AnthropicClient {
             self.config.temperature
         };
 
-        // Build the request
+        // Build the request (no output_format for raw text generation)
         debug!("Building Anthropic API request for text generation");
         let request = CompletionRequest {
             model: self.config.model.as_str().to_string(),
@@ -656,6 +667,7 @@ impl LLMClient for AnthropicClient {
             temperature: effective_temp,
             max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
             thinking: thinking_config,
+            output_format: None, // Raw text generation doesn't use structured outputs
         };
 
         // Send the request to Anthropic

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -9,7 +9,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, TokenUsage, ValidationFailureContext, check_response_status,
-    extract_json_from_markdown, generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_with_history, handle_http_error,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -150,11 +150,25 @@ struct GrokChatMessage {
     content: String,
 }
 
+/// JSON Schema format specification for structured outputs
 #[derive(Debug, Serialize)]
-struct FunctionDef {
+struct JsonSchemaFormat {
     name: String,
-    description: String,
-    parameters: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    schema: Value,
+    strict: bool,
+}
+
+/// Response format for structured outputs
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum ResponseFormat {
+    #[serde(rename = "json_schema")]
+    JsonSchema { json_schema: JsonSchemaFormat },
+    #[allow(dead_code)]
+    #[serde(rename = "json_object")]
+    JsonObject,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,9 +176,7 @@ struct ChatCompletionRequest {
     model: String,
     messages: Vec<GrokChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    functions: Option<Vec<FunctionDef>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    function_call: Option<Value>,
+    response_format: Option<ResponseFormat>,
     temperature: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
@@ -172,17 +184,9 @@ struct ChatCompletionRequest {
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct FunctionCall {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct ResponseMessage {
     role: String,
     content: Option<String>,
-    function_call: Option<FunctionCall>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -305,6 +309,9 @@ impl GrokClient {
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
     ///
+    /// Uses Grok's native Structured Outputs with `response_format: json_schema`
+    /// for guaranteed schema compliance via constrained decoding.
+    ///
     /// The raw response is included to enable conversation history tracking for retries,
     /// which improves prompt caching efficiency.
     async fn materialize_internal<T>(
@@ -317,53 +324,47 @@ impl GrokClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        info!("Generating structured response with Grok");
+        info!("Generating structured response with Grok (native structured outputs)");
 
         // Get the schema for type T
         let schema = T::schema();
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
-        let schema_str =
-            serde_json::to_string(&schema.to_json()).unwrap_or_else(|_| "{}".to_string());
+        // Get the schema JSON and ensure additionalProperties is false (required for strict mode)
+        let mut schema_json = schema.to_json();
+        if let Some(obj) = schema_json.as_object_mut() {
+            obj.insert("additionalProperties".to_string(), serde_json::json!(false));
+        }
 
         // Build API messages from conversation history
-        // The first message gets the schema instructions prepended
+        // With native structured outputs, we don't need to include schema instructions in the prompt
         let api_messages: Vec<GrokChatMessage> = messages
             .iter()
-            .enumerate()
-            .map(|(i, msg)| {
-                let content = if i == 0 && msg.role.as_str() == "user" {
-                    // First user message gets schema instructions
-                    format!(
-                        "You are a helpful assistant that outputs JSON. The user wants data in the following JSON schema format:\n\n{}\n\nYou MUST provide your answer in valid JSON format according to the schema above.\n1. Include ALL required fields\n2. Format as a complete, valid JSON object\n3. DO NOT include explanations, just return the JSON\n4. Make sure to use double quotes for all strings and property names\n5. For enum fields, use EXACTLY one of the values listed in the descriptions\n6. Include ALL nested objects with all their required fields\n7. For array fields:\n   - MOST IMPORTANT: When an array items.type is \"object\", provide an array of complete objects with ALL required fields\n   - DO NOT provide arrays of strings when arrays of objects are required\n   - Include multiple items (at least 2-3) in each array\n   - Every object in an array must match the schema for that object type\n8. Follow type specifications EXACTLY (string, number, boolean, array, object)\n\nUser query: {}",
-                        schema_str, msg.content
-                    )
-                } else {
-                    msg.content.clone()
-                };
-                GrokChatMessage {
-                    role: msg.role.as_str().to_string(),
-                    content,
-                }
+            .map(|msg| GrokChatMessage {
+                role: msg.role.as_str().to_string(),
+                content: msg.content.clone(),
             })
             .collect();
 
-        let function = FunctionDef {
-            name: schema_name.clone(),
-            description: "Output in the specified format. IMPORTANT: 1) Include ALL required fields. 2) For enum fields, use EXACTLY one of the values allowed in the description. 3) Include all nested objects with ALL their required fields. 4) For arrays of objects, always provide complete objects with all required fields - never arrays of strings. 5) Include multiple items (2-3) in each array.".to_string(),
-            parameters: schema.to_json(),
+        // Create response format for native structured outputs
+        let response_format = ResponseFormat::JsonSchema {
+            json_schema: JsonSchemaFormat {
+                name: schema_name.clone(),
+                description: None,
+                schema: schema_json,
+                strict: true,
+            },
         };
 
         debug!(
-            "Building Grok API request with function calling (history_len={})",
+            "Building Grok API request with structured outputs (history_len={})",
             api_messages.len()
         );
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
             messages: api_messages,
-            functions: Some(vec![function]),
-            function_call: Some(json!({ "name": schema_name })),
+            response_format: Some(response_format),
             temperature: self.config.temperature,
             max_tokens: self.config.max_tokens,
         };
@@ -374,7 +375,7 @@ impl GrokClient {
             .as_deref()
             .unwrap_or("https://api.x.ai/v1");
         let url = format!("{}/chat/completions", base_url);
-        debug!(url = %url, "Sending request to Grok API");
+        debug!(url = %url, "Sending request to Grok API with structured outputs");
         let response = self
             .client
             .post(&url)
@@ -421,27 +422,27 @@ impl GrokClient {
         let message = &completion.choices[0].message;
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
 
-        if let Some(function_call) = &message.function_call {
-            let raw_response = function_call.arguments.clone();
+        // With native structured outputs, the response is in message.content as guaranteed JSON
+        if let Some(content) = &message.content {
+            let raw_response = content.clone();
             debug!(
-                function_name = %function_call.name,
-                args_len = raw_response.len(),
-                "Function call received from Grok API"
+                content_len = raw_response.len(),
+                "Received structured output response"
             );
 
-            let json_content = extract_json_from_markdown(&raw_response);
-            trace!(json = %json_content, "Attempting to parse function call arguments as JSON");
-            let result: T = match serde_json::from_str(&json_content) {
+            // Parse the JSON content directly - with native structured outputs, it's guaranteed to be valid JSON
+            trace!(json = %raw_response, "Parsing structured output response");
+            let result: T = match serde_json::from_str(&raw_response) {
                 Ok(parsed) => parsed,
                 Err(e) => {
                     let error_msg = format!(
-                        "Failed to parse response: {}\nPartial JSON: {}",
-                        e, json_content
+                        "Failed to parse response as JSON: {}\nPartial JSON: {}",
+                        e, raw_response
                     );
                     error!(
                         error = %e,
-                        partial_json = %json_content,
-                        "JSON parsing error"
+                        content = %raw_response,
+                        "JSON parsing error (unexpected with structured outputs)"
                     );
                     return Err((
                         RStructorError::ValidationError(error_msg.clone()),
@@ -450,6 +451,7 @@ impl GrokClient {
                 }
             };
 
+            // Apply any custom validation (business logic beyond schema)
             if let Err(e) = result.validate() {
                 error!(error = ?e, "Custom validation failed");
                 let error_msg = e.to_string();
@@ -461,52 +463,13 @@ impl GrokClient {
 
             info!("Successfully generated and validated structured data");
             Ok(MaterializeInternalOutput::new(result, raw_response, usage))
-        } else if let Some(content) = &message.content {
-            let raw_response = content.clone();
-            warn!(
-                content_len = raw_response.len(),
-                "No function call in response, attempting to parse content as JSON"
-            );
-
-            let json_content = extract_json_from_markdown(&raw_response);
-            trace!(json = %json_content, "Attempting to parse response as JSON");
-            let result: T = match serde_json::from_str(&json_content) {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    let error_msg = format!(
-                        "Failed to parse response content: {}\nPartial JSON: {}",
-                        e, json_content
-                    );
-                    error!(
-                        error = %e,
-                        content = %json_content,
-                        "Failed to parse content as JSON"
-                    );
-                    return Err((
-                        RStructorError::ValidationError(error_msg.clone()),
-                        Some(ValidationFailureContext::new(error_msg, raw_response)),
-                    ));
-                }
-            };
-
-            if let Err(e) = result.validate() {
-                error!(error = ?e, "Custom validation failed");
-                let error_msg = e.to_string();
-                return Err((
-                    e,
-                    Some(ValidationFailureContext::new(error_msg, raw_response)),
-                ));
-            }
-
-            info!("Successfully generated and validated structured data from content");
-            Ok(MaterializeInternalOutput::new(result, raw_response, usage))
         } else {
-            error!("No function call or content in Grok API response");
+            error!("No content in Grok API response");
             Err((
                 RStructorError::api_error(
                     "Grok",
                     ApiErrorKind::UnexpectedResponse {
-                        details: "No function call or content in response".to_string(),
+                        details: "No content in response".to_string(),
                     },
                 ),
                 None,
@@ -624,7 +587,7 @@ impl LLMClient for GrokClient {
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         info!("Generating raw text response with Grok");
 
-        // Build the request without functions
+        // Build the request without structured outputs
         debug!("Building Grok API request for text generation");
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
@@ -632,8 +595,7 @@ impl LLMClient for GrokClient {
                 role: "user".to_string(),
                 content: prompt.to_string(),
             }],
-            functions: None,
-            function_call: None,
+            response_format: None,
             temperature: self.config.temperature,
             max_tokens: self.config.max_tokens,
         };

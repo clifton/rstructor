@@ -5,29 +5,6 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, trace, warn};
 
-/// Extract JSON from markdown code blocks if present, otherwise return the content as-is.
-///
-/// This function handles cases where LLM providers wrap JSON responses in markdown code blocks
-/// like ```json ... ``` or ``` ... ```.
-pub fn extract_json_from_markdown(content: &str) -> String {
-    let trimmed = content.trim();
-
-    // Match ```json ... ``` or ``` ... ```
-    if trimmed.starts_with("```") {
-        // Find the first newline after ```
-        if let Some(start_idx) = trimmed.find('\n') {
-            let after_start = &trimmed[start_idx + 1..];
-            // Find the closing ```
-            if let Some(end_idx) = after_start.rfind("```") {
-                return after_start[..end_idx].trim().to_string();
-            }
-        }
-    }
-
-    // If no markdown code blocks found, return as-is
-    trimmed.to_string()
-}
-
 /// Convert a reqwest error to a RStructorError, handling timeout errors specially.
 pub fn handle_http_error(e: reqwest::Error, provider_name: &str) -> RStructorError {
     error!(error = %e, "HTTP request to {} failed", provider_name);
