@@ -1,4 +1,4 @@
-use crate::error::{RStructorError, Result};
+use crate::error::{ApiErrorKind, RStructorError, Result};
 use reqwest::Response;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -37,29 +37,168 @@ pub fn handle_http_error(e: reqwest::Error, provider_name: &str) -> RStructorErr
     }
 }
 
+/// Parse retry-after header value to Duration.
+fn parse_retry_after(value: &str) -> Option<Duration> {
+    // Try parsing as seconds (most common)
+    if let Ok(secs) = value.parse::<u64>() {
+        return Some(Duration::from_secs(secs));
+    }
+    // Could also parse HTTP-date format, but seconds is most common
+    None
+}
+
+/// Classify an API error based on HTTP status code and response body.
+fn classify_api_error(
+    status: reqwest::StatusCode,
+    error_text: &str,
+    retry_after: Option<Duration>,
+    model_hint: Option<&str>,
+) -> ApiErrorKind {
+    let code = status.as_u16();
+    let error_lower = error_text.to_lowercase();
+
+    match code {
+        // Authentication errors
+        401 => ApiErrorKind::AuthenticationFailed,
+
+        // Permission errors
+        403 => ApiErrorKind::PermissionDenied,
+
+        // Not found - check if it's a model error
+        404 => {
+            // Check if the error message mentions "model"
+            if error_lower.contains("model") {
+                let model = model_hint
+                    .map(|s| s.to_string())
+                    .or_else(|| extract_model_from_error(&error_lower))
+                    .unwrap_or_else(|| "unknown".to_string());
+                ApiErrorKind::InvalidModel {
+                    model,
+                    suggestion: suggest_model(&error_lower),
+                }
+            } else {
+                ApiErrorKind::Other {
+                    code,
+                    message: error_text.to_string(),
+                }
+            }
+        }
+
+        // Bad request
+        400 => ApiErrorKind::BadRequest {
+            details: truncate_message(error_text, 200),
+        },
+
+        // Payload too large
+        413 => ApiErrorKind::RequestTooLarge,
+
+        // Rate limited
+        429 => ApiErrorKind::RateLimited { retry_after },
+
+        // Server errors
+        500 | 502 => ApiErrorKind::ServerError { code },
+
+        // Service unavailable
+        503 => ApiErrorKind::ServiceUnavailable,
+
+        // Gateway/Cloudflare errors
+        520..=524 => ApiErrorKind::GatewayError { code },
+
+        // Other errors
+        _ => ApiErrorKind::Other {
+            code,
+            message: truncate_message(error_text, 500),
+        },
+    }
+}
+
+/// Extract model name from error message if present.
+fn extract_model_from_error(error_text: &str) -> Option<String> {
+    // Look for quoted model names like 'gpt-4' or "gpt-4"
+    for quote in ['\'', '"'] {
+        if let Some(start) = error_text.find(quote) {
+            let rest = &error_text[start + 1..];
+            if let Some(end) = rest.find(quote) {
+                let candidate = &rest[..end];
+                // Model names typically have alphanumeric chars, dots, or dashes
+                if candidate.len() > 2
+                    && candidate
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '-' || c == '.' || c == '_')
+                {
+                    return Some(candidate.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Suggest an alternative model based on error context.
+fn suggest_model(error_text: &str) -> Option<String> {
+    // Common model name patterns and their suggestions
+    if error_text.contains("gpt-4") {
+        Some("gpt-4o or gpt-4o-mini".to_string())
+    } else if error_text.contains("gpt-3") {
+        Some("gpt-4o-mini".to_string())
+    } else if error_text.contains("claude-2") {
+        Some("claude-sonnet-4-5-20250929".to_string())
+    } else if error_text.contains("gemini-pro") {
+        Some("gemini-2.5-flash or gemini-3-flash-preview".to_string())
+    } else {
+        None
+    }
+}
+
+/// Truncate a message to a maximum length.
+fn truncate_message(msg: &str, max_len: usize) -> String {
+    if msg.len() <= max_len {
+        msg.to_string()
+    } else {
+        format!("{}...", &msg[..max_len])
+    }
+}
+
 /// Check HTTP response status and extract error message if unsuccessful.
+///
+/// This function classifies errors into actionable types (rate limit, auth failure, etc.)
+/// and provides user-friendly error messages with suggested actions.
 pub async fn check_response_status(response: Response, provider_name: &str) -> Result<Response> {
     if !response.status().is_success() {
         let status = response.status();
+
+        // Extract retry-after header if present
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_retry_after);
+
         let error_text = response.text().await?;
+
+        let kind = classify_api_error(status, &error_text, retry_after, None);
+
         error!(
             status = %status,
             error = %error_text,
+            kind = %kind,
             "{} API returned error response", provider_name
         );
-        return Err(RStructorError::ApiError(format!(
-            "{} API error: {}",
-            provider_name, error_text
-        )));
+
+        return Err(RStructorError::api_error(provider_name, kind));
     }
     Ok(response)
 }
 
 /// Helper function to execute generation with retry logic.
 ///
-/// This function handles automatic retries for validation errors when retry configuration
-/// is enabled. It will retry up to `max_retries` times, optionally including error feedback
-/// in retry prompts.
+/// This function handles automatic retries for:
+/// - Validation errors (with optional error feedback in prompts)
+/// - Retryable API errors (rate limits, service unavailable, gateway errors)
+///
+/// It will retry up to `max_retries` times. For validation errors, the error message
+/// can be included in subsequent prompts. For API errors, it respects `retry_after`
+/// headers when available.
 pub async fn generate_with_retry<F, Fut, T>(
     mut generate_fn: F,
     prompt: &str,
@@ -125,9 +264,11 @@ where
                 return Ok(result);
             }
             Err(err) => {
-                // Only retry for validation errors
+                let is_last_attempt = attempt >= max_attempts - 1;
+
+                // Handle validation errors (include feedback in next prompt)
                 if let RStructorError::ValidationError(msg) = &err {
-                    if attempt < max_attempts - 1 {
+                    if !is_last_attempt {
                         warn!(
                             attempt = attempt + 1,
                             error = msg,
@@ -139,22 +280,39 @@ where
                         sleep(Duration::from_millis(500)).await;
                         continue;
                     } else {
-                        // Last attempt failed
                         error!(
                             attempts = max_attempts,
                             error = msg,
                             "Failed after maximum retry attempts with validation errors"
                         );
                     }
+                }
+                // Handle retryable API errors (rate limits, transient failures)
+                else if err.is_retryable() && !is_last_attempt {
+                    let delay = err.retry_delay().unwrap_or(Duration::from_secs(1));
+                    warn!(
+                        attempt = attempt + 1,
+                        error = ?err,
+                        delay_ms = delay.as_millis(),
+                        "Retryable API error, waiting before retry"
+                    );
+                    sleep(delay).await;
+                    continue;
+                }
+                // Non-retryable errors or last attempt
+                else if is_last_attempt {
+                    error!(
+                        attempts = max_attempts,
+                        error = ?err,
+                        "Failed after maximum retry attempts"
+                    );
                 } else {
-                    // For non-validation errors
                     error!(
                         error = ?err,
-                        "Non-validation error occurred during generation"
+                        "Non-retryable error occurred during generation"
                     );
                 }
 
-                // For non-validation errors or last attempt, return the error
                 return Err(err);
             }
         }

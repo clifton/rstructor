@@ -7,10 +7,10 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    GenerateResult, LLMClient, MaterializeResult, ThinkingLevel, TokenUsage, check_response_status,
-    generate_with_retry, handle_http_error,
+    GenerateResult, LLMClient, MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage,
+    check_response_status, generate_with_retry, handle_http_error,
 };
-use crate::error::{RStructorError, Result};
+use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
 /// OpenAI models available for completion
@@ -245,8 +245,9 @@ impl OpenAIClient {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
-            return Err(RStructorError::ApiError(
-                "API key cannot be empty. Use OpenAIClient::from_env() to read from OPENAI_API_KEY environment variable.".to_string(),
+            return Err(RStructorError::api_error(
+                "OpenAI",
+                ApiErrorKind::AuthenticationFailed,
             ));
         }
         info!("Creating new OpenAI client");
@@ -288,9 +289,8 @@ impl OpenAIClient {
     /// ```
     #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt52))]
     pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
-            RStructorError::ApiError("OPENAI_API_KEY environment variable is not set".to_string())
-        })?;
+        let api_key = std::env::var("OPENAI_API_KEY")
+            .map_err(|_| RStructorError::api_error("OpenAI", ApiErrorKind::AuthenticationFailed))?;
 
         info!("Creating new OpenAI client from environment variable");
         trace!("API key length: {}", api_key.len());
@@ -476,8 +476,11 @@ impl OpenAIClient {
 
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
-            return Err(RStructorError::ApiError(
-                "No completion choices returned".to_string(),
+            return Err(RStructorError::api_error(
+                "OpenAI",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion choices returned".to_string(),
+                },
             ));
         }
 
@@ -564,8 +567,11 @@ impl OpenAIClient {
                 Ok((result, usage))
             } else {
                 error!("No function call or content in OpenAI response");
-                Err(RStructorError::ApiError(
-                    "No function call or content in response".to_string(),
+                Err(RStructorError::api_error(
+                    "OpenAI",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No function call or content in response".to_string(),
+                    },
                 ))
             }
         }
@@ -715,8 +721,11 @@ impl LLMClient for OpenAIClient {
 
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
-            return Err(RStructorError::ApiError(
-                "No completion choices returned".to_string(),
+            return Err(RStructorError::api_error(
+                "OpenAI",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion choices returned".to_string(),
+                },
             ));
         }
 
@@ -741,9 +750,69 @@ impl LLMClient for OpenAIClient {
             Ok(GenerateResult::new(content.clone(), usage))
         } else {
             error!("No content in OpenAI response");
-            Err(RStructorError::ApiError(
-                "No content in response".to_string(),
+            Err(RStructorError::api_error(
+                "OpenAI",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No content in response".to_string(),
+                },
             ))
         }
+    }
+
+    /// Fetch available models from OpenAI's API.
+    ///
+    /// Returns a list of GPT models available for chat completions.
+    /// Filters out embedding, whisper, and other non-chat models.
+    async fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
+        let url = format!("{}/models", base_url);
+
+        debug!(url = %url, "Fetching available models from OpenAI");
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .map_err(|e| handle_http_error(e, "OpenAI"))?;
+
+        let response = check_response_status(response, "OpenAI").await?;
+
+        let json: serde_json::Value = response.json().await.map_err(|e| {
+            error!(error = %e, "Failed to parse models response from OpenAI");
+            e
+        })?;
+
+        let models = json
+            .get("data")
+            .and_then(|data| data.as_array())
+            .map(|models_array| {
+                models_array
+                    .iter()
+                    .filter_map(|model| {
+                        let id = model.get("id").and_then(|id| id.as_str())?;
+                        // Filter to only GPT models (chat completion models)
+                        if id.starts_with("gpt-") || id.starts_with("o1") || id.starts_with("o3") {
+                            Some(ModelInfo {
+                                id: id.to_string(),
+                                name: None,
+                                description: None,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        debug!(count = models.len(), "Fetched OpenAI models");
+        Ok(models)
     }
 }

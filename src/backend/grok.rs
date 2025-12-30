@@ -7,10 +7,10 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    GenerateResult, LLMClient, MaterializeResult, TokenUsage, check_response_status,
+    GenerateResult, LLMClient, MaterializeResult, ModelInfo, TokenUsage, check_response_status,
     extract_json_from_markdown, generate_with_retry, handle_http_error,
 };
-use crate::error::{RStructorError, Result};
+use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
 /// Grok models available for completion
@@ -228,8 +228,9 @@ impl GrokClient {
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
-            return Err(RStructorError::ApiError(
-                "API key cannot be empty. Use GrokClient::from_env() to read from XAI_API_KEY environment variable.".to_string(),
+            return Err(RStructorError::api_error(
+                "Grok",
+                ApiErrorKind::AuthenticationFailed,
             ));
         }
 
@@ -271,9 +272,8 @@ impl GrokClient {
     /// ```
     #[instrument(name = "grok_client_from_env", fields(model = ?Model::Grok4))]
     pub fn from_env() -> Result<Self> {
-        let api_key = std::env::var("XAI_API_KEY").map_err(|_| {
-            RStructorError::ApiError("XAI_API_KEY environment variable is not set".to_string())
-        })?;
+        let api_key = std::env::var("XAI_API_KEY")
+            .map_err(|_| RStructorError::api_error("Grok", ApiErrorKind::AuthenticationFailed))?;
 
         info!("Creating new Grok client from environment variable");
         trace!("API key length: {}", api_key.len());
@@ -368,8 +368,11 @@ impl GrokClient {
 
         if completion.choices.is_empty() {
             error!("Grok API returned empty choices array");
-            return Err(RStructorError::ApiError(
-                "No completion choices returned".to_string(),
+            return Err(RStructorError::api_error(
+                "Grok",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion choices returned".to_string(),
+                },
             ));
         }
 
@@ -451,8 +454,11 @@ impl GrokClient {
             Ok((result, usage))
         } else {
             error!("No function call or content in Grok API response");
-            Err(RStructorError::ApiError(
-                "No function call or content in response".to_string(),
+            Err(RStructorError::api_error(
+                "Grok",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No function call or content in response".to_string(),
+                },
             ))
         }
     }
@@ -610,8 +616,11 @@ impl LLMClient for GrokClient {
 
         if completion.choices.is_empty() {
             error!("Grok API returned empty choices array");
-            return Err(RStructorError::ApiError(
-                "No completion choices returned".to_string(),
+            return Err(RStructorError::api_error(
+                "Grok",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion choices returned".to_string(),
+                },
             ));
         }
 
@@ -636,9 +645,68 @@ impl LLMClient for GrokClient {
             Ok(GenerateResult::new(content.clone(), usage))
         } else {
             error!("No content in Grok API response");
-            Err(RStructorError::ApiError(
-                "No content in response".to_string(),
+            Err(RStructorError::api_error(
+                "Grok",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No content in response".to_string(),
+                },
             ))
         }
+    }
+
+    /// Fetch available models from Grok's API.
+    ///
+    /// Returns a list of Grok models available for chat completions.
+    async fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.x.ai/v1");
+        let url = format!("{}/models", base_url);
+
+        debug!(url = %url, "Fetching available models from Grok");
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+            .map_err(|e| handle_http_error(e, "Grok"))?;
+
+        let response = check_response_status(response, "Grok").await?;
+
+        let json: serde_json::Value = response.json().await.map_err(|e| {
+            error!(error = %e, "Failed to parse models response from Grok");
+            e
+        })?;
+
+        let models = json
+            .get("data")
+            .and_then(|data| data.as_array())
+            .map(|models_array| {
+                models_array
+                    .iter()
+                    .filter_map(|model| {
+                        let id = model.get("id").and_then(|id| id.as_str())?;
+                        // Filter to only Grok models
+                        if id.starts_with("grok-") {
+                            Some(ModelInfo {
+                                id: id.to_string(),
+                                name: None,
+                                description: None,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        debug!(count = models.len(), "Fetched Grok models");
+        Ok(models)
     }
 }

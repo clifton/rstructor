@@ -1,4 +1,6 @@
-use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient, RStructorError};
+use rstructor::{
+    AnthropicClient, ApiErrorKind, Instructor, LLMClient, OpenAIClient, RStructorError,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     env,
@@ -139,9 +141,8 @@ fn validate_recipe(recipe: &Recipe) -> rstructor::Result<()> {
 
 async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> {
     // Get API key from environment
-    let api_key = env::var("OPENAI_API_KEY").map_err(|_| {
-        RStructorError::ApiError("OPENAI_API_KEY environment variable not set".into())
-    })?;
+    let api_key = env::var("OPENAI_API_KEY")
+        .map_err(|_| RStructorError::api_error("OpenAI", ApiErrorKind::AuthenticationFailed))?;
 
     // Create OpenAI client
     let client = OpenAIClient::new(api_key)?
@@ -178,9 +179,8 @@ async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> 
 
 async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recipe> {
     // Get API key from environment
-    let api_key = env::var("ANTHROPIC_API_KEY").map_err(|_| {
-        RStructorError::ApiError("ANTHROPIC_API_KEY environment variable not set".into())
-    })?;
+    let api_key = env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| RStructorError::api_error("Anthropic", ApiErrorKind::AuthenticationFailed))?;
 
     // Create Anthropic client
     let client = AnthropicClient::new(api_key)?
