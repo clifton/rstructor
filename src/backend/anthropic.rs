@@ -9,7 +9,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_with_history, handle_http_error, parse_validate_and_create_output,
+    prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -322,11 +323,8 @@ impl AnthropicClient {
         let schema = T::schema();
         trace!("Retrieved JSON schema for type");
 
-        // Get the schema JSON and ensure additionalProperties is false (required for strict mode)
-        let mut schema_json = schema.to_json();
-        if let Some(obj) = schema_json.as_object_mut() {
-            obj.insert("additionalProperties".to_string(), serde_json::json!(false));
-        }
+        // Prepare schema with additionalProperties: false recursively for all nested objects
+        let schema_json = prepare_strict_schema(&schema);
 
         // Build API messages from conversation history
         // With native structured outputs, we don't need to include schema instructions in the prompt
@@ -453,41 +451,10 @@ impl AnthropicClient {
             }
         };
 
-        // Parse the JSON content directly
+        // Parse the JSON content directly using shared utility
         // With native structured outputs, the response is guaranteed to be valid JSON
         trace!(json = %raw_response, "Parsing structured output response");
-        let result: T = match serde_json::from_str(&raw_response) {
-            Ok(parsed) => parsed,
-            Err(e) => {
-                let error_msg = format!(
-                    "Failed to parse response as JSON: {}\nPartial JSON: {}",
-                    e, raw_response
-                );
-                error!(
-                    error = %e,
-                    content = %raw_response,
-                    "JSON parsing error (unexpected with structured outputs)"
-                );
-                return Err((
-                    RStructorError::ValidationError(error_msg.clone()),
-                    Some(ValidationFailureContext::new(error_msg, raw_response)),
-                ));
-            }
-        };
-
-        // Apply any custom validation (business logic beyond schema)
-        debug!("Applying custom validation");
-        if let Err(e) = result.validate() {
-            error!(error = ?e, "Custom validation failed");
-            let error_msg = e.to_string();
-            return Err((
-                e,
-                Some(ValidationFailureContext::new(error_msg, raw_response)),
-            ));
-        }
-
-        info!("Successfully generated and validated structured data");
-        Ok(MaterializeInternalOutput::new(result, raw_response, usage))
+        parse_validate_and_create_output(raw_response, usage)
     }
 }
 

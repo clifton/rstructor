@@ -9,7 +9,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_with_history, handle_http_error, parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -379,6 +379,7 @@ impl GeminiClient {
             None
         };
 
+        // Note: Gemini's schema format doesn't support additionalProperties, so we use the raw schema
         let generation_config = GenerationConfig {
             temperature: self.config.temperature,
             max_output_tokens: self.config.max_tokens,
@@ -465,37 +466,9 @@ impl GeminiClient {
                 debug!(content_len = raw_response.len(), "Processing text part");
                 // With native response_schema, the response is guaranteed to be valid JSON
                 trace!(json = %raw_response, "Parsing structured output response");
-                let result: T = match serde_json::from_str(&raw_response) {
-                    Ok(parsed) => parsed,
-                    Err(e) => {
-                        let error_msg = format!(
-                            "Failed to parse response as JSON: {}\nPartial JSON: {}",
-                            e, raw_response
-                        );
-                        error!(
-                            error = %e,
-                            content = %raw_response,
-                            "JSON parsing error (unexpected with structured outputs)"
-                        );
-                        return Err((
-                            RStructorError::ValidationError(error_msg.clone()),
-                            Some(ValidationFailureContext::new(error_msg, raw_response)),
-                        ));
-                    }
-                };
 
-                // Apply any custom validation (business logic beyond schema)
-                if let Err(e) = result.validate() {
-                    error!(error = ?e, "Custom validation failed");
-                    let error_msg = e.to_string();
-                    return Err((
-                        e,
-                        Some(ValidationFailureContext::new(error_msg, raw_response)),
-                    ));
-                }
-
-                info!("Successfully generated and validated structured data");
-                return Ok(MaterializeInternalOutput::new(result, raw_response, usage));
+                // Parse and validate the response using shared utility
+                return parse_validate_and_create_output(raw_response, usage);
             }
         }
 

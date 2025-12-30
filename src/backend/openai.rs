@@ -1,15 +1,15 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error,
+    ModelInfo, ResponseFormat, ThinkingLevel, TokenUsage, ValidationFailureContext,
+    check_response_status, generate_with_retry_with_history, handle_http_error,
+    parse_validate_and_create_output, prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -164,27 +164,7 @@ struct OpenAIChatMessage {
     content: String,
 }
 
-/// JSON Schema definition for structured outputs
-#[derive(Debug, Serialize)]
-struct JsonSchemaFormat {
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
-    schema: Value,
-    strict: bool,
-}
-
-/// Response format for structured outputs
-#[derive(Debug, Serialize)]
-#[serde(tag = "type")]
-enum ResponseFormat {
-    #[serde(rename = "json_schema")]
-    JsonSchema { json_schema: JsonSchemaFormat },
-    /// Simple JSON mode (not strict, for backwards compatibility)
-    #[allow(dead_code)]
-    #[serde(rename = "json_object")]
-    JsonObject,
-}
+// ResponseFormat and JsonSchemaFormat are now imported from utils
 
 #[derive(Debug, Serialize)]
 struct ChatCompletionRequest {
@@ -427,21 +407,15 @@ impl OpenAIClient {
         // Avoid calling to_string() in trace to prevent potential stack overflow with complex schemas
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
-        // Get the schema JSON and ensure additionalProperties is false (required for strict mode)
-        let mut schema_json = schema.to_json();
-        if let Some(obj) = schema_json.as_object_mut() {
-            obj.insert("additionalProperties".to_string(), json!(false));
-        }
+        // Prepare schema with additionalProperties: false recursively for all nested objects
+        let schema_json = prepare_strict_schema(&schema);
 
         // Create response format with JSON schema (strict mode)
-        let response_format = ResponseFormat::JsonSchema {
-            json_schema: JsonSchemaFormat {
-                name: schema_name.clone(),
-                description: Some("Output in the specified format. Include ALL required fields and follow the schema exactly.".to_string()),
-                schema: schema_json,
-                strict: true,
-            },
-        };
+        let response_format = ResponseFormat::json_schema(
+            schema_name.clone(),
+            schema_json,
+            Some("Output in the specified format. Include ALL required fields and follow the schema exactly.".to_string()),
+        );
 
         // Build reasoning_effort for GPT-5.x models
         let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
@@ -546,39 +520,8 @@ impl OpenAIClient {
                 "Structured output received from OpenAI"
             );
 
-            // Parse the JSON content into our target type
-            // With strict mode, the JSON should always be valid according to the schema
-            let result: T = match serde_json::from_str(&raw_response) {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    let error_msg = format!(
-                        "Failed to parse response: {}\nPartial JSON: {}",
-                        e, &raw_response
-                    );
-                    error!(
-                        error = %e,
-                        partial_json = %raw_response,
-                        "JSON parsing error (unexpected with strict mode)"
-                    );
-                    return Err((
-                        RStructorError::ValidationError(error_msg.clone()),
-                        Some(ValidationFailureContext::new(error_msg, raw_response)),
-                    ));
-                }
-            };
-
-            // Apply any custom validation (business logic beyond schema)
-            if let Err(e) = result.validate() {
-                error!(error = ?e, "Custom validation failed");
-                let error_msg = e.to_string();
-                return Err((
-                    e,
-                    Some(ValidationFailureContext::new(error_msg, raw_response)),
-                ));
-            }
-
-            info!("Successfully generated and validated structured data");
-            Ok(MaterializeInternalOutput::new(result, raw_response, usage))
+            // Parse and validate the response using shared utility
+            parse_validate_and_create_output(raw_response, usage)
         } else {
             error!("No content in OpenAI response");
             Err((
