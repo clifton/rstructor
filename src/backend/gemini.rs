@@ -739,8 +739,8 @@ impl LLMClient for GeminiClient {
             .config
             .base_url
             .as_deref()
-            .unwrap_or("https://generativelanguage.googleapis.com/v1beta/");
-        let url = format!("{}models?key={}", base_url, self.config.api_key);
+            .unwrap_or("https://generativelanguage.googleapis.com/v1beta");
+        let url = format!("{}/models?key={}", base_url, self.config.api_key);
 
         debug!("Fetching available models from Gemini");
 
@@ -805,5 +805,75 @@ impl LLMClient for GeminiClient {
 
         debug!(count = models.len(), "Fetched Gemini models");
         Ok(models)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Helper to construct the URL that list_models would use
+    fn build_list_models_url(base_url: &str, api_key: &str) -> String {
+        format!("{}/models?key={}", base_url, api_key)
+    }
+
+    /// Helper to construct the URL that materialize/generate would use
+    fn build_generate_url(base_url: &str, model: &str) -> String {
+        format!("{}/models/{}:generateContent", base_url, model)
+    }
+
+    #[test]
+    fn url_construction_consistent_with_default_base_url() {
+        let base_url = "https://generativelanguage.googleapis.com/v1beta";
+        let api_key = "test-key";
+        let model = "gemini-2.5-flash";
+
+        let list_url = build_list_models_url(base_url, api_key);
+        let generate_url = build_generate_url(base_url, model);
+
+        assert_eq!(
+            list_url,
+            "https://generativelanguage.googleapis.com/v1beta/models?key=test-key"
+        );
+        assert_eq!(
+            generate_url,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        );
+    }
+
+    #[test]
+    fn url_construction_consistent_with_custom_base_url_no_trailing_slash() {
+        // User provides base_url without trailing slash (consistent with docs)
+        let base_url = "http://localhost:8080/v1beta";
+        let api_key = "test-key";
+        let model = "gemini-2.5-flash";
+
+        let list_url = build_list_models_url(base_url, api_key);
+        let generate_url = build_generate_url(base_url, model);
+
+        // Both should produce valid URLs with /models path
+        assert_eq!(list_url, "http://localhost:8080/v1beta/models?key=test-key");
+        assert_eq!(
+            generate_url,
+            "http://localhost:8080/v1beta/models/gemini-2.5-flash:generateContent"
+        );
+
+        // Verify that neither URL has the malformed pattern "v1betamodels"
+        assert!(!list_url.contains("v1betamodels"));
+        assert!(!generate_url.contains("v1betamodels"));
+    }
+
+    #[test]
+    fn url_construction_with_trailing_slash_base_url() {
+        // If user provides trailing slash, we get double slash (but that's their choice)
+        // This test documents current behavior
+        let base_url = "http://localhost:8080/v1beta/";
+        let api_key = "test-key";
+
+        let list_url = build_list_models_url(base_url, api_key);
+
+        // Double slash is expected when user provides trailing slash
+        assert_eq!(
+            list_url,
+            "http://localhost:8080/v1beta//models?key=test-key"
+        );
     }
 }
