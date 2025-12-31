@@ -184,9 +184,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         println!("Using OpenAI to generate recipe...");
 
-        let client = OpenAIClient::new(api_key)?
-            .temperature(0.2)
-            .max_retries(5);
+        let client = OpenAIClient::new(api_key)?.temperature(0.2).max_retries(5);
 
         let recipe: Recipe = client.materialize(prompt).await?;
 

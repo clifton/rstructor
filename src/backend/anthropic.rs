@@ -229,9 +229,9 @@ impl AnthropicClient {
             model: AnthropicModel::ClaudeSonnet45, // Default to Claude Sonnet 4.5 (latest flagship)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,     // Default: no timeout (uses reqwest's default)
+            timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,     // Default: use official Anthropic API
+            base_url: None,       // Default: use official Anthropic API
             thinking_level: None, // Default: no extended thinking (faster responses)
         };
 
@@ -271,9 +271,9 @@ impl AnthropicClient {
             model: AnthropicModel::ClaudeSonnet45, // Default to Claude Sonnet 4.5 (latest flagship)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,     // Default: no timeout (uses reqwest's default)
+            timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,     // Default: use official Anthropic API
+            base_url: None,       // Default: use official Anthropic API
             thinking_level: None, // Default: no extended thinking (faster responses)
         };
 

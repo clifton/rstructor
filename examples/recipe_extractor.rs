@@ -145,8 +145,7 @@ async fn get_recipe_from_openai(recipe_name: &str) -> rstructor::Result<Recipe> 
         .map_err(|_| RStructorError::api_error("OpenAI", ApiErrorKind::AuthenticationFailed))?;
 
     // Create OpenAI client
-    let client = OpenAIClient::new(api_key)?
-        .temperature(0.1); // Lower temperature for more consistent results
+    let client = OpenAIClient::new(api_key)?.temperature(0.1); // Lower temperature for more consistent results
 
     // Generate the recipe with a structured prompt
     let prompt = format!(
@@ -181,8 +180,7 @@ async fn get_recipe_from_anthropic(recipe_name: &str) -> rstructor::Result<Recip
         .map_err(|_| RStructorError::api_error("Anthropic", ApiErrorKind::AuthenticationFailed))?;
 
     // Create Anthropic client
-    let client = AnthropicClient::new(api_key)?
-        .temperature(0.1); // Lower temperature for more consistent results
+    let client = AnthropicClient::new(api_key)?.temperature(0.1); // Lower temperature for more consistent results
 
     // Generate the recipe with a structured prompt
     let prompt = format!(

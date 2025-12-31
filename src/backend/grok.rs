@@ -227,9 +227,9 @@ impl GrokClient {
             model: Model::Grok41FastNonReasoning, // Default to Grok-4.1 Fast Non-Reasoning
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,      // Default: no timeout (uses reqwest's default)
+            timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,     // Default: use official Grok API
+            base_url: None,       // Default: use official Grok API
         };
 
         debug!("Grok client created with default configuration");
@@ -267,9 +267,9 @@ impl GrokClient {
             model: Model::Grok41FastNonReasoning, // Default to Grok-4.1 Fast Non-Reasoning
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,      // Default: no timeout (uses reqwest's default)
+            timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,     // Default: use official Grok API
+            base_url: None,       // Default: use official Grok API
         };
 
         debug!("Grok client created with default configuration");

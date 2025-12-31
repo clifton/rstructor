@@ -243,9 +243,9 @@ impl OpenAIClient {
             model: Model::Gpt52, // Default to GPT-5.2 (latest GPT-5)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,      // Default: no timeout (uses reqwest's default)
+            timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,     // Default: use official OpenAI API
+            base_url: None,       // Default: use official OpenAI API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for GPT-5.x
         };
 
@@ -284,9 +284,9 @@ impl OpenAIClient {
             model: Model::Gpt52, // Default to GPT-5.2 (latest GPT-5)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,      // Default: no timeout (uses reqwest's default)
+            timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,     // Default: use official OpenAI API
+            base_url: None,       // Default: use official OpenAI API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for GPT-5.x
         };
 

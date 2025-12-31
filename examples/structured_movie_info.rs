@@ -75,8 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(api_key) = openai_key {
         println!("Using OpenAI...");
 
-        let client = OpenAIClient::new(api_key)?
-            .temperature(0.0);
+        let client = OpenAIClient::new(api_key)?.temperature(0.0);
 
         match client.materialize::<Movie>(prompt).await {
             Ok(movie) => {
@@ -98,8 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(api_key) = anthropic_key {
         println!("\nUsing Anthropic...");
 
-        let client = AnthropicClient::new(api_key)?
-            .temperature(0.0);
+        let client = AnthropicClient::new(api_key)?.temperature(0.0);
 
         match client.materialize::<Movie>(prompt).await {
             Ok(movie) => {

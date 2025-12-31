@@ -307,9 +307,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         println!("\nProcessing your request with OpenAI...\n");
 
-        let client = OpenAIClient::new(api_key)?
-            .temperature(0.3)
-            .max_retries(5);
+        let client = OpenAIClient::new(api_key)?.temperature(0.3).max_retries(5);
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),

@@ -257,9 +257,9 @@ impl GeminiClient {
             model: Model::Gemini3FlashPreview, // Default to Gemini 3 Flash Preview (latest)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,      // Default: no timeout (uses reqwest's default)
+            timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,     // Default: use official Gemini API
+            base_url: None,       // Default: use official Gemini API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3
         };
 
@@ -299,9 +299,9 @@ impl GeminiClient {
             model: Model::Gemini3FlashPreview, // Default to Gemini 3 Flash Preview (latest)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,      // Default: no timeout (uses reqwest's default)
+            timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,     // Default: use official Gemini API
+            base_url: None,       // Default: use official Gemini API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3
         };
 
