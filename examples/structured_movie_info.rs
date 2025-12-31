@@ -1,6 +1,8 @@
-use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient};
+use rstructor::{Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 use std::env;
+
+/// This example demonstrates extracting structured movie information.
 
 // Define our data model
 #[derive(Instructor, Serialize, Deserialize, Debug)]
@@ -62,64 +64,26 @@ fn validate_movie(movie: &Movie) -> rstructor::Result<()> {
     Ok(())
 }
 
+fn print_movie(provider: &str, movie: &Movie) {
+    println!("\n{} Response:", provider);
+    println!("  Title: {}", movie.title);
+    println!("  Director: {}", movie.director);
+    println!("  Year: {}", movie.release_year);
+    println!("  Genres: {:?}", movie.genre);
+    println!("  Rating: {:.1}", movie.rating);
+    println!("  Plot: {}", movie.plot_summary);
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Get API keys from environment
-    let openai_key = env::var("OPENAI_API_KEY").ok();
-    let anthropic_key = env::var("ANTHROPIC_API_KEY").ok();
-
-    // User prompt
     let prompt = "Tell me about the movie Inception";
 
-    // Try OpenAI if key is available
-    if let Some(api_key) = openai_key {
-        println!("Using OpenAI...");
+    let api_key =
+        env::var("OPENAI_API_KEY").expect("Please set OPENAI_API_KEY environment variable");
 
-        let client = OpenAIClient::new(api_key)?
-            .temperature(0.0)
-            .max_retries(3)
-            .include_error_feedback(true);
-
-        match client.materialize::<Movie>(prompt).await {
-            Ok(movie) => {
-                println!("\nOpenAI Response:");
-                println!("Title: {}", movie.title);
-                println!("Director: {}", movie.director);
-                println!("Year: {}", movie.release_year);
-                println!("Genres: {:?}", movie.genre);
-                println!("Rating: {:.1}", movie.rating);
-                println!("Plot: {}", movie.plot_summary);
-            }
-            Err(e) => println!("Error with OpenAI: {}", e),
-        }
-    } else {
-        println!("Skipping OpenAI (API key not found)");
-    }
-
-    // Try Anthropic if key is available
-    if let Some(api_key) = anthropic_key {
-        println!("\nUsing Anthropic...");
-
-        let client = AnthropicClient::new(api_key)?
-            .temperature(0.0)
-            .max_retries(3)
-            .include_error_feedback(true);
-
-        match client.materialize::<Movie>(prompt).await {
-            Ok(movie) => {
-                println!("\nAnthropic Response:");
-                println!("Title: {}", movie.title);
-                println!("Director: {}", movie.director);
-                println!("Year: {}", movie.release_year);
-                println!("Genres: {:?}", movie.genre);
-                println!("Rating: {:.1}", movie.rating);
-                println!("Plot: {}", movie.plot_summary);
-            }
-            Err(e) => println!("Error with Anthropic: {}", e),
-        }
-    } else {
-        println!("Skipping Anthropic (API key not found)");
-    }
+    let client = OpenAIClient::new(api_key)?;
+    let movie = client.materialize::<Movie>(prompt).await?;
+    print_movie("OpenAI", &movie);
 
     Ok(())
 }

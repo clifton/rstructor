@@ -1,6 +1,4 @@
-#![allow(clippy::collapsible_if)]
-
-use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient, RStructorError};
+use rstructor::{GeminiClient, Instructor, LLMClient, RStructorError};
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -170,49 +168,16 @@ fn validate_recipe(recipe: &Recipe) -> rstructor::Result<()> {
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    // User prompt requesting a recipe
-    // Important: Explicitly request structured data format
-    let prompt = "Create a recipe for chocolate chip cookies.
+    // Simple prompt - the schema handles structure enforcement
+    let prompt = "Create a recipe for chocolate chip cookies.";
 
-CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
-1. Ingredients MUST be an array of objects (not strings). Each object must have exactly: 'name' (string), 'amount' (number), 'unit' (string).
-2. Steps MUST be an array of objects (not strings). Each object must have: 'number' (integer starting at 1), 'description' (string), and optionally 'time_minutes' (integer).
-3. Nutrition MUST be an object with exactly these fields: 'calories' (integer), 'protein_g' (number), 'carbs_g' (number), 'fat_g' (number). All values must be numbers, not strings. Field names must match exactly. THIS FIELD IS REQUIRED - DO NOT OMIT IT.
-4. All other fields (name, description, prep_time_minutes, cook_time_minutes, servings, difficulty) are also REQUIRED.";
+    let api_key =
+        env::var("GEMINI_API_KEY").expect("Please set GEMINI_API_KEY environment variable");
 
-    // Try using either OpenAI or Anthropic based on available API keys
-    if let Ok(api_key) = env::var("OPENAI_API_KEY") {
-        println!("Using OpenAI to generate recipe...");
-
-        let client = OpenAIClient::new(api_key)?
-            .temperature(0.2)
-            .max_retries(5)
-            .include_error_feedback(true);
-
-        let recipe: Recipe = client.materialize(prompt).await?;
-
-        // Print the generated recipe
-        print_recipe(&recipe);
-    } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
-        println!("Using Anthropic to generate recipe...");
-
-        let client = AnthropicClient::new(api_key)?
-            .temperature(0.2)
-            .max_retries(5)
-            .include_error_feedback(true);
-
-        let recipe: Recipe = client.materialize(prompt).await?;
-
-        // Print the generated recipe
-        print_recipe(&recipe);
-    } else {
-        println!("No API keys found in environment variables.");
-        println!("Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY to run this example.");
-        println!("\nNote: This example requires API keys because it makes actual LLM calls.");
-        println!(
-            "If you see validation errors, the LLM may need more retries or a clearer prompt."
-        );
-    }
+    println!("Using Gemini to generate recipe...");
+    let client = GeminiClient::new(api_key)?.temperature(0.2);
+    let recipe: Recipe = client.materialize(prompt).await?;
+    print_recipe(&recipe);
 
     Ok(())
 }

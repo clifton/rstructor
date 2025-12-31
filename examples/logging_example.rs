@@ -115,25 +115,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create a client with higher temperature to increase chances of validation errors
-    let client = AnthropicClient::new(api_key)?
-        .temperature(0.7) // Higher temperature = more creativity = more validation errors
-        .max_retries(3)
-        .include_error_feedback(true);
+    let client = AnthropicClient::new(api_key)?.temperature(0.7); // Higher temperature = more creativity = more validation errors
 
     println!("\nSending request to Anthropic API with increased randomness...");
     println!("Will retry up to 3 times on validation errors with detailed logging.\n");
 
-    // Generate a structured forecast with more specific prompt and increased retries
-    let prompt = "What's the detailed weather forecast for Tokyo for the next 3 days? Include temperatures in Celsius and weather conditions for each day.
-
-CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
-1. The 'location' field is REQUIRED (city name).
-2. The 'current_temperature' field is REQUIRED (number in Celsius).
-3. The 'forecast' field must be an array of objects, where each object has:
-   - 'day' (REQUIRED - day of the week like 'Monday', 'Tuesday', etc.)
-   - 'temperature' (REQUIRED - number in Celsius)
-   - 'conditions' (REQUIRED - weather description like 'Sunny', 'Cloudy', etc.)
-   ALL THREE FIELDS ARE REQUIRED FOR EACH FORECAST ITEM.";
+    // Simple prompt - schema handles structure enforcement
+    let prompt = "What's the weather forecast for Tokyo for the next 3 days?";
 
     // This line will be logged with spans and info - using 3 retries for more chances to see retry logs
     let forecast_result = client.materialize::<WeatherForecast>(prompt).await;

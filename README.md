@@ -18,7 +18,7 @@ The Rust equivalent of [Instructor](https://github.com/jxnl/instructor) for Pyth
 - **Multi-provider** — OpenAI, Anthropic, Grok (xAI), and Gemini with unified API
 - **Auto-validation** — Type checking plus custom business rules with automatic retry
 - **Complex types** — Nested objects, arrays, optionals, enums with associated data
-- **Extended thinking** — Native support for reasoning models (GPT-5.x, Claude 4.x, Gemini 3)
+- **Extended thinking** — Native support for reasoning models (GPT-5.2, Claude 4.5, Gemini 3)
 
 ## Installation
 
@@ -48,8 +48,7 @@ struct Movie {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAIClient::from_env()?
-        .temperature(0.0)
-        .max_retries(3);
+        .temperature(0.0);
 
     let movie: Movie = client.materialize("Tell me about Inception").await?;
     println!("{}: {} ({})", movie.title, movie.director, movie.year);
@@ -63,16 +62,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 use rstructor::{OpenAIClient, AnthropicClient, GrokClient, GeminiClient, LLMClient};
 
 // OpenAI (reads OPENAI_API_KEY)
-let client = OpenAIClient::from_env()?.model("gpt-4o");
+let client = OpenAIClient::from_env()?.model("gpt-5.2");
 
 // Anthropic (reads ANTHROPIC_API_KEY)
 let client = AnthropicClient::from_env()?.model("claude-sonnet-4-5-20250929");
 
 // Grok/xAI (reads XAI_API_KEY)
-let client = GrokClient::from_env()?.model("grok-3");
+let client = GrokClient::from_env()?.model("grok-4-1-fast-non-reasoning");
 
 // Gemini (reads GEMINI_API_KEY)
-let client = GeminiClient::from_env()?.model("gemini-2.5-flash");
+let client = GeminiClient::from_env()?.model("gemini-3-flash-preview");
 
 // Custom endpoint (local LLMs, proxies)
 let client = OpenAIClient::new("key")?
@@ -109,10 +108,12 @@ fn validate_movie(movie: &Movie) -> Result<()> {
     Ok(())
 }
 
-// Configure retry behavior
-let client = OpenAIClient::from_env()?
-    .max_retries(3)
-    .include_error_feedback(true);  // Send error context on retry
+// Retries are enabled by default (3 attempts with error feedback)
+// To increase retries:
+let client = OpenAIClient::from_env()?.max_retries(5);
+
+// To disable retries:
+let client = OpenAIClient::from_env()?.no_retries();
 ```
 
 ## Complex Types
@@ -174,8 +175,9 @@ Configure reasoning depth for supported models:
 ```rust
 use rstructor::ThinkingLevel;
 
-// GPT-5.x, Claude 4.x, Gemini 3
+// GPT-5.2, Claude 4.5 (Sonnet/Opus), Gemini 3
 let client = OpenAIClient::from_env()?
+    .model("gpt-5.2")
     .thinking_level(ThinkingLevel::High);
 
 // Levels: Off, Minimal, Low, Medium, High

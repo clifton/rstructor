@@ -103,8 +103,8 @@ pub trait LLMClient {
     /// This method takes a text prompt and returns the structured object.
     /// The LLM is guided to produce output that conforms to the JSON schema defined by T.
     /// If the returned data doesn't match the expected schema or fails validation,
-    /// an error is returned. Configure retry behavior using `.max_retries()` and
-    /// `.include_error_feedback()` builder methods.
+    /// the client will automatically retry up to 3 times (configurable via `.max_retries()`
+    /// or disabled via `.no_retries()`).
     ///
     /// For token usage information, use [`materialize_with_metadata`](Self::materialize_with_metadata).
     ///

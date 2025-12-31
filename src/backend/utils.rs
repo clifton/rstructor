@@ -164,6 +164,96 @@ fn add_additional_properties_false(schema: &mut Value) {
     }
 }
 
+/// Prepare a JSON schema for Gemini by stripping unsupported keywords.
+///
+/// Gemini's structured outputs API doesn't support certain JSON Schema keywords like
+/// `examples`, `additionalProperties`, `title`, etc. This function recursively removes
+/// them from the schema.
+///
+/// # Arguments
+///
+/// * `schema` - The JSON schema to modify
+///
+/// # Returns
+///
+/// A new schema Value with unsupported keywords removed
+pub fn prepare_gemini_schema(schema: &crate::schema::Schema) -> Value {
+    let mut schema_json = schema.to_json();
+    strip_gemini_unsupported_keywords(&mut schema_json);
+    schema_json
+}
+
+/// Recursively removes keywords unsupported by Gemini's structured outputs.
+fn strip_gemini_unsupported_keywords(schema: &mut Value) {
+    if let Some(obj) = schema.as_object_mut() {
+        // Remove unsupported keywords
+        obj.remove("examples");
+        obj.remove("additionalProperties");
+        obj.remove("title");
+        obj.remove("$schema");
+        obj.remove("$id");
+        obj.remove("default");
+
+        // Recursively process nested schemas
+        if let Some(properties) = obj.get_mut("properties")
+            && let Some(props_obj) = properties.as_object_mut()
+        {
+            for (_key, prop_schema) in props_obj.iter_mut() {
+                strip_gemini_unsupported_keywords(prop_schema);
+            }
+        }
+
+        // Process 'items' for arrays
+        if let Some(items) = obj.get_mut("items") {
+            strip_gemini_unsupported_keywords(items);
+        }
+
+        // Process 'allOf' array
+        if let Some(all_of) = obj.get_mut("allOf")
+            && let Some(arr) = all_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                strip_gemini_unsupported_keywords(item);
+            }
+        }
+
+        // Process 'anyOf' array
+        if let Some(any_of) = obj.get_mut("anyOf")
+            && let Some(arr) = any_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                strip_gemini_unsupported_keywords(item);
+            }
+        }
+
+        // Process 'oneOf' array
+        if let Some(one_of) = obj.get_mut("oneOf")
+            && let Some(arr) = one_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                strip_gemini_unsupported_keywords(item);
+            }
+        }
+
+        // Process 'definitions' / '$defs'
+        if let Some(definitions) = obj.get_mut("definitions")
+            && let Some(defs_obj) = definitions.as_object_mut()
+        {
+            for (_key, def_schema) in defs_obj.iter_mut() {
+                strip_gemini_unsupported_keywords(def_schema);
+            }
+        }
+
+        if let Some(defs) = obj.get_mut("$defs")
+            && let Some(defs_obj) = defs.as_object_mut()
+        {
+            for (_key, def_schema) in defs_obj.iter_mut() {
+                strip_gemini_unsupported_keywords(def_schema);
+            }
+        }
+    }
+}
+
 /// JSON Schema format specification for structured outputs.
 ///
 /// This struct is used by OpenAI and Grok (and potentially other OpenAI-compatible APIs)
@@ -486,12 +576,10 @@ pub async fn check_response_status(response: Response, provider_name: &str) -> R
 /// * `generate_fn` - Function that takes a conversation history and returns the result plus raw response
 /// * `prompt` - The initial user prompt
 /// * `max_retries` - Maximum number of retry attempts (None or 0 means no retries)
-/// * `include_error_feedback` - Whether to include validation errors in retry prompts (default: true)
 pub async fn generate_with_retry_with_history<F, Fut, T>(
     mut generate_fn: F,
     prompt: &str,
     max_retries: Option<usize>,
-    include_error_feedback: Option<bool>,
 ) -> Result<MaterializeInternalOutput<T>>
 where
     F: FnMut(Vec<ChatMessage>) -> Fut,
@@ -509,14 +597,13 @@ where
     };
 
     let max_attempts = max_retries + 1; // +1 for initial attempt
-    let include_error_feedback = include_error_feedback.unwrap_or(true);
 
     // Initialize conversation history with the original user prompt
     let mut messages = vec![ChatMessage::user(prompt)];
 
     trace!(
-        "Starting structured generation with conversation history: max_attempts={}, include_error_feedback={}",
-        max_attempts, include_error_feedback
+        "Starting structured generation with conversation history: max_attempts={}",
+        max_attempts
     );
 
     for attempt in 0..max_attempts {
@@ -554,35 +641,33 @@ where
                             "Validation error in generation attempt"
                         );
 
-                        // Build conversation history for retry
-                        if include_error_feedback {
-                            if let Some(ctx) = validation_ctx {
-                                // Add the failed assistant response to history
-                                messages.push(ChatMessage::assistant(&ctx.raw_response));
+                        // Build conversation history for retry with error feedback
+                        if let Some(ctx) = validation_ctx {
+                            // Add the failed assistant response to history
+                            messages.push(ChatMessage::assistant(&ctx.raw_response));
 
-                                // Add user message with error feedback
-                                let error_feedback = format!(
-                                    "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
-                                    ctx.error_message
-                                );
-                                messages.push(ChatMessage::user(error_feedback));
+                            // Add user message with error feedback
+                            let error_feedback = format!(
+                                "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
+                                ctx.error_message
+                            );
+                            messages.push(ChatMessage::user(error_feedback));
 
-                                debug!(
-                                    history_len = messages.len(),
-                                    "Updated conversation history for retry"
-                                );
-                            } else {
-                                // Fallback: no raw response context available.
-                                // We cannot add error feedback without the raw response because:
-                                // 1. Adding only a user message would create consecutive user messages,
-                                //    violating the alternating user/assistant pattern expected by LLM APIs
-                                // 2. The error message references "your previous response" but we can't show it
-                                // Instead, we retry with the original conversation (no history modification)
-                                warn!(
-                                    "Validation error occurred but no raw response context available. \
-                                     Retrying without error feedback in conversation history."
-                                );
-                            }
+                            debug!(
+                                history_len = messages.len(),
+                                "Updated conversation history for retry"
+                            );
+                        } else {
+                            // Fallback: no raw response context available.
+                            // We cannot add error feedback without the raw response because:
+                            // 1. Adding only a user message would create consecutive user messages,
+                            //    violating the alternating user/assistant pattern expected by LLM APIs
+                            // 2. The error message references "your previous response" but we can't show it
+                            // Instead, we retry with the original conversation (no history modification)
+                            warn!(
+                                "Validation error occurred but no raw response context available. \
+                                 Retrying without error feedback in conversation history."
+                            );
                         }
 
                         // Wait briefly before retrying
@@ -726,6 +811,8 @@ macro_rules! impl_client_builder_methods {
             /// When `materialize` encounters a validation error, it will automatically
             /// retry up to this many times, including the validation error message in subsequent attempts.
             ///
+            /// The default is 3 retries. Use `.no_retries()` to disable retries entirely.
+            ///
             /// # Arguments
             ///
             /// * `max_retries` - Maximum number of retry attempts (0 = no retries, only single attempt)
@@ -736,7 +823,7 @@ macro_rules! impl_client_builder_methods {
             /// # use rstructor::OpenAIClient;
             /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
             /// let client = OpenAIClient::new("api-key")?
-            ///     .max_retries(3);  // Retry up to 3 times on validation errors
+            ///     .max_retries(5);  // Increase to 5 retries (default is 3)
             /// # Ok(())
             /// # }
             /// ```
@@ -751,15 +838,10 @@ macro_rules! impl_client_builder_methods {
                 self
             }
 
-            /// Set whether to include validation error feedback in retry prompts.
+            /// Disable automatic retries on validation errors.
             ///
-            /// When enabled (default: true), validation error messages are included in retry prompts
-            /// to help the LLM understand what went wrong and fix issues. When disabled, retries
-            /// happen without error feedback, relying only on the original prompt.
-            ///
-            /// # Arguments
-            ///
-            /// * `include_error_feedback` - Whether to include validation error messages in retry prompts
+            /// By default, the client retries up to 3 times when validation errors occur.
+            /// Use this method to disable retries and fail immediately on the first error.
             ///
             /// # Examples
             ///
@@ -767,19 +849,17 @@ macro_rules! impl_client_builder_methods {
             /// # use rstructor::OpenAIClient;
             /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
             /// let client = OpenAIClient::new("api-key")?
-            ///     .max_retries(3)
-            ///     .include_error_feedback(true);  // Include error messages in retries
+            ///     .no_retries();  // Fail immediately on validation errors
             /// # Ok(())
             /// # }
             /// ```
             #[tracing::instrument(skip(self))]
-            pub fn include_error_feedback(mut self, include_error_feedback: bool) -> Self {
+            pub fn no_retries(mut self) -> Self {
                 tracing::debug!(
-                    previous_include_error_feedback = ?self.config.include_error_feedback,
-                    new_include_error_feedback = include_error_feedback,
-                    "Setting include_error_feedback"
+                    previous_max_retries = ?self.config.max_retries,
+                    "Disabling retries"
                 );
-                self.config.include_error_feedback = Some(include_error_feedback);
+                self.config.max_retries = Some(0);
                 self
             }
         }
@@ -1126,5 +1206,138 @@ mod tests {
         let msg = "Hello";
         // floor_char_boundary(0) returns 0, so we get just "..."
         assert_eq!(truncate_message(msg, 0), "...");
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_unsupported_keywords() {
+        use crate::schema::Schema;
+
+        // Create a schema with examples and other unsupported keywords
+        let schema = Schema::new(serde_json::json!({
+            "type": "object",
+            "title": "Movie",
+            "properties": {
+                "title": { "type": "string", "description": "Movie title" },
+                "year": { "type": "integer", "description": "Release year" }
+            },
+            "examples": [{
+                "title": "The Matrix",
+                "year": 1999
+            }]
+        }));
+
+        let gemini_schema = prepare_gemini_schema(&schema);
+
+        // Verify examples is stripped
+        assert!(
+            gemini_schema.get("examples").is_none(),
+            "examples should be stripped from Gemini schema"
+        );
+
+        // Verify title is stripped (Gemini doesn't support it)
+        assert!(
+            gemini_schema.get("title").is_none(),
+            "title should be stripped from Gemini schema"
+        );
+
+        // Verify the basic schema structure is preserved
+        assert_eq!(gemini_schema["type"], "object");
+        assert!(gemini_schema["properties"]["title"].is_object());
+        assert!(gemini_schema["properties"]["year"].is_object());
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_nested_examples() {
+        use crate::schema::Schema;
+
+        // Create a schema with nested objects that have examples
+        let schema = Schema::new(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "recipe_name": { "type": "string" },
+                "ingredients": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "amount": { "type": "number" }
+                        },
+                        "examples": [{
+                            "name": "flour",
+                            "amount": 2.5
+                        }]
+                    }
+                }
+            },
+            "examples": [{
+                "recipe_name": "Cookies",
+                "ingredients": []
+            }]
+        }));
+
+        let gemini_schema = prepare_gemini_schema(&schema);
+
+        // Verify examples is stripped at root
+        assert!(
+            gemini_schema.get("examples").is_none(),
+            "root examples should be stripped"
+        );
+
+        // Verify examples is stripped from array items (nested object)
+        assert!(
+            gemini_schema["properties"]["ingredients"]["items"]
+                .get("examples")
+                .is_none(),
+            "nested examples should be stripped"
+        );
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_additional_properties() {
+        let mut schema_json = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            },
+            "additionalProperties": false
+        });
+
+        strip_gemini_unsupported_keywords(&mut schema_json);
+
+        assert!(
+            schema_json.get("additionalProperties").is_none(),
+            "additionalProperties should be stripped"
+        );
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_title_and_schema() {
+        let mut schema_json = serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Movie",
+            "type": "object",
+            "properties": {
+                "name": {
+                    "title": "MovieName",
+                    "type": "string"
+                }
+            }
+        });
+
+        strip_gemini_unsupported_keywords(&mut schema_json);
+
+        assert!(
+            schema_json.get("$schema").is_none(),
+            "$schema should be stripped"
+        );
+        assert!(
+            schema_json.get("title").is_none(),
+            "title should be stripped"
+        );
+        assert!(
+            schema_json["properties"]["name"].get("title").is_none(),
+            "nested title should be stripped"
+        );
     }
 }
