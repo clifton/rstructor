@@ -1,15 +1,15 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error,
+    ModelInfo, ResponseFormat, ThinkingLevel, TokenUsage, ValidationFailureContext,
+    check_response_status, generate_with_retry_with_history, handle_http_error,
+    parse_validate_and_create_output, prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -164,21 +164,14 @@ struct OpenAIChatMessage {
     content: String,
 }
 
-#[derive(Debug, Serialize)]
-struct FunctionDef {
-    name: String,
-    description: String,
-    parameters: Value,
-}
+// ResponseFormat and JsonSchemaFormat are now imported from utils
 
 #[derive(Debug, Serialize)]
 struct ChatCompletionRequest {
     model: String,
     messages: Vec<OpenAIChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    functions: Option<Vec<FunctionDef>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    function_call: Option<Value>,
+    response_format: Option<ResponseFormat>,
     temperature: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
@@ -189,17 +182,9 @@ struct ChatCompletionRequest {
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-struct FunctionCall {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct ResponseMessage {
     role: String,
     content: Option<String>,
-    function_call: Option<FunctionCall>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,6 +384,9 @@ impl OpenAIClient {
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
     ///
+    /// Uses OpenAI's native Structured Outputs with `response_format: json_schema`
+    /// for guaranteed schema compliance.
+    ///
     /// The raw response is included to enable conversation history tracking for retries,
     /// which improves prompt caching efficiency.
     async fn materialize_internal<T>(
@@ -411,7 +399,7 @@ impl OpenAIClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        info!("Generating structured response with OpenAI");
+        info!("Generating structured response with OpenAI (native structured outputs)");
 
         // Get the schema for type T
         let schema = T::schema();
@@ -419,12 +407,15 @@ impl OpenAIClient {
         // Avoid calling to_string() in trace to prevent potential stack overflow with complex schemas
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
-        // Create function definition with the schema
-        let function = FunctionDef {
-            name: schema_name.clone(),
-            description: "Output in the specified format. IMPORTANT: 1) Include ALL required fields. 2) For enum fields, use EXACTLY one of the values allowed in the description. 3) Include all nested objects with ALL their required fields. 4) For arrays of objects, always provide complete objects with all required fields - never arrays of strings. 5) Include multiple items (2-3) in each array.".to_string(),
-            parameters: schema.to_json(),
-        };
+        // Prepare schema with additionalProperties: false recursively for all nested objects
+        let schema_json = prepare_strict_schema(&schema);
+
+        // Create response format with JSON schema (strict mode)
+        let response_format = ResponseFormat::json_schema(
+            schema_name.clone(),
+            schema_json,
+            Some("Output in the specified format. Include ALL required fields and follow the schema exactly.".to_string()),
+        );
 
         // Build reasoning_effort for GPT-5.x models
         let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
@@ -452,16 +443,15 @@ impl OpenAIClient {
             })
             .collect();
 
-        // Build the request
+        // Build the request with native structured outputs
         debug!(
-            "Building OpenAI API request with function calling (history_len={})",
+            "Building OpenAI API request with structured outputs (history_len={})",
             api_messages.len()
         );
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
             messages: api_messages,
-            functions: Some(vec![function]),
-            function_call: Some(json!({ "name": schema_name })),
+            response_format: Some(response_format),
             temperature: effective_temp,
             max_tokens: self.config.max_tokens,
             reasoning_effort,
@@ -522,102 +512,27 @@ impl OpenAIClient {
         let message = &completion.choices[0].message;
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
 
-        // Extract the function arguments JSON
-        if let Some(function_call) = &message.function_call {
-            let raw_response = function_call.arguments.clone();
+        // With structured outputs, the response is in message.content as guaranteed-valid JSON
+        if let Some(content) = &message.content {
+            let raw_response = content.clone();
             debug!(
-                function_name = %function_call.name,
-                args_len = raw_response.len(),
-                "Function call received from OpenAI"
+                content_len = raw_response.len(),
+                "Structured output received from OpenAI"
             );
 
-            // Parse the arguments JSON string into our target type
-            let result: T = match serde_json::from_str(&raw_response) {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    let error_msg = format!(
-                        "Failed to parse response: {}\nPartial JSON: {}",
-                        e, &raw_response
-                    );
-                    error!(
-                        error = %e,
-                        partial_json = %raw_response,
-                        "JSON parsing error"
-                    );
-                    return Err((
-                        RStructorError::ValidationError(error_msg.clone()),
-                        Some(ValidationFailureContext::new(error_msg, raw_response)),
-                    ));
-                }
-            };
-
-            // Apply any custom validation
-            if let Err(e) = result.validate() {
-                error!(error = ?e, "Custom validation failed");
-                let error_msg = e.to_string();
-                return Err((
-                    e,
-                    Some(ValidationFailureContext::new(error_msg, raw_response)),
-                ));
-            }
-
-            info!("Successfully generated and validated structured data");
-            Ok(MaterializeInternalOutput::new(result, raw_response, usage))
+            // Parse and validate the response using shared utility
+            parse_validate_and_create_output(raw_response, usage)
         } else {
-            // If no function call, try to extract from content if available
-            if let Some(content) = &message.content {
-                let raw_response = content.clone();
-                warn!(
-                    content_len = raw_response.len(),
-                    "No function call in response, attempting to parse content as JSON"
-                );
-
-                // Try to extract JSON from the content (assuming the model might have returned JSON directly)
-                use crate::backend::extract_json_from_markdown;
-                let json_content = extract_json_from_markdown(&raw_response);
-                let result: T = match serde_json::from_str(&json_content) {
-                    Ok(parsed) => parsed,
-                    Err(e) => {
-                        let error_msg = format!(
-                            "Failed to parse response content: {}\nPartial JSON: {}",
-                            e, &json_content
-                        );
-                        error!(
-                            error = %e,
-                            content = %json_content,
-                            "Failed to parse content as JSON"
-                        );
-                        return Err((
-                            RStructorError::ValidationError(error_msg.clone()),
-                            Some(ValidationFailureContext::new(error_msg, raw_response)),
-                        ));
-                    }
-                };
-
-                // Apply any custom validation
-                if let Err(e) = result.validate() {
-                    error!(error = ?e, "Custom validation failed");
-                    let error_msg = e.to_string();
-                    return Err((
-                        e,
-                        Some(ValidationFailureContext::new(error_msg, raw_response)),
-                    ));
-                }
-
-                info!("Successfully generated and validated structured data from content");
-                Ok(MaterializeInternalOutput::new(result, raw_response, usage))
-            } else {
-                error!("No function call or content in OpenAI response");
-                Err((
-                    RStructorError::api_error(
-                        "OpenAI",
-                        ApiErrorKind::UnexpectedResponse {
-                            details: "No function call or content in response".to_string(),
-                        },
-                    ),
-                    None,
-                ))
-            }
+            error!("No content in OpenAI response");
+            Err((
+                RStructorError::api_error(
+                    "OpenAI",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No content in response".to_string(),
+                    },
+                ),
+                None,
+            ))
         }
     }
 }
@@ -721,7 +636,7 @@ impl LLMClient for OpenAIClient {
             self.config.temperature
         };
 
-        // Build the request without functions
+        // Build the request for text generation (no structured output)
         debug!("Building OpenAI API request for text generation");
         let request = ChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
@@ -729,8 +644,7 @@ impl LLMClient for OpenAIClient {
                 role: "user".to_string(),
                 content: prompt.to_string(),
             }],
-            functions: None,
-            function_call: None,
+            response_format: None,
             temperature: effective_temp,
             max_tokens: self.config.max_tokens,
             reasoning_effort,

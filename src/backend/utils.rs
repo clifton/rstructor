@@ -1,31 +1,302 @@
-use crate::backend::{ChatMessage, MaterializeInternalOutput, ValidationFailureContext};
+use crate::backend::{
+    ChatMessage, MaterializeInternalOutput, TokenUsage, ValidationFailureContext,
+};
 use crate::error::{ApiErrorKind, RStructorError, Result};
+use crate::model::Instructor;
 use reqwest::Response;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, trace, warn};
 
-/// Extract JSON from markdown code blocks if present, otherwise return the content as-is.
+/// Prepare a JSON schema for strict mode by recursively adding required fields
+/// to all object types in the schema.
 ///
-/// This function handles cases where LLM providers wrap JSON responses in markdown code blocks
-/// like ```json ... ``` or ``` ... ```.
-pub fn extract_json_from_markdown(content: &str) -> String {
-    let trimmed = content.trim();
+/// This is required by providers like OpenAI that use strict structured outputs, where
+/// every object in the schema (including nested objects and array items) must have:
+/// 1. `additionalProperties: false`
+/// 2. A `required` array listing all property keys
+///
+/// # Arguments
+///
+/// * `schema` - The JSON schema to modify
+///
+/// # Returns
+///
+/// A new schema Value with strict mode requirements added to all objects
+pub fn prepare_strict_schema(schema: &crate::schema::Schema) -> Value {
+    let mut schema_json = schema.to_json();
+    add_additional_properties_false(&mut schema_json);
+    schema_json
+}
 
-    // Match ```json ... ``` or ``` ... ```
-    if trimmed.starts_with("```") {
-        // Find the first newline after ```
-        if let Some(start_idx) = trimmed.find('\n') {
-            let after_start = &trimmed[start_idx + 1..];
-            // Find the closing ```
-            if let Some(end_idx) = after_start.rfind("```") {
-                return after_start[..end_idx].trim().to_string();
+/// Recursively prepares a JSON schema for strict mode by adding:
+/// 1. `additionalProperties: false` to all object types
+/// 2. `required` array with all property keys (if not already present)
+fn add_additional_properties_false(schema: &mut Value) {
+    if let Some(obj) = schema.as_object_mut() {
+        // Check if this is an object type schema
+        let is_object_type = obj
+            .get("type")
+            .and_then(|t| t.as_str())
+            .is_some_and(|t| t == "object");
+
+        // Also check if it has properties (even without explicit type: object)
+        let has_properties = obj.contains_key("properties");
+
+        if is_object_type || has_properties {
+            obj.insert("additionalProperties".to_string(), serde_json::json!(false));
+
+            // OpenAI strict mode requires ALL properties to be listed in `required`
+            // This overrides any existing `required` array since the derive macro
+            // only includes non-optional fields, but strict mode needs all of them
+            if let Some(properties) = obj.get("properties")
+                && let Some(props_obj) = properties.as_object()
+            {
+                let required_keys: Vec<Value> =
+                    props_obj.keys().map(|k| serde_json::json!(k)).collect();
+                if !required_keys.is_empty() {
+                    obj.insert("required".to_string(), Value::Array(required_keys));
+                }
             }
         }
+
+        // Recursively process nested schemas
+        // Process 'properties' object
+        if let Some(properties) = obj.get_mut("properties")
+            && let Some(props_obj) = properties.as_object_mut()
+        {
+            for (_key, prop_schema) in props_obj.iter_mut() {
+                add_additional_properties_false(prop_schema);
+            }
+        }
+
+        // Process 'items' for arrays
+        if let Some(items) = obj.get_mut("items") {
+            add_additional_properties_false(items);
+        }
+
+        // Process 'additionalItems' for arrays
+        if let Some(additional_items) = obj.get_mut("additionalItems") {
+            add_additional_properties_false(additional_items);
+        }
+
+        // Process 'allOf' array
+        if let Some(all_of) = obj.get_mut("allOf")
+            && let Some(arr) = all_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                add_additional_properties_false(item);
+            }
+        }
+
+        // Process 'anyOf' array
+        if let Some(any_of) = obj.get_mut("anyOf")
+            && let Some(arr) = any_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                add_additional_properties_false(item);
+            }
+        }
+
+        // Process 'oneOf' array
+        if let Some(one_of) = obj.get_mut("oneOf")
+            && let Some(arr) = one_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                add_additional_properties_false(item);
+            }
+        }
+
+        // Process 'definitions' / '$defs' for reusable schemas
+        if let Some(definitions) = obj.get_mut("definitions")
+            && let Some(defs_obj) = definitions.as_object_mut()
+        {
+            for (_key, def_schema) in defs_obj.iter_mut() {
+                add_additional_properties_false(def_schema);
+            }
+        }
+
+        if let Some(defs) = obj.get_mut("$defs")
+            && let Some(defs_obj) = defs.as_object_mut()
+        {
+            for (_key, def_schema) in defs_obj.iter_mut() {
+                add_additional_properties_false(def_schema);
+            }
+        }
+
+        // Process 'not' schema
+        if let Some(not_schema) = obj.get_mut("not") {
+            add_additional_properties_false(not_schema);
+        }
+
+        // Process 'if', 'then', 'else' schemas
+        if let Some(if_schema) = obj.get_mut("if") {
+            add_additional_properties_false(if_schema);
+        }
+        if let Some(then_schema) = obj.get_mut("then") {
+            add_additional_properties_false(then_schema);
+        }
+        if let Some(else_schema) = obj.get_mut("else") {
+            add_additional_properties_false(else_schema);
+        }
+
+        // Process 'patternProperties' object
+        if let Some(pattern_props) = obj.get_mut("patternProperties")
+            && let Some(pattern_obj) = pattern_props.as_object_mut()
+        {
+            for (_pattern, pattern_schema) in pattern_obj.iter_mut() {
+                add_additional_properties_false(pattern_schema);
+            }
+        }
+
+        // Process 'contains' for arrays
+        if let Some(contains) = obj.get_mut("contains") {
+            add_additional_properties_false(contains);
+        }
+
+        // Process 'propertyNames' schema
+        if let Some(property_names) = obj.get_mut("propertyNames") {
+            add_additional_properties_false(property_names);
+        }
+    }
+}
+
+/// JSON Schema format specification for structured outputs.
+///
+/// This struct is used by OpenAI and Grok (and potentially other OpenAI-compatible APIs)
+/// for their native structured outputs feature.
+#[derive(Debug, Serialize)]
+pub struct JsonSchemaFormat {
+    /// Name of the schema (usually the type name)
+    pub name: String,
+    /// Optional description of the schema
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The JSON schema itself
+    pub schema: Value,
+    /// Whether to use strict mode (required for structured outputs)
+    pub strict: bool,
+}
+
+/// Response format for structured outputs (OpenAI-compatible).
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+pub enum ResponseFormat {
+    /// JSON Schema structured output format
+    #[serde(rename = "json_schema")]
+    JsonSchema {
+        /// The JSON schema specification
+        json_schema: JsonSchemaFormat,
+    },
+}
+
+impl ResponseFormat {
+    /// Create a new JSON schema response format for structured outputs.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The name of the schema (usually the type name)
+    /// * `schema` - The JSON schema for the expected output
+    /// * `description` - Optional description of what the output should contain
+    pub fn json_schema(name: String, schema: Value, description: Option<String>) -> Self {
+        ResponseFormat::JsonSchema {
+            json_schema: JsonSchemaFormat {
+                name,
+                description,
+                schema,
+                strict: true,
+            },
+        }
+    }
+}
+
+/// Parse a raw JSON response and validate it against the Instructor trait.
+///
+/// This function handles:
+/// 1. JSON parsing with detailed error messages
+/// 2. Custom validation via the Instructor trait
+///
+/// # Arguments
+///
+/// * `raw_response` - The raw JSON string from the LLM
+///
+/// # Returns
+///
+/// The parsed and validated data, or an error with validation context
+pub fn parse_and_validate_response<T>(
+    raw_response: &str,
+) -> std::result::Result<T, (RStructorError, Option<ValidationFailureContext>)>
+where
+    T: Instructor + DeserializeOwned,
+{
+    // Parse the JSON content into our target type
+    let result: T = match serde_json::from_str(raw_response) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            let error_msg = format!(
+                "Failed to parse response as JSON: {}\nPartial JSON: {}",
+                e, raw_response
+            );
+            error!(
+                error = %e,
+                content = %raw_response,
+                "JSON parsing error"
+            );
+            return Err((
+                RStructorError::ValidationError(error_msg.clone()),
+                Some(ValidationFailureContext::new(
+                    error_msg,
+                    raw_response.to_string(),
+                )),
+            ));
+        }
+    };
+
+    // Apply any custom validation (business logic beyond schema)
+    if let Err(e) = result.validate() {
+        error!(error = ?e, "Custom validation failed");
+        let error_msg = e.to_string();
+        return Err((
+            e,
+            Some(ValidationFailureContext::new(
+                error_msg,
+                raw_response.to_string(),
+            )),
+        ));
     }
 
-    // If no markdown code blocks found, return as-is
-    trimmed.to_string()
+    Ok(result)
+}
+
+/// Helper to create a successful MaterializeInternalOutput from parsed data.
+///
+/// This is a convenience function that combines parsing, validation, and
+/// output construction in one step.
+///
+/// # Arguments
+///
+/// * `raw_response` - The raw JSON string from the LLM
+/// * `usage` - Optional token usage information
+///
+/// # Returns
+///
+/// A MaterializeInternalOutput with the parsed data, or an error
+pub fn parse_validate_and_create_output<T>(
+    raw_response: String,
+    usage: Option<TokenUsage>,
+) -> std::result::Result<
+    MaterializeInternalOutput<T>,
+    (RStructorError, Option<ValidationFailureContext>),
+>
+where
+    T: Instructor + DeserializeOwned,
+{
+    let result = parse_and_validate_response::<T>(&raw_response)?;
+    info!("Successfully generated and validated structured data");
+    Ok(MaterializeInternalOutput::new(result, raw_response, usage))
 }
 
 /// Convert a reqwest error to a RStructorError, handling timeout errors specially.
@@ -518,6 +789,269 @@ macro_rules! impl_client_builder_methods {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_add_additional_properties_simple_object() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_add_additional_properties_nested_object() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "user": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" }
+                    }
+                }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert_eq!(
+            schema["properties"]["user"]["additionalProperties"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn test_add_additional_properties_array_items() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "ingredients": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "amount": { "type": "string" }
+                        }
+                    }
+                }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+        // Top-level should have additionalProperties: false
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        // Array items object should also have additionalProperties: false
+        assert_eq!(
+            schema["properties"]["ingredients"]["items"]["additionalProperties"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn test_add_additional_properties_deeply_nested() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "recipe": {
+                    "type": "object",
+                    "properties": {
+                        "ingredients": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "details": {
+                                        "type": "object",
+                                        "properties": {
+                                            "brand": { "type": "string" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+
+        // All object levels should have additionalProperties: false
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert_eq!(
+            schema["properties"]["recipe"]["additionalProperties"],
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            schema["properties"]["recipe"]["properties"]["ingredients"]["items"]["additionalProperties"],
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            schema["properties"]["recipe"]["properties"]["ingredients"]["items"]["properties"]["details"]
+                ["additionalProperties"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn test_add_additional_properties_anyof() {
+        let mut schema = serde_json::json!({
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" }
+                    }
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "number" }
+                    }
+                }
+            ]
+        });
+        add_additional_properties_false(&mut schema);
+
+        assert_eq!(
+            schema["anyOf"][0]["additionalProperties"],
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            schema["anyOf"][1]["additionalProperties"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn test_add_additional_properties_definitions() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "item": { "$ref": "#/definitions/Item" }
+            },
+            "definitions": {
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string" }
+                    }
+                }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert_eq!(
+            schema["definitions"]["Item"]["additionalProperties"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn test_add_additional_properties_preserves_existing() {
+        // If additionalProperties is already set, it should be overwritten
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            },
+            "additionalProperties": true
+        });
+        add_additional_properties_false(&mut schema);
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_add_additional_properties_no_type() {
+        // Object with properties but no explicit type should still get additionalProperties: false
+        let mut schema = serde_json::json!({
+            "properties": {
+                "name": { "type": "string" }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_adds_required_array() {
+        // Schema without required array should get one added with all property keys
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "age": { "type": "number" }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+
+        let required = schema["required"]
+            .as_array()
+            .expect("required should be an array");
+        assert_eq!(required.len(), 2);
+        assert!(required.contains(&serde_json::json!("name")));
+        assert!(required.contains(&serde_json::json!("age")));
+    }
+
+    #[test]
+    fn test_overrides_existing_required_array() {
+        // Schema with existing required array should be overridden to include all properties
+        // (OpenAI strict mode requires ALL properties in required, even optional ones)
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "age": { "type": "number" }
+            },
+            "required": ["name"]
+        });
+        add_additional_properties_false(&mut schema);
+
+        let required = schema["required"]
+            .as_array()
+            .expect("required should be an array");
+        // Now it should include ALL properties, not just the original
+        assert_eq!(required.len(), 2);
+        assert!(required.contains(&serde_json::json!("name")));
+        assert!(required.contains(&serde_json::json!("age")));
+    }
+
+    #[test]
+    fn test_adds_required_array_to_nested_objects() {
+        // Nested objects should also get required arrays
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "number": { "type": "integer" },
+                            "description": { "type": "string" }
+                        }
+                    }
+                }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+
+        // Top-level should have required
+        let required = schema["required"]
+            .as_array()
+            .expect("required should be an array");
+        assert!(required.contains(&serde_json::json!("steps")));
+
+        // Nested array items should also have required
+        let nested_required = schema["properties"]["steps"]["items"]["required"]
+            .as_array()
+            .expect("nested required should be an array");
+        assert!(nested_required.contains(&serde_json::json!("number")));
+        assert!(nested_required.contains(&serde_json::json!("description")));
+    }
 
     #[test]
     fn truncate_message_ascii_within_limit() {
