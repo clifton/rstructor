@@ -1207,4 +1207,137 @@ mod tests {
         // floor_char_boundary(0) returns 0, so we get just "..."
         assert_eq!(truncate_message(msg, 0), "...");
     }
+
+    #[test]
+    fn test_gemini_schema_strips_unsupported_keywords() {
+        use crate::schema::Schema;
+
+        // Create a schema with examples and other unsupported keywords
+        let schema = Schema::new(serde_json::json!({
+            "type": "object",
+            "title": "Movie",
+            "properties": {
+                "title": { "type": "string", "description": "Movie title" },
+                "year": { "type": "integer", "description": "Release year" }
+            },
+            "examples": [{
+                "title": "The Matrix",
+                "year": 1999
+            }]
+        }));
+
+        let gemini_schema = prepare_gemini_schema(&schema);
+
+        // Verify examples is stripped
+        assert!(
+            gemini_schema.get("examples").is_none(),
+            "examples should be stripped from Gemini schema"
+        );
+
+        // Verify title is stripped (Gemini doesn't support it)
+        assert!(
+            gemini_schema.get("title").is_none(),
+            "title should be stripped from Gemini schema"
+        );
+
+        // Verify the basic schema structure is preserved
+        assert_eq!(gemini_schema["type"], "object");
+        assert!(gemini_schema["properties"]["title"].is_object());
+        assert!(gemini_schema["properties"]["year"].is_object());
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_nested_examples() {
+        use crate::schema::Schema;
+
+        // Create a schema with nested objects that have examples
+        let schema = Schema::new(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "recipe_name": { "type": "string" },
+                "ingredients": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": { "type": "string" },
+                            "amount": { "type": "number" }
+                        },
+                        "examples": [{
+                            "name": "flour",
+                            "amount": 2.5
+                        }]
+                    }
+                }
+            },
+            "examples": [{
+                "recipe_name": "Cookies",
+                "ingredients": []
+            }]
+        }));
+
+        let gemini_schema = prepare_gemini_schema(&schema);
+
+        // Verify examples is stripped at root
+        assert!(
+            gemini_schema.get("examples").is_none(),
+            "root examples should be stripped"
+        );
+
+        // Verify examples is stripped from array items (nested object)
+        assert!(
+            gemini_schema["properties"]["ingredients"]["items"]
+                .get("examples")
+                .is_none(),
+            "nested examples should be stripped"
+        );
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_additional_properties() {
+        let mut schema_json = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            },
+            "additionalProperties": false
+        });
+
+        strip_gemini_unsupported_keywords(&mut schema_json);
+
+        assert!(
+            schema_json.get("additionalProperties").is_none(),
+            "additionalProperties should be stripped"
+        );
+    }
+
+    #[test]
+    fn test_gemini_schema_strips_title_and_schema() {
+        let mut schema_json = serde_json::json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "Movie",
+            "type": "object",
+            "properties": {
+                "name": {
+                    "title": "MovieName",
+                    "type": "string"
+                }
+            }
+        });
+
+        strip_gemini_unsupported_keywords(&mut schema_json);
+
+        assert!(
+            schema_json.get("$schema").is_none(),
+            "$schema should be stripped"
+        );
+        assert!(
+            schema_json.get("title").is_none(),
+            "title should be stripped"
+        );
+        assert!(
+            schema_json["properties"]["name"].get("title").is_none(),
+            "nested title should be stripped"
+        );
+    }
 }

@@ -291,8 +291,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sample_description.to_string()
     };
 
-    let api_key = env::var("ANTHROPIC_API_KEY")
-        .expect("Please set ANTHROPIC_API_KEY environment variable");
+    let api_key =
+        env::var("ANTHROPIC_API_KEY").expect("Please set ANTHROPIC_API_KEY environment variable");
 
     println!("\nProcessing your request with Anthropic...\n");
     let client = AnthropicClient::new(api_key)?.temperature(0.3);
