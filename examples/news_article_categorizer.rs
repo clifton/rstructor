@@ -1,6 +1,4 @@
-#![allow(clippy::collapsible_if)]
-
-use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient};
+use rstructor::{GrokClient, Instructor, LLMClient};
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -81,26 +79,14 @@ struct ArticleAnalysis {
 async fn analyze_article(
     article_text: &str,
 ) -> Result<ArticleAnalysis, Box<dyn std::error::Error>> {
-    // Try using available API keys
-    if let Ok(api_key) = env::var("OPENAI_API_KEY") {
-        println!("Using OpenAI for article analysis...");
+    let api_key = env::var("XAI_API_KEY").expect("Please set XAI_API_KEY environment variable");
 
-        let client = OpenAIClient::new(api_key)?.temperature(0.0);
+    println!("Using Grok for article analysis...");
+    let client = GrokClient::new(api_key)?.temperature(0.0);
 
-        let prompt = format!("Analyze the following news article:\n\n{}", article_text);
-        let analysis = client.materialize::<ArticleAnalysis>(&prompt).await?;
-        Ok(analysis)
-    } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
-        println!("Using Anthropic for article analysis...");
-
-        let client = AnthropicClient::new(api_key)?.temperature(0.0);
-
-        let prompt = format!("Analyze the following news article:\n\n{}", article_text);
-        let analysis = client.materialize::<ArticleAnalysis>(&prompt).await?;
-        Ok(analysis)
-    } else {
-        Err("No API keys found. Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY.".into())
-    }
+    let prompt = format!("Analyze the following news article:\n\n{}", article_text);
+    let analysis = client.materialize::<ArticleAnalysis>(&prompt).await?;
+    Ok(analysis)
 }
 
 #[tokio::main]

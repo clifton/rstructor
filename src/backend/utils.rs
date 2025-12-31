@@ -164,6 +164,96 @@ fn add_additional_properties_false(schema: &mut Value) {
     }
 }
 
+/// Prepare a JSON schema for Gemini by stripping unsupported keywords.
+///
+/// Gemini's structured outputs API doesn't support certain JSON Schema keywords like
+/// `examples`, `additionalProperties`, `title`, etc. This function recursively removes
+/// them from the schema.
+///
+/// # Arguments
+///
+/// * `schema` - The JSON schema to modify
+///
+/// # Returns
+///
+/// A new schema Value with unsupported keywords removed
+pub fn prepare_gemini_schema(schema: &crate::schema::Schema) -> Value {
+    let mut schema_json = schema.to_json();
+    strip_gemini_unsupported_keywords(&mut schema_json);
+    schema_json
+}
+
+/// Recursively removes keywords unsupported by Gemini's structured outputs.
+fn strip_gemini_unsupported_keywords(schema: &mut Value) {
+    if let Some(obj) = schema.as_object_mut() {
+        // Remove unsupported keywords
+        obj.remove("examples");
+        obj.remove("additionalProperties");
+        obj.remove("title");
+        obj.remove("$schema");
+        obj.remove("$id");
+        obj.remove("default");
+
+        // Recursively process nested schemas
+        if let Some(properties) = obj.get_mut("properties")
+            && let Some(props_obj) = properties.as_object_mut()
+        {
+            for (_key, prop_schema) in props_obj.iter_mut() {
+                strip_gemini_unsupported_keywords(prop_schema);
+            }
+        }
+
+        // Process 'items' for arrays
+        if let Some(items) = obj.get_mut("items") {
+            strip_gemini_unsupported_keywords(items);
+        }
+
+        // Process 'allOf' array
+        if let Some(all_of) = obj.get_mut("allOf")
+            && let Some(arr) = all_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                strip_gemini_unsupported_keywords(item);
+            }
+        }
+
+        // Process 'anyOf' array
+        if let Some(any_of) = obj.get_mut("anyOf")
+            && let Some(arr) = any_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                strip_gemini_unsupported_keywords(item);
+            }
+        }
+
+        // Process 'oneOf' array
+        if let Some(one_of) = obj.get_mut("oneOf")
+            && let Some(arr) = one_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                strip_gemini_unsupported_keywords(item);
+            }
+        }
+
+        // Process 'definitions' / '$defs'
+        if let Some(definitions) = obj.get_mut("definitions")
+            && let Some(defs_obj) = definitions.as_object_mut()
+        {
+            for (_key, def_schema) in defs_obj.iter_mut() {
+                strip_gemini_unsupported_keywords(def_schema);
+            }
+        }
+
+        if let Some(defs) = obj.get_mut("$defs")
+            && let Some(defs_obj) = defs.as_object_mut()
+        {
+            for (_key, def_schema) in defs_obj.iter_mut() {
+                strip_gemini_unsupported_keywords(def_schema);
+            }
+        }
+    }
+}
+
 /// JSON Schema format specification for structured outputs.
 ///
 /// This struct is used by OpenAI and Grok (and potentially other OpenAI-compatible APIs)

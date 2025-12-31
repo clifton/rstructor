@@ -376,12 +376,13 @@ impl GeminiClient {
             None
         };
 
-        // Note: Gemini's schema format doesn't support additionalProperties, so we use the raw schema
+        // Prepare schema for Gemini by stripping unsupported keywords (examples, additionalProperties, etc.)
+        let gemini_schema = crate::backend::utils::prepare_gemini_schema(&schema);
         let generation_config = GenerationConfig {
             temperature: self.config.temperature,
             max_output_tokens: self.config.max_tokens,
             response_mime_type: Some("application/json".to_string()),
-            response_schema: Some(schema.to_json()),
+            response_schema: Some(gemini_schema),
             thinking_config,
         };
 

@@ -1,4 +1,4 @@
-use rstructor::{AnthropicClient, Instructor, OpenAIClient, RStructorError};
+use rstructor::{AnthropicClient, Instructor, RStructorError};
 type Result<T> = rstructor::Result<T>;
 use chrono::{NaiveDate, NaiveTime};
 use serde::{Deserialize, Serialize};
@@ -291,38 +291,20 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         sample_description.to_string()
     };
 
-    // Select LLM client based on available API keys
-    if let Ok(api_key) = env::var("OPENAI_API_KEY") {
-        println!("\nProcessing your request with OpenAI...\n");
+    let api_key = env::var("ANTHROPIC_API_KEY")
+        .expect("Please set ANTHROPIC_API_KEY environment variable");
 
-        let client = OpenAIClient::new(api_key)?.temperature(0.3);
+    println!("\nProcessing your request with Anthropic...\n");
+    let client = AnthropicClient::new(api_key)?.temperature(0.3);
 
-        match process_event_request(&client, &description).await {
-            Ok(plan) => print_event_plan(&plan),
-            Err(e) => {
-                println!("Error: {}", e);
-                if let rstructor::RStructorError::ValidationError(msg) = &e {
-                    println!("\nValidation error details: {}", msg);
-                }
+    match process_event_request(&client, &description).await {
+        Ok(plan) => print_event_plan(&plan),
+        Err(e) => {
+            println!("Error: {}", e);
+            if let rstructor::RStructorError::ValidationError(msg) = &e {
+                println!("\nValidation error details: {}", msg);
             }
         }
-    } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
-        println!("\nProcessing your request with Anthropic...\n");
-
-        let client = AnthropicClient::new(api_key)?.temperature(0.3);
-
-        match process_event_request(&client, &description).await {
-            Ok(plan) => print_event_plan(&plan),
-            Err(e) => {
-                println!("Error: {}", e);
-                if let rstructor::RStructorError::ValidationError(msg) = &e {
-                    println!("\nValidation error details: {}", msg);
-                }
-            }
-        }
-    } else {
-        println!("\nNo API keys found in environment variables.");
-        println!("Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY to use this example.");
     }
 
     Ok(())

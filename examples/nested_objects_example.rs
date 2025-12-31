@@ -1,6 +1,4 @@
-#![allow(clippy::collapsible_if)]
-
-use rstructor::{AnthropicClient, Instructor, LLMClient, OpenAIClient, RStructorError};
+use rstructor::{GeminiClient, Instructor, LLMClient, RStructorError};
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -173,33 +171,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Simple prompt - the schema handles structure enforcement
     let prompt = "Create a recipe for chocolate chip cookies.";
 
-    // Try using either OpenAI or Anthropic based on available API keys
-    if let Ok(api_key) = env::var("OPENAI_API_KEY") {
-        println!("Using OpenAI to generate recipe...");
+    let api_key =
+        env::var("GEMINI_API_KEY").expect("Please set GEMINI_API_KEY environment variable");
 
-        let client = OpenAIClient::new(api_key)?.temperature(0.2);
-
-        let recipe: Recipe = client.materialize(prompt).await?;
-
-        // Print the generated recipe
-        print_recipe(&recipe);
-    } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
-        println!("Using Anthropic to generate recipe...");
-
-        let client = AnthropicClient::new(api_key)?.temperature(0.2);
-
-        let recipe: Recipe = client.materialize(prompt).await?;
-
-        // Print the generated recipe
-        print_recipe(&recipe);
-    } else {
-        println!("No API keys found in environment variables.");
-        println!("Please set either OPENAI_API_KEY or ANTHROPIC_API_KEY to run this example.");
-        println!("\nNote: This example requires API keys because it makes actual LLM calls.");
-        println!(
-            "If you see validation errors, the LLM may need more retries or a clearer prompt."
-        );
-    }
+    println!("Using Gemini to generate recipe...");
+    let client = GeminiClient::new(api_key)?.temperature(0.2);
+    let recipe: Recipe = client.materialize(prompt).await?;
+    print_recipe(&recipe);
 
     Ok(())
 }

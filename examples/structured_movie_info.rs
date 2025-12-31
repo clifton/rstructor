@@ -1,9 +1,8 @@
-use rstructor::{AnthropicClient, GeminiClient, GrokClient, Instructor, LLMClient, OpenAIClient};
+use rstructor::{Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 use std::env;
 
-/// This example demonstrates using all four supported LLM backends
-/// to extract structured movie information from a simple prompt.
+/// This example demonstrates extracting structured movie information.
 
 // Define our data model
 #[derive(Instructor, Serialize, Deserialize, Debug)]
@@ -79,53 +78,12 @@ fn print_movie(provider: &str, movie: &Movie) {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let prompt = "Tell me about the movie Inception";
 
-    // OpenAI
-    if let Ok(api_key) = env::var("OPENAI_API_KEY") {
-        println!("Using OpenAI...");
-        let client = OpenAIClient::new(api_key)?;
-        match client.materialize::<Movie>(prompt).await {
-            Ok(movie) => print_movie("OpenAI", &movie),
-            Err(e) => println!("Error with OpenAI: {}", e),
-        }
-    } else {
-        println!("Skipping OpenAI (OPENAI_API_KEY not set)");
-    }
+    let api_key =
+        env::var("OPENAI_API_KEY").expect("Please set OPENAI_API_KEY environment variable");
 
-    // Anthropic
-    if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
-        println!("\nUsing Anthropic...");
-        let client = AnthropicClient::new(api_key)?;
-        match client.materialize::<Movie>(prompt).await {
-            Ok(movie) => print_movie("Anthropic", &movie),
-            Err(e) => println!("Error with Anthropic: {}", e),
-        }
-    } else {
-        println!("Skipping Anthropic (ANTHROPIC_API_KEY not set)");
-    }
-
-    // Grok (xAI)
-    if let Ok(api_key) = env::var("XAI_API_KEY") {
-        println!("\nUsing Grok...");
-        let client = GrokClient::new(api_key)?;
-        match client.materialize::<Movie>(prompt).await {
-            Ok(movie) => print_movie("Grok", &movie),
-            Err(e) => println!("Error with Grok: {}", e),
-        }
-    } else {
-        println!("Skipping Grok (XAI_API_KEY not set)");
-    }
-
-    // Gemini
-    if let Ok(api_key) = env::var("GEMINI_API_KEY") {
-        println!("\nUsing Gemini...");
-        let client = GeminiClient::new(api_key)?;
-        match client.materialize::<Movie>(prompt).await {
-            Ok(movie) => print_movie("Gemini", &movie),
-            Err(e) => println!("Error with Gemini: {}", e),
-        }
-    } else {
-        println!("Skipping Gemini (GEMINI_API_KEY not set)");
-    }
+    let client = OpenAIClient::new(api_key)?;
+    let movie = client.materialize::<Movie>(prompt).await?;
+    print_movie("OpenAI", &movie);
 
     Ok(())
 }
