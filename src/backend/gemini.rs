@@ -140,7 +140,6 @@ pub struct GeminiConfig {
     pub max_tokens: Option<u32>,
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
-    pub include_error_feedback: Option<bool>,
     /// Custom base URL for Gemini-compatible APIs
     /// Defaults to "https://generativelanguage.googleapis.com/v1beta" if not set
     pub base_url: Option<String>,
@@ -258,10 +257,9 @@ impl GeminiClient {
             model: Model::Gemini3FlashPreview, // Default to Gemini 3 Flash Preview (latest)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,     // Default: no timeout (uses reqwest's default)
-            max_retries: None, // Default: no retries (configure via .max_retries())
-            include_error_feedback: None, // Default: include error feedback in retry prompts
-            base_url: None,    // Default: use official Gemini API
+            timeout: None,      // Default: no timeout (uses reqwest's default)
+            max_retries: Some(3), // Default: 3 retries with error feedback
+            base_url: None,     // Default: use official Gemini API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3
         };
 
@@ -301,10 +299,9 @@ impl GeminiClient {
             model: Model::Gemini3FlashPreview, // Default to Gemini 3 Flash Preview (latest)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,     // Default: no timeout (uses reqwest's default)
-            max_retries: None, // Default: no retries (configure via .max_retries())
-            include_error_feedback: None, // Default: include error feedback in retry prompts
-            base_url: None,    // Default: use official Gemini API
+            timeout: None,      // Default: no timeout (uses reqwest's default)
+            max_retries: Some(3), // Default: 3 retries with error feedback
+            base_url: None,     // Default: use official Gemini API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3
         };
 
@@ -577,7 +574,6 @@ impl LLMClient for GeminiClient {
             },
             prompt,
             self.config.max_retries,
-            self.config.include_error_feedback,
         )
         .await?;
         Ok(output.data)
@@ -603,7 +599,6 @@ impl LLMClient for GeminiClient {
             },
             prompt,
             self.config.max_retries,
-            self.config.include_error_feedback,
         )
         .await?;
         Ok(MaterializeResult::new(output.data, output.usage))

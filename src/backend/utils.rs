@@ -486,12 +486,10 @@ pub async fn check_response_status(response: Response, provider_name: &str) -> R
 /// * `generate_fn` - Function that takes a conversation history and returns the result plus raw response
 /// * `prompt` - The initial user prompt
 /// * `max_retries` - Maximum number of retry attempts (None or 0 means no retries)
-/// * `include_error_feedback` - Whether to include validation errors in retry prompts (default: true)
 pub async fn generate_with_retry_with_history<F, Fut, T>(
     mut generate_fn: F,
     prompt: &str,
     max_retries: Option<usize>,
-    include_error_feedback: Option<bool>,
 ) -> Result<MaterializeInternalOutput<T>>
 where
     F: FnMut(Vec<ChatMessage>) -> Fut,
@@ -509,14 +507,13 @@ where
     };
 
     let max_attempts = max_retries + 1; // +1 for initial attempt
-    let include_error_feedback = include_error_feedback.unwrap_or(true);
 
     // Initialize conversation history with the original user prompt
     let mut messages = vec![ChatMessage::user(prompt)];
 
     trace!(
-        "Starting structured generation with conversation history: max_attempts={}, include_error_feedback={}",
-        max_attempts, include_error_feedback
+        "Starting structured generation with conversation history: max_attempts={}",
+        max_attempts
     );
 
     for attempt in 0..max_attempts {
@@ -554,35 +551,33 @@ where
                             "Validation error in generation attempt"
                         );
 
-                        // Build conversation history for retry
-                        if include_error_feedback {
-                            if let Some(ctx) = validation_ctx {
-                                // Add the failed assistant response to history
-                                messages.push(ChatMessage::assistant(&ctx.raw_response));
+                        // Build conversation history for retry with error feedback
+                        if let Some(ctx) = validation_ctx {
+                            // Add the failed assistant response to history
+                            messages.push(ChatMessage::assistant(&ctx.raw_response));
 
-                                // Add user message with error feedback
-                                let error_feedback = format!(
-                                    "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
-                                    ctx.error_message
-                                );
-                                messages.push(ChatMessage::user(error_feedback));
+                            // Add user message with error feedback
+                            let error_feedback = format!(
+                                "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
+                                ctx.error_message
+                            );
+                            messages.push(ChatMessage::user(error_feedback));
 
-                                debug!(
-                                    history_len = messages.len(),
-                                    "Updated conversation history for retry"
-                                );
-                            } else {
-                                // Fallback: no raw response context available.
-                                // We cannot add error feedback without the raw response because:
-                                // 1. Adding only a user message would create consecutive user messages,
-                                //    violating the alternating user/assistant pattern expected by LLM APIs
-                                // 2. The error message references "your previous response" but we can't show it
-                                // Instead, we retry with the original conversation (no history modification)
-                                warn!(
-                                    "Validation error occurred but no raw response context available. \
-                                     Retrying without error feedback in conversation history."
-                                );
-                            }
+                            debug!(
+                                history_len = messages.len(),
+                                "Updated conversation history for retry"
+                            );
+                        } else {
+                            // Fallback: no raw response context available.
+                            // We cannot add error feedback without the raw response because:
+                            // 1. Adding only a user message would create consecutive user messages,
+                            //    violating the alternating user/assistant pattern expected by LLM APIs
+                            // 2. The error message references "your previous response" but we can't show it
+                            // Instead, we retry with the original conversation (no history modification)
+                            warn!(
+                                "Validation error occurred but no raw response context available. \
+                                 Retrying without error feedback in conversation history."
+                            );
                         }
 
                         // Wait briefly before retrying
@@ -726,6 +721,8 @@ macro_rules! impl_client_builder_methods {
             /// When `materialize` encounters a validation error, it will automatically
             /// retry up to this many times, including the validation error message in subsequent attempts.
             ///
+            /// The default is 3 retries. Use `.no_retries()` to disable retries entirely.
+            ///
             /// # Arguments
             ///
             /// * `max_retries` - Maximum number of retry attempts (0 = no retries, only single attempt)
@@ -736,7 +733,7 @@ macro_rules! impl_client_builder_methods {
             /// # use rstructor::OpenAIClient;
             /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
             /// let client = OpenAIClient::new("api-key")?
-            ///     .max_retries(3);  // Retry up to 3 times on validation errors
+            ///     .max_retries(5);  // Increase to 5 retries (default is 3)
             /// # Ok(())
             /// # }
             /// ```
@@ -751,15 +748,10 @@ macro_rules! impl_client_builder_methods {
                 self
             }
 
-            /// Set whether to include validation error feedback in retry prompts.
+            /// Disable automatic retries on validation errors.
             ///
-            /// When enabled (default: true), validation error messages are included in retry prompts
-            /// to help the LLM understand what went wrong and fix issues. When disabled, retries
-            /// happen without error feedback, relying only on the original prompt.
-            ///
-            /// # Arguments
-            ///
-            /// * `include_error_feedback` - Whether to include validation error messages in retry prompts
+            /// By default, the client retries up to 3 times when validation errors occur.
+            /// Use this method to disable retries and fail immediately on the first error.
             ///
             /// # Examples
             ///
@@ -767,19 +759,17 @@ macro_rules! impl_client_builder_methods {
             /// # use rstructor::OpenAIClient;
             /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
             /// let client = OpenAIClient::new("api-key")?
-            ///     .max_retries(3)
-            ///     .include_error_feedback(true);  // Include error messages in retries
+            ///     .no_retries();  // Fail immediately on validation errors
             /// # Ok(())
             /// # }
             /// ```
             #[tracing::instrument(skip(self))]
-            pub fn include_error_feedback(mut self, include_error_feedback: bool) -> Self {
+            pub fn no_retries(mut self) -> Self {
                 tracing::debug!(
-                    previous_include_error_feedback = ?self.config.include_error_feedback,
-                    new_include_error_feedback = include_error_feedback,
-                    "Setting include_error_feedback"
+                    previous_max_retries = ?self.config.max_retries,
+                    "Disabling retries"
                 );
-                self.config.include_error_feedback = Some(include_error_feedback);
+                self.config.max_retries = Some(0);
                 self
             }
         }

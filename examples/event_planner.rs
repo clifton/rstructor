@@ -309,8 +309,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         let client = OpenAIClient::new(api_key)?
             .temperature(0.3)
-            .max_retries(5)
-            .include_error_feedback(true);
+            .max_retries(5);
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),
@@ -326,8 +325,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         let client = AnthropicClient::new(api_key)?
             .temperature(0.3)
-            .max_retries(5)
-            .include_error_feedback(true);
+            .max_retries(5);
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),

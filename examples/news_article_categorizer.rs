@@ -87,8 +87,7 @@ async fn analyze_article(
 
         let client = OpenAIClient::new(api_key)?
             .temperature(0.0)
-            .max_retries(5)
-            .include_error_feedback(true);
+            .max_retries(5);
 
         let prompt = format!(
             "Analyze the following news article completely according to the schema.\n\nCRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:\n1. The 'category' field is REQUIRED and must be one of: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.\n2. The 'entities' field must be an array of objects, where each object has 'name', 'entity_type', and 'relevance' fields. Do NOT return entities as strings. Each entity must be a complete JSON object.\n3. All other fields (title, summary, sentiment, keywords, bias_assessment) are also REQUIRED.\n\nArticle:\n{}",
@@ -101,8 +100,7 @@ async fn analyze_article(
 
         let client = AnthropicClient::new(api_key)?
             .temperature(0.0)
-            .max_retries(5)
-            .include_error_feedback(true);
+            .max_retries(5);
 
         let prompt = format!(
             "Analyze the following news article completely according to the schema.\n\nCRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:\n1. The 'category' field is REQUIRED and must be one of: Politics, Technology, Business, Sports, Entertainment, Health, Science, Environment, Education, Opinion, Other.\n2. The 'entities' field must be an array of objects, where each object has 'name', 'entity_type', and 'relevance' fields. Do NOT return entities as strings. Each entity must be a complete JSON object.\n3. All other fields (title, summary, sentiment, keywords, bias_assessment) are also REQUIRED.\n\nArticle:\n{}",

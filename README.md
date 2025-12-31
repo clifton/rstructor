@@ -48,8 +48,7 @@ struct Movie {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAIClient::from_env()?
-        .temperature(0.0)
-        .max_retries(3);
+        .temperature(0.0);
 
     let movie: Movie = client.materialize("Tell me about Inception").await?;
     println!("{}: {} ({})", movie.title, movie.director, movie.year);
@@ -109,10 +108,12 @@ fn validate_movie(movie: &Movie) -> Result<()> {
     Ok(())
 }
 
-// Configure retry behavior
-let client = OpenAIClient::from_env()?
-    .max_retries(3)
-    .include_error_feedback(true);  // Send error context on retry
+// Retries are enabled by default (3 attempts with error feedback)
+// To increase retries:
+let client = OpenAIClient::from_env()?.max_retries(5);
+
+// To disable retries:
+let client = OpenAIClient::from_env()?.no_retries();
 ```
 
 ## Complex Types

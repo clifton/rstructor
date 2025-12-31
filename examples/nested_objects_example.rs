@@ -186,8 +186,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
 
         let client = OpenAIClient::new(api_key)?
             .temperature(0.2)
-            .max_retries(5)
-            .include_error_feedback(true);
+            .max_retries(5);
 
         let recipe: Recipe = client.materialize(prompt).await?;
 
@@ -198,8 +197,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
 
         let client = AnthropicClient::new(api_key)?
             .temperature(0.2)
-            .max_retries(5)
-            .include_error_feedback(true);
+            .max_retries(5);
 
         let recipe: Recipe = client.materialize(prompt).await?;
 

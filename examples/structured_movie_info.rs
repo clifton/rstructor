@@ -76,9 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Using OpenAI...");
 
         let client = OpenAIClient::new(api_key)?
-            .temperature(0.0)
-            .max_retries(3)
-            .include_error_feedback(true);
+            .temperature(0.0);
 
         match client.materialize::<Movie>(prompt).await {
             Ok(movie) => {
@@ -101,9 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\nUsing Anthropic...");
 
         let client = AnthropicClient::new(api_key)?
-            .temperature(0.0)
-            .max_retries(3)
-            .include_error_feedback(true);
+            .temperature(0.0);
 
         match client.materialize::<Movie>(prompt).await {
             Ok(movie) => {

@@ -142,7 +142,6 @@ pub struct OpenAIConfig {
     pub max_tokens: Option<u32>,
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
-    pub include_error_feedback: Option<bool>,
     /// Custom base URL for OpenAI-compatible APIs (e.g., local LLMs, proxy endpoints)
     /// Defaults to "https://api.openai.com/v1" if not set
     pub base_url: Option<String>,
@@ -244,10 +243,9 @@ impl OpenAIClient {
             model: Model::Gpt52, // Default to GPT-5.2 (latest GPT-5)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,     // Default: no timeout (uses reqwest's default)
-            max_retries: None, // Default: no retries (configure via .max_retries())
-            include_error_feedback: None, // Default: include error feedback in retry prompts
-            base_url: None,    // Default: use official OpenAI API
+            timeout: None,      // Default: no timeout (uses reqwest's default)
+            max_retries: Some(3), // Default: 3 retries with error feedback
+            base_url: None,     // Default: use official OpenAI API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for GPT-5.x
         };
 
@@ -286,10 +284,9 @@ impl OpenAIClient {
             model: Model::Gpt52, // Default to GPT-5.2 (latest GPT-5)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,     // Default: no timeout (uses reqwest's default)
-            max_retries: None, // Default: no retries (configure via .max_retries())
-            include_error_feedback: None, // Default: include error feedback in retry prompts
-            base_url: None,    // Default: use official OpenAI API
+            timeout: None,      // Default: no timeout (uses reqwest's default)
+            max_retries: Some(3), // Default: 3 retries with error feedback
+            base_url: None,     // Default: use official OpenAI API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for GPT-5.x
         };
 
@@ -563,7 +560,6 @@ impl LLMClient for OpenAIClient {
             },
             prompt,
             self.config.max_retries,
-            self.config.include_error_feedback,
         )
         .await?;
         Ok(output.data)
@@ -589,7 +585,6 @@ impl LLMClient for OpenAIClient {
             },
             prompt,
             self.config.max_retries,
-            self.config.include_error_feedback,
         )
         .await?;
         Ok(MaterializeResult::new(output.data, output.usage))
