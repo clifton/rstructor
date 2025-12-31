@@ -73,21 +73,21 @@ bump_version_silent() {
     echo "$new_version"
 }
 
-# First, bump version in the derive crate
-echo "Updating derive crate version..."
-cd rstructor_derive
-DERIVE_VERSION=$(bump_version_silent Cargo.toml)
-echo "  rstructor_derive version updated to $DERIVE_VERSION"
-cd ..
-
-# Then, bump version in the main crate
+# First, bump version in the main crate
 echo "Updating main crate version..."
 MAIN_VERSION=$(bump_version_silent Cargo.toml)
 echo "  rstructor version updated to $MAIN_VERSION"
 
-# Now update the dependency reference using a different approach
+# Set derive crate to the same version as main crate
+echo "Syncing derive crate version to $MAIN_VERSION..."
+DERIVE_CARGO="rstructor_derive/Cargo.toml"
+sed -i.bak "s/^version = \"[0-9.]*\"/version = \"$MAIN_VERSION\"/" "$DERIVE_CARGO"
+rm "${DERIVE_CARGO}.bak"
+DERIVE_VERSION=$MAIN_VERSION
+echo "  rstructor_derive version set to $DERIVE_VERSION"
+
+# Update the dependency reference in main Cargo.toml
 echo "Updating dependency reference in main Cargo.toml..."
-# Use exact string replacement pattern rather than regex
 sed -i.bak "s/rstructor_derive = { version = \"[0-9.]*\"/rstructor_derive = { version = \"$DERIVE_VERSION\"/" Cargo.toml
 rm Cargo.toml.bak
 
