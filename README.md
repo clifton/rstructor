@@ -150,6 +150,37 @@ enum PaymentMethod {
 }
 ```
 
+### Serde Rename Support
+
+rstructor respects `#[serde(rename)]` and `#[serde(rename_all)]` attributes:
+
+```rust
+#[derive(Instructor, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserProfile {
+    first_name: String,      // becomes "firstName" in schema
+    last_name: String,       // becomes "lastName" in schema
+    email_address: String,   // becomes "emailAddress" in schema
+}
+
+#[derive(Instructor, Serialize, Deserialize)]
+struct CommitMessage {
+    #[serde(rename = "type")]  // use "type" as JSON key
+    commit_type: String,
+    description: String,
+}
+
+#[derive(Instructor, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CommitType {
+    Fix,       // becomes "fix"
+    Feat,      // becomes "feat"
+    Refactor,  // becomes "refactor"
+}
+```
+
+Supported case conversions: `lowercase`, `UPPERCASE`, `camelCase`, `PascalCase`, `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case`, `SCREAMING-KEBAB-CASE`.
+
 ### Custom Types (Dates, UUIDs)
 
 ```rust
@@ -234,6 +265,7 @@ export OPENAI_API_KEY=your_key
 cargo run --example structured_movie_info
 cargo run --example nested_objects_example
 cargo run --example enum_with_data_example
+cargo run --example serde_rename_example
 ```
 
 ## For Python Developers
