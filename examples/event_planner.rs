@@ -243,19 +243,7 @@ async fn process_event_request(
     description: &str,
 ) -> Result<EventPlan> {
     let prompt = format!(
-        "Target JSON: EventPlan\n\nCRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
-1. 'event_name' (REQUIRED - string)
-2. 'event_type' (REQUIRED - string)
-3. 'description' (REQUIRED - string)
-4. 'date' (REQUIRED - YYYY-MM-DD format)
-5. 'start_time' (REQUIRED - HH:MM format)
-6. 'end_time' (REQUIRED - HH:MM format)
-7. 'location' (REQUIRED - object with name, address, city at minimum)
-8. 'estimated_attendees' (REQUIRED - number)
-9. 'contact' (REQUIRED - object with name and either email or phone)
-10. 'activities' (REQUIRED - array of objects, each with name, start_time, end_time)
-
-Based on the following description, create a detailed event plan:\n\n{}",
+        "Create a detailed event plan based on this description:\n\n{}",
         description
     );
 
@@ -307,7 +295,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         println!("\nProcessing your request with OpenAI...\n");
 
-        let client = OpenAIClient::new(api_key)?.temperature(0.3).max_retries(5);
+        let client = OpenAIClient::new(api_key)?.temperature(0.3);
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),
@@ -321,9 +309,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("\nProcessing your request with Anthropic...\n");
 
-        let client = AnthropicClient::new(api_key)?
-            .temperature(0.3)
-            .max_retries(5);
+        let client = AnthropicClient::new(api_key)?.temperature(0.3);
 
         match process_event_request(&client, &description).await {
             Ok(plan) => print_event_plan(&plan),

@@ -170,21 +170,14 @@ fn validate_recipe(recipe: &Recipe) -> rstructor::Result<()> {
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    // User prompt requesting a recipe
-    // Important: Explicitly request structured data format
-    let prompt = "Create a recipe for chocolate chip cookies.
-
-CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
-1. Ingredients MUST be an array of objects (not strings). Each object must have exactly: 'name' (string), 'amount' (number), 'unit' (string).
-2. Steps MUST be an array of objects (not strings). Each object must have: 'number' (integer starting at 1), 'description' (string), and optionally 'time_minutes' (integer).
-3. Nutrition MUST be an object with exactly these fields: 'calories' (integer), 'protein_g' (number), 'carbs_g' (number), 'fat_g' (number). All values must be numbers, not strings. Field names must match exactly. THIS FIELD IS REQUIRED - DO NOT OMIT IT.
-4. All other fields (name, description, prep_time_minutes, cook_time_minutes, servings, difficulty) are also REQUIRED.";
+    // Simple prompt - the schema handles structure enforcement
+    let prompt = "Create a recipe for chocolate chip cookies.";
 
     // Try using either OpenAI or Anthropic based on available API keys
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         println!("Using OpenAI to generate recipe...");
 
-        let client = OpenAIClient::new(api_key)?.temperature(0.2).max_retries(5);
+        let client = OpenAIClient::new(api_key)?.temperature(0.2);
 
         let recipe: Recipe = client.materialize(prompt).await?;
 
@@ -193,9 +186,7 @@ CRITICAL REQUIREMENTS - ALL FIELDS ARE REQUIRED:
     } else if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         println!("Using Anthropic to generate recipe...");
 
-        let client = AnthropicClient::new(api_key)?
-            .temperature(0.2)
-            .max_retries(5);
+        let client = AnthropicClient::new(api_key)?.temperature(0.2);
 
         let recipe: Recipe = client.materialize(prompt).await?;
 
