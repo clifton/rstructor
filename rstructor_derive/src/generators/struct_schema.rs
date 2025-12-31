@@ -21,56 +21,20 @@ pub fn generate_struct_schema(
     match &data_struct.fields {
         Fields::Named(fields) => {
             for field in &fields.named {
+                // Parse field attributes first to check for serde rename
+                let attrs = parse_field_attributes(field);
+
                 let original_field_name = field.ident.as_ref().unwrap().to_string();
-                let field_name = if let Some(rename_all) = &container_attrs.serde_rename_all {
+                // Priority: 1) field-level #[serde(rename)], 2) container #[serde(rename_all)], 3) original name
+                let field_name = if let Some(ref rename) = attrs.serde_rename {
+                    rename.clone()
+                } else if let Some(rename_all) = &container_attrs.serde_rename_all {
                     // Apply the serde rename_all transformation
-                    match rename_all.as_str() {
-                        "lowercase" => original_field_name.to_lowercase(),
-                        "UPPERCASE" => original_field_name.to_uppercase(),
-                        "camelCase" => {
-                            // Convert snake_case to camelCase
-                            let parts: Vec<&str> = original_field_name.split('_').collect();
-                            if parts.is_empty() {
-                                original_field_name
-                            } else {
-                                let mut result = parts[0].to_string();
-                                for part in &parts[1..] {
-                                    if !part.is_empty() {
-                                        let mut chars = part.chars();
-                                        if let Some(first) = chars.next() {
-                                            result.push(first.to_ascii_uppercase());
-                                            result.extend(chars);
-                                        }
-                                    }
-                                }
-                                result
-                            }
-                        }
-                        "PascalCase" => {
-                            // Convert snake_case to PascalCase
-                            let parts: Vec<&str> = original_field_name.split('_').collect();
-                            let mut result = String::new();
-                            for part in parts {
-                                if !part.is_empty() {
-                                    let mut chars = part.chars();
-                                    if let Some(first) = chars.next() {
-                                        result.push(first.to_ascii_uppercase());
-                                        result.extend(chars);
-                                    }
-                                }
-                            }
-                            result
-                        }
-                        "snake_case" => original_field_name,
-                        _ => original_field_name,
-                    }
+                    apply_rename_all(&original_field_name, rename_all)
                 } else {
                     original_field_name
                 };
                 let is_optional = is_option_type(&field.ty);
-
-                // Parse field attributes
-                let attrs = parse_field_attributes(field);
 
                 // Get schema type
                 let schema_type = get_schema_type_from_rust_type(&field.ty);
@@ -367,4 +331,85 @@ pub fn generate_struct_schema(
             }
         }
     }
+}
+
+/// Apply serde rename_all transformation to a field/variant name
+pub fn apply_rename_all(name: &str, rename_all: &str) -> String {
+    match rename_all {
+        "lowercase" => name.to_lowercase(),
+        "UPPERCASE" => name.to_uppercase(),
+        "camelCase" => {
+            // Convert snake_case to camelCase, or PascalCase to camelCase
+            if name.contains('_') {
+                // snake_case input
+                let parts: Vec<&str> = name.split('_').collect();
+                if parts.is_empty() {
+                    name.to_string()
+                } else {
+                    let mut result = parts[0].to_lowercase();
+                    for part in &parts[1..] {
+                        if !part.is_empty() {
+                            let mut chars = part.chars();
+                            if let Some(first) = chars.next() {
+                                result.push(first.to_ascii_uppercase());
+                                result.extend(chars.map(|c| c.to_ascii_lowercase()));
+                            }
+                        }
+                    }
+                    result
+                }
+            } else {
+                // PascalCase input - just lowercase the first char
+                let mut chars = name.chars();
+                match chars.next() {
+                    Some(first) => first.to_ascii_lowercase().to_string() + chars.as_str(),
+                    None => name.to_string(),
+                }
+            }
+        }
+        "PascalCase" => {
+            // Convert snake_case to PascalCase
+            let parts: Vec<&str> = name.split('_').collect();
+            let mut result = String::new();
+            for part in parts {
+                if !part.is_empty() {
+                    let mut chars = part.chars();
+                    if let Some(first) = chars.next() {
+                        result.push(first.to_ascii_uppercase());
+                        result.extend(chars);
+                    }
+                }
+            }
+            result
+        }
+        "snake_case" => {
+            // Convert PascalCase/camelCase to snake_case
+            pascal_to_snake_case(name)
+        }
+        "SCREAMING_SNAKE_CASE" => {
+            // Convert to SCREAMING_SNAKE_CASE
+            pascal_to_snake_case(name).to_uppercase()
+        }
+        "kebab-case" => {
+            // Convert to kebab-case
+            pascal_to_snake_case(name).replace('_', "-")
+        }
+        "SCREAMING-KEBAB-CASE" => {
+            // Convert to SCREAMING-KEBAB-CASE
+            pascal_to_snake_case(name).to_uppercase().replace('_', "-")
+        }
+        _ => name.to_string(),
+    }
+}
+
+/// Convert PascalCase or camelCase to snake_case
+fn pascal_to_snake_case(name: &str) -> String {
+    let mut result = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            result.push('_');
+        }
+        result.push(c.to_ascii_lowercase());
+    }
+    result
 }

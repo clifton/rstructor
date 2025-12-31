@@ -3,6 +3,7 @@ use quote::quote;
 use syn::{DataEnum, Fields, Ident, Type};
 
 use crate::container_attrs::ContainerAttributes;
+use crate::generators::struct_schema::apply_rename_all;
 use crate::parsers::field_parser::parse_field_attributes;
 use crate::parsers::variant_parser::parse_variant_attributes;
 use crate::type_utils::{
@@ -33,11 +34,22 @@ fn generate_simple_enum_schema(
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
 ) -> TokenStream {
-    // Generate implementation for simple enum
+    // Generate implementation for simple enum with serde rename support
     let variant_values: Vec<_> = data_enum
         .variants
         .iter()
-        .map(|v| v.ident.to_string())
+        .map(|v| {
+            let attrs = parse_variant_attributes(v);
+            let original_name = v.ident.to_string();
+            // Priority: 1) variant #[serde(rename)], 2) container #[serde(rename_all)], 3) original name
+            if let Some(ref rename) = attrs.serde_rename {
+                rename.clone()
+            } else if let Some(ref rename_all) = container_attrs.serde_rename_all {
+                apply_rename_all(&original_name, rename_all)
+            } else {
+                original_name
+            }
+        })
         .collect();
 
     // Handle container attributes
@@ -115,10 +127,19 @@ fn generate_complex_enum_schema(
 
     // Process each variant
     for variant in &data_enum.variants {
-        let variant_name = variant.ident.to_string();
-
-        // Get description from variant attributes if available
+        // Get description and rename from variant attributes
         let attrs = parse_variant_attributes(variant);
+
+        let original_variant_name = variant.ident.to_string();
+        // Priority: 1) variant #[serde(rename)], 2) container #[serde(rename_all)], 3) original name
+        let variant_name = if let Some(ref rename) = attrs.serde_rename {
+            rename.clone()
+        } else if let Some(ref rename_all) = container_attrs.serde_rename_all {
+            apply_rename_all(&original_variant_name, rename_all)
+        } else {
+            original_variant_name.clone()
+        };
+
         let description = attrs
             .description
             .unwrap_or_else(|| format!("Variant {}", variant_name));
@@ -222,9 +243,17 @@ fn generate_complex_enum_schema(
                 let mut required_fields = Vec::new();
 
                 for field in &fields.named {
-                    if let Some(field_name) = &field.ident {
-                        let field_name_str = field_name.to_string();
+                    if let Some(field_ident) = &field.ident {
+                        let original_field_name = field_ident.to_string();
                         let field_attrs = parse_field_attributes(field);
+
+                        // Apply serde rename if present
+                        let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
+                            rename.clone()
+                        } else {
+                            original_field_name.clone()
+                        };
+
                         let field_desc = field_attrs
                             .description
                             .unwrap_or_else(|| format!("Field {}", field_name_str));
