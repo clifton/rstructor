@@ -185,27 +185,263 @@ pub fn prepare_gemini_schema(schema: &crate::schema::Schema) -> Value {
 
 /// Recursively removes keywords unsupported by Gemini's structured outputs.
 fn strip_gemini_unsupported_keywords(schema: &mut Value) {
+    // First, resolve any $ref references by inlining definitions
+    resolve_refs_for_gemini(schema);
+
+    strip_gemini_unsupported_keywords_recursive(schema);
+}
+
+/// Resolves $ref references by inlining definitions for Gemini compatibility.
+/// This handles recursive schemas by inlining to a limited depth.
+fn resolve_refs_for_gemini(schema: &mut Value) {
+    // Extract $defs if present
+    let defs = if let Some(obj) = schema.as_object_mut() {
+        obj.remove("$defs").or_else(|| obj.remove("definitions"))
+    } else {
+        None
+    };
+
+    if let Some(defs) = defs {
+        // If schema has $ref at root, replace with the referenced definition
+        if let Some(obj) = schema.as_object_mut()
+            && let Some(ref_value) = obj.remove("$ref")
+            && let Some(ref_str) = ref_value.as_str()
+            && let Some(def_name) = ref_str
+                .strip_prefix("#/$defs/")
+                .or_else(|| ref_str.strip_prefix("#/definitions/"))
+            && let Some(defs_obj) = defs.as_object()
+            && let Some(definition) = defs_obj.get(def_name)
+        {
+            // Replace schema with the definition
+            *schema = definition.clone();
+
+            // Recursively inline refs in the new schema (with depth limit)
+            inline_refs_recursive(schema, &defs, 3);
+        }
+    }
+}
+
+/// Recursively inlines $ref references with a depth limit to prevent infinite recursion.
+fn inline_refs_recursive(schema: &mut Value, defs: &Value, depth: usize) {
+    if depth == 0 {
+        // At max depth, replace self-references with a simple object schema
+        if let Some(obj) = schema.as_object_mut()
+            && obj.contains_key("$ref")
+        {
+            obj.remove("$ref");
+            obj.insert("type".to_string(), Value::String("object".to_string()));
+            obj.insert(
+                "description".to_string(),
+                Value::String("Recursive reference (depth limit reached)".to_string()),
+            );
+        }
+        return;
+    }
+
+    if let Some(obj) = schema.as_object_mut() {
+        // Replace $ref with inline definition
+        if let Some(ref_value) = obj.remove("$ref")
+            && let Some(ref_str) = ref_value.as_str()
+            && let Some(def_name) = ref_str
+                .strip_prefix("#/$defs/")
+                .or_else(|| ref_str.strip_prefix("#/definitions/"))
+            && let Some(defs_obj) = defs.as_object()
+            && let Some(definition) = defs_obj.get(def_name)
+        {
+            // Replace with inline definition
+            *schema = definition.clone();
+            // Continue recursively with reduced depth
+            inline_refs_recursive(schema, defs, depth - 1);
+            return;
+        }
+
+        // Process nested schemas
+        if let Some(properties) = obj.get_mut("properties")
+            && let Some(props_obj) = properties.as_object_mut()
+        {
+            for prop_schema in props_obj.values_mut() {
+                inline_refs_recursive(prop_schema, defs, depth);
+            }
+        }
+
+        if let Some(items) = obj.get_mut("items") {
+            inline_refs_recursive(items, defs, depth);
+        }
+
+        if let Some(prefix_items) = obj.get_mut("prefixItems")
+            && let Some(arr) = prefix_items.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                inline_refs_recursive(item, defs, depth);
+            }
+        }
+
+        if let Some(one_of) = obj.get_mut("oneOf")
+            && let Some(arr) = one_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                inline_refs_recursive(item, defs, depth);
+            }
+        }
+
+        if let Some(any_of) = obj.get_mut("anyOf")
+            && let Some(arr) = any_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                inline_refs_recursive(item, defs, depth);
+            }
+        }
+
+        if let Some(all_of) = obj.get_mut("allOf")
+            && let Some(arr) = all_of.as_array_mut()
+        {
+            for item in arr.iter_mut() {
+                inline_refs_recursive(item, defs, depth);
+            }
+        }
+
+        // Handle additionalProperties if it's a schema object (for maps)
+        if let Some(additional) = obj.get_mut("additionalProperties")
+            && additional.is_object()
+        {
+            inline_refs_recursive(additional, defs, depth);
+        }
+    }
+}
+
+/// Internal function that strips unsupported keywords after refs are resolved.
+fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
     if let Some(obj) = schema.as_object_mut() {
         // Remove unsupported keywords
         obj.remove("examples");
-        obj.remove("additionalProperties");
         obj.remove("title");
         obj.remove("$schema");
         obj.remove("$id");
         obj.remove("default");
+        obj.remove("$defs");
+        obj.remove("definitions");
+        obj.remove("$ref"); // Should be resolved by now, but remove if any remain
+
+        // Handle additionalProperties: remove if boolean, keep if it's a schema for maps
+        if let Some(additional) = obj.get("additionalProperties")
+            && additional.is_boolean()
+        {
+            obj.remove("additionalProperties");
+        }
+
+        // For object types with additionalProperties but no properties, this is a Map type
+        // Gemini requires properties to be non-empty for object types
+        // Since Gemini doesn't support map types natively, we remove type constraint
+        // and add a description. The response won't be strictly validated but should
+        // parse correctly.
+        let is_object = obj.get("type").and_then(|t| t.as_str()) == Some("object");
+        let has_properties = obj.contains_key("properties");
+        let has_additional_props = obj.contains_key("additionalProperties");
+
+        if is_object && !has_properties && has_additional_props {
+            // This is a map type - Gemini doesn't support this natively
+            // We need to generate a workaround schema that Gemini can understand
+            let additional = obj.remove("additionalProperties");
+
+            // Get existing description if any
+            let existing_desc = obj
+                .get("description")
+                .and_then(|d| d.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+
+            // For Gemini, we'll define a few placeholder property keys that represent
+            // the expected dynamic key structure. This is a workaround since Gemini
+            // requires properties to be defined.
+            let value_schema = additional.unwrap_or(serde_json::json!({}));
+
+            // Create placeholder properties with the value schema
+            // Using generic key names that indicate these are examples
+            let mut placeholder_props = serde_json::Map::new();
+            placeholder_props.insert("key1".to_string(), value_schema.clone());
+            placeholder_props.insert("key2".to_string(), value_schema.clone());
+            placeholder_props.insert("key3".to_string(), value_schema);
+
+            obj.insert("properties".to_string(), Value::Object(placeholder_props));
+
+            // Update description to explain this is a map with any keys
+            let map_desc = if existing_desc.is_empty() {
+                "Object with any string keys (key1, key2, key3 are examples - use actual meaningful key names)".to_string()
+            } else {
+                format!(
+                    "{} (key1, key2, key3 are example keys - use actual meaningful key names)",
+                    existing_desc
+                )
+            };
+            obj.insert("description".to_string(), Value::String(map_desc));
+        }
 
         // Recursively process nested schemas
         if let Some(properties) = obj.get_mut("properties")
             && let Some(props_obj) = properties.as_object_mut()
         {
-            for (_key, prop_schema) in props_obj.iter_mut() {
-                strip_gemini_unsupported_keywords(prop_schema);
+            for prop_schema in props_obj.values_mut() {
+                strip_gemini_unsupported_keywords_recursive(prop_schema);
             }
         }
 
         // Process 'items' for arrays
         if let Some(items) = obj.get_mut("items") {
-            strip_gemini_unsupported_keywords(items);
+            strip_gemini_unsupported_keywords_recursive(items);
+        }
+
+        // Handle tuples (prefixItems) - Gemini doesn't support prefixItems
+        // Convert to a regular array with oneOf for the item types
+        if let Some(prefix_items) = obj.remove("prefixItems")
+            && let Some(arr) = prefix_items.as_array()
+        {
+            // Recursively process each item schema
+            let mut processed_items: Vec<Value> = arr
+                .iter()
+                .map(|item| {
+                    let mut item_clone = item.clone();
+                    strip_gemini_unsupported_keywords_recursive(&mut item_clone);
+                    item_clone
+                })
+                .collect();
+
+            // Remove duplicates for cleaner schema
+            processed_items.dedup();
+
+            // If all items are the same type, use single items schema
+            if processed_items.len() == 1 {
+                obj.insert(
+                    "items".to_string(),
+                    processed_items.into_iter().next().unwrap(),
+                );
+            } else {
+                // Use anyOf for mixed types
+                obj.insert(
+                    "items".to_string(),
+                    serde_json::json!({
+                        "anyOf": processed_items
+                    }),
+                );
+            }
+
+            // Remove minItems/maxItems since they're not strictly enforced without prefixItems
+            obj.remove("minItems");
+            obj.remove("maxItems");
+
+            // Add description about tuple structure
+            let existing_desc = obj
+                .get("description")
+                .and_then(|d| d.as_str())
+                .map(|s| format!("{}. ", s))
+                .unwrap_or_default();
+            let tuple_len = arr.len();
+            obj.insert(
+                "description".to_string(),
+                Value::String(format!(
+                    "{}Fixed-length array (tuple) with {} elements",
+                    existing_desc, tuple_len
+                )),
+            );
         }
 
         // Process 'allOf' array
@@ -213,7 +449,7 @@ fn strip_gemini_unsupported_keywords(schema: &mut Value) {
             && let Some(arr) = all_of.as_array_mut()
         {
             for item in arr.iter_mut() {
-                strip_gemini_unsupported_keywords(item);
+                strip_gemini_unsupported_keywords_recursive(item);
             }
         }
 
@@ -222,7 +458,7 @@ fn strip_gemini_unsupported_keywords(schema: &mut Value) {
             && let Some(arr) = any_of.as_array_mut()
         {
             for item in arr.iter_mut() {
-                strip_gemini_unsupported_keywords(item);
+                strip_gemini_unsupported_keywords_recursive(item);
             }
         }
 
@@ -231,25 +467,15 @@ fn strip_gemini_unsupported_keywords(schema: &mut Value) {
             && let Some(arr) = one_of.as_array_mut()
         {
             for item in arr.iter_mut() {
-                strip_gemini_unsupported_keywords(item);
+                strip_gemini_unsupported_keywords_recursive(item);
             }
         }
 
-        // Process 'definitions' / '$defs'
-        if let Some(definitions) = obj.get_mut("definitions")
-            && let Some(defs_obj) = definitions.as_object_mut()
+        // Handle additionalProperties if it's a schema object (for maps) - recurse into it
+        if let Some(additional) = obj.get_mut("additionalProperties")
+            && additional.is_object()
         {
-            for (_key, def_schema) in defs_obj.iter_mut() {
-                strip_gemini_unsupported_keywords(def_schema);
-            }
-        }
-
-        if let Some(defs) = obj.get_mut("$defs")
-            && let Some(defs_obj) = defs.as_object_mut()
-        {
-            for (_key, def_schema) in defs_obj.iter_mut() {
-                strip_gemini_unsupported_keywords(def_schema);
-            }
+            strip_gemini_unsupported_keywords_recursive(additional);
         }
     }
 }

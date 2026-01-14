@@ -207,6 +207,9 @@ fn extract_container_attributes(attrs: &[syn::Attribute]) -> ContainerAttributes
     let mut examples = Vec::new();
     let mut serde_rename_all = None;
     let mut validate = None;
+    let mut serde_tag = None;
+    let mut serde_content = None;
+    let mut serde_untagged = false;
 
     // First, check for llm-specific attributes
     for attr in attrs {
@@ -264,11 +267,30 @@ fn extract_container_attributes(attrs: &[syn::Attribute]) -> ContainerAttributes
                     let value = meta.value()?;
                     let content: syn::LitStr = value.parse()?;
                     serde_rename_all = Some(content.value());
+                } else if meta.path.is_ident("tag") {
+                    let value = meta.value()?;
+                    let content: syn::LitStr = value.parse()?;
+                    serde_tag = Some(content.value());
+                } else if meta.path.is_ident("content") {
+                    let value = meta.value()?;
+                    let content: syn::LitStr = value.parse()?;
+                    serde_content = Some(content.value());
+                } else if meta.path.is_ident("untagged") {
+                    serde_untagged = true;
                 }
                 Ok(())
             });
         }
     }
 
-    ContainerAttributes::new(description, title, examples, serde_rename_all, validate)
+    ContainerAttributes::builder()
+        .description(description)
+        .title(title)
+        .examples(examples)
+        .serde_rename_all(serde_rename_all)
+        .validate(validate)
+        .serde_tag(serde_tag)
+        .serde_content(serde_content)
+        .serde_untagged(serde_untagged)
+        .build()
 }

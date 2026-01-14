@@ -5,8 +5,9 @@ use syn::{DataStruct, Fields, Ident, Type};
 use crate::container_attrs::ContainerAttributes;
 use crate::parsers::field_parser::parse_field_attributes;
 use crate::type_utils::{
-    get_array_inner_type, get_option_inner_type, get_schema_type_from_rust_type, is_array_type,
-    is_option_type,
+    get_array_inner_type, get_box_inner_type, get_map_types, get_option_inner_type,
+    get_schema_type_from_rust_type, get_tuple_element_types, is_array_type, is_box_type,
+    is_json_value_type, is_map_type, is_option_type, is_self_reference, is_tuple_type,
 };
 
 /// Generate the schema implementation for a struct
@@ -17,9 +18,19 @@ pub fn generate_struct_schema(
 ) -> TokenStream {
     let mut property_setters = Vec::new();
     let mut required_setters = Vec::new();
+    let mut has_self_reference = false;
+    let struct_name_str = name.to_string();
 
     match &data_struct.fields {
         Fields::Named(fields) => {
+            // First pass: check for self-references
+            for field in &fields.named {
+                if is_self_reference(&field.ty, &struct_name_str) {
+                    has_self_reference = true;
+                    break;
+                }
+            }
+
             for field in &fields.named {
                 // Parse field attributes first to check for serde rename
                 let attrs = parse_field_attributes(field);
@@ -80,9 +91,17 @@ pub fn generate_struct_schema(
                         props.insert("description".to_string(),
                                     ::serde_json::Value::String("UUID identifier string".to_string()));
                     }
-                } else if is_array_type(&field.ty) {
-                    // For array types, we need to add the 'items' property
-                    if let Some(inner_type) = get_array_inner_type(&field.ty) {
+                } else if is_array_type(&field.ty)
+                    || (is_optional && is_array_type(get_option_inner_type(&field.ty)))
+                {
+                    // For array types (including Option<Vec<T>>), we need to add the 'items' property
+                    let actual_array_type =
+                        if is_optional && is_array_type(get_option_inner_type(&field.ty)) {
+                            get_option_inner_type(&field.ty)
+                        } else {
+                            &field.ty
+                        };
+                    if let Some(inner_type) = get_array_inner_type(actual_array_type) {
                         // Get the inner schema type
                         let inner_schema_type = get_schema_type_from_rust_type(inner_type);
 
@@ -141,19 +160,35 @@ pub fn generate_struct_schema(
                                 props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
                             }
                         } else if inner_schema_type == "object" {
-                            // For arrays of nested structs, embed the inner type's schema directly
-                            // This requires the inner type to implement SchemaType
-                            quote! {
-                                // Create property for this array field with nested struct items
-                                let mut props = ::serde_json::Map::new();
-                                props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
+                            // Check if this is a self-reference (recursive type)
+                            let struct_name_str = name.to_string();
+                            if is_self_reference(inner_type, &struct_name_str) {
+                                // For self-referential types, use $ref to prevent infinite recursion
+                                quote! {
+                                    // Create property for this array field with recursive reference
+                                    let mut props = ::serde_json::Map::new();
+                                    props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
 
-                                // Get the inner type's schema directly
-                                // This embeds the full schema with properties at compile time
-                                let inner_schema = <#inner_type as ::rstructor::schema::SchemaType>::schema();
-                                let items_schema = inner_schema.to_json();
+                                    // Use $ref for recursive type
+                                    let mut items_schema = ::serde_json::Map::new();
+                                    items_schema.insert("$ref".to_string(), ::serde_json::Value::String(format!("#/$defs/{}", #struct_name_str)));
+                                    props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
+                                }
+                            } else {
+                                // For arrays of nested structs, embed the inner type's schema directly
+                                // This requires the inner type to implement SchemaType
+                                quote! {
+                                    // Create property for this array field with nested struct items
+                                    let mut props = ::serde_json::Map::new();
+                                    props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
 
-                                props.insert("items".to_string(), items_schema);
+                                    // Get the inner type's schema directly
+                                    // This embeds the full schema with properties at compile time
+                                    let inner_schema = <#inner_type as ::rstructor::schema::SchemaType>::schema();
+                                    let items_schema = inner_schema.to_json();
+
+                                    props.insert("items".to_string(), items_schema);
+                                }
                             }
                         } else {
                             // Standard handling for primitive types
@@ -179,6 +214,121 @@ pub fn generate_struct_schema(
                             let mut items_schema = ::serde_json::Map::new();
                             items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
                             props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
+                        }
+                    }
+                } else if is_json_value_type(&field.ty)
+                    || (is_optional && is_json_value_type(get_option_inner_type(&field.ty)))
+                {
+                    // For serde_json::Value, use an empty schema (any JSON is valid)
+                    quote! {
+                        let mut props = ::serde_json::Map::new();
+                        // Empty object schema means any JSON value is accepted
+                    }
+                } else if is_map_type(&field.ty)
+                    || (is_optional && is_map_type(get_option_inner_type(&field.ty)))
+                {
+                    // For HashMap<K, V> or BTreeMap<K, V>
+                    let actual_type = if is_optional {
+                        get_option_inner_type(&field.ty)
+                    } else {
+                        &field.ty
+                    };
+                    if let Some((_key_ty, val_ty)) = get_map_types(actual_type) {
+                        // Use SchemaType::schema() for all value types to get complete schema
+                        // This ensures arrays get proper `items`, objects get properties, etc.
+                        quote! {
+                            let mut props = ::serde_json::Map::new();
+                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                            let value_schema = <#val_ty as ::rstructor::schema::SchemaType>::schema();
+                            props.insert("additionalProperties".to_string(), value_schema.to_json());
+                        }
+                    } else {
+                        // Fallback for map without detectable types
+                        quote! {
+                            let mut props = ::serde_json::Map::new();
+                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                        }
+                    }
+                } else if is_box_type(&field.ty)
+                    || (is_optional && is_box_type(get_option_inner_type(&field.ty)))
+                {
+                    // For Box<T>, unwrap and use the inner type's schema
+                    let actual_type = if is_optional {
+                        get_option_inner_type(&field.ty)
+                    } else {
+                        &field.ty
+                    };
+                    if let Some(inner_ty) = get_box_inner_type(actual_type) {
+                        let inner_schema_type = get_schema_type_from_rust_type(inner_ty);
+                        if inner_schema_type == "object" {
+                            // Inner type is a complex type, use its schema
+                            quote! {
+                                let nested_schema = <#inner_ty as ::rstructor::schema::SchemaType>::schema();
+                                let props_json = nested_schema.to_json();
+                                let mut props = if let ::serde_json::Value::Object(m) = props_json {
+                                    m
+                                } else {
+                                    let mut m = ::serde_json::Map::new();
+                                    m.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                                    m
+                                };
+                            }
+                        } else {
+                            // Inner type is a primitive
+                            quote! {
+                                let mut props = ::serde_json::Map::new();
+                                props.insert("type".to_string(), ::serde_json::Value::String(#inner_schema_type.to_string()));
+                            }
+                        }
+                    } else {
+                        // Fallback
+                        quote! {
+                            let mut props = ::serde_json::Map::new();
+                            props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                        }
+                    }
+                } else if is_tuple_type(&field.ty)
+                    || (is_optional && is_tuple_type(get_option_inner_type(&field.ty)))
+                {
+                    // For tuples, generate array with prefixItems
+                    let actual_type = if is_optional {
+                        get_option_inner_type(&field.ty)
+                    } else {
+                        &field.ty
+                    };
+                    if let Some(element_types) = get_tuple_element_types(actual_type) {
+                        let element_count = element_types.len();
+                        // Generate schema for each element
+                        let element_schemas: Vec<TokenStream> = element_types
+                            .iter()
+                            .map(|elem_ty| {
+                                let elem_schema_type = get_schema_type_from_rust_type(elem_ty);
+                                if elem_schema_type == "object" {
+                                    quote! {
+                                        <#elem_ty as ::rstructor::schema::SchemaType>::schema().to_json()
+                                    }
+                                } else {
+                                    quote! {
+                                        ::serde_json::json!({"type": #elem_schema_type})
+                                    }
+                                }
+                            })
+                            .collect();
+                        quote! {
+                            let mut props = ::serde_json::Map::new();
+                            props.insert("type".to_string(), ::serde_json::Value::String("array".to_string()));
+                            let prefix_items = vec![
+                                #(#element_schemas),*
+                            ];
+                            props.insert("prefixItems".to_string(), ::serde_json::Value::Array(prefix_items));
+                            props.insert("minItems".to_string(), ::serde_json::Value::Number(::serde_json::Number::from(#element_count)));
+                            props.insert("maxItems".to_string(), ::serde_json::Value::Number(::serde_json::Number::from(#element_count)));
+                        }
+                    } else {
+                        // Fallback for tuple without detectable elements
+                        quote! {
+                            let mut props = ::serde_json::Map::new();
+                            props.insert("type".to_string(), ::serde_json::Value::String("array".to_string()));
                         }
                     }
                 } else if type_name.is_some() && schema_type == "object" {
@@ -301,33 +451,74 @@ pub fn generate_struct_schema(
         quote! {}
     };
 
-    // Generate implementation
-    quote! {
-        impl ::rstructor::schema::SchemaType for #name {
-            fn schema() -> ::rstructor::schema::Schema {
-                // Create base schema object
-                let mut schema_obj = ::serde_json::json!({
-                    "type": "object",
-                    "title": stringify!(#name),
-                    "properties": {}
-                });
+    // Generate implementation with $defs support for recursive types
+    if has_self_reference {
+        quote! {
+            impl ::rstructor::schema::SchemaType for #name {
+                fn schema() -> ::rstructor::schema::Schema {
+                    // Create base schema object (properties will be added to $defs)
+                    let mut schema_obj = ::serde_json::json!({
+                        "type": "object",
+                        "title": stringify!(#name),
+                        "properties": {}
+                    });
 
-                // Add container attributes if available
-                #container_setter
+                    // Add container attributes if available
+                    #container_setter
 
-                // Fill properties
-                #(#property_setters)*
+                    // Fill properties
+                    #(#property_setters)*
 
-                // Add required fields
-                let mut required = Vec::new();
-                #(#required_setters)*
-                schema_obj["required"] = ::serde_json::Value::Array(required);
+                    // Add required fields
+                    let mut required = Vec::new();
+                    #(#required_setters)*
+                    schema_obj["required"] = ::serde_json::Value::Array(required);
 
-                ::rstructor::schema::Schema::new(schema_obj)
+                    // Create root schema with $defs for recursive types
+                    let struct_name = stringify!(#name);
+                    let root_schema = ::serde_json::json!({
+                        "$defs": {
+                            struct_name: schema_obj
+                        },
+                        "$ref": format!("#/$defs/{}", struct_name)
+                    });
+
+                    ::rstructor::schema::Schema::new(root_schema)
+                }
+
+                fn schema_name() -> Option<String> {
+                    Some(stringify!(#name).to_string())
+                }
             }
+        }
+    } else {
+        quote! {
+            impl ::rstructor::schema::SchemaType for #name {
+                fn schema() -> ::rstructor::schema::Schema {
+                    // Create base schema object
+                    let mut schema_obj = ::serde_json::json!({
+                        "type": "object",
+                        "title": stringify!(#name),
+                        "properties": {}
+                    });
 
-            fn schema_name() -> Option<String> {
-                Some(stringify!(#name).to_string())
+                    // Add container attributes if available
+                    #container_setter
+
+                    // Fill properties
+                    #(#property_setters)*
+
+                    // Add required fields
+                    let mut required = Vec::new();
+                    #(#required_setters)*
+                    schema_obj["required"] = ::serde_json::Value::Array(required);
+
+                    ::rstructor::schema::Schema::new(schema_obj)
+                }
+
+                fn schema_name() -> Option<String> {
+                    Some(stringify!(#name).to_string())
+                }
             }
         }
     }
