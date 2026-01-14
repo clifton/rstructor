@@ -30,7 +30,10 @@ mod hashmap_tests {
     #[tokio::test]
     async fn test_gemini_hashmap_nested_vec() {
         let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
-        let client = GeminiClient::new(api_key).unwrap().temperature(0.0).model("gemini-2.5-flash-preview-09-2025");
+        let client = GeminiClient::new(api_key)
+            .unwrap()
+            .temperature(0.0)
+            .no_retries();
 
         let prompt = "Organize these items into categories: apple, hammer, banana, screwdriver, drill. Use category names like 'fruit', 'tools' as the keys.";
         let result: rstructor::Result<Inventory> = client.materialize(prompt).await;
@@ -58,7 +61,10 @@ mod hashmap_tests {
     #[tokio::test]
     async fn test_gemini_hashmap_complex_value() {
         let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
-        let client = GeminiClient::new(api_key).unwrap().temperature(0.0).model("gemini-2.5-flash-preview-09-2025");
+        let client = GeminiClient::new(api_key)
+            .unwrap()
+            .temperature(0.0)
+            .no_retries();
 
         let prompt = "Generate metadata for users. Create entries with keys 'alice' and 'bob'. Alice has score 9.5 and tags 'pro', 'admin'. Bob has score 4.0 and tag 'newbie'.";
         let result: rstructor::Result<ComplexMap> = client.materialize(prompt).await;

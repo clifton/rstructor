@@ -139,12 +139,7 @@ fn generate_complex_enum_schema(
             );
         } else {
             // Internal tagging: #[serde(tag = "...")]
-            return generate_internally_tagged_enum_schema(
-                name,
-                data_enum,
-                container_attrs,
-                tag,
-            );
+            return generate_internally_tagged_enum_schema(name, data_enum, container_attrs, tag);
         }
     }
 
@@ -449,75 +444,78 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
 
     // Handle HashMap/BTreeMap
     if is_map_type(actual_type)
-        && let Some((_key_ty, val_ty)) = get_map_types(actual_type) {
-            let val_schema_type = get_schema_type_from_rust_type(val_ty);
-            if val_schema_type == "object" {
-                return quote! {
-                    {
-                        let mut schema = ::serde_json::json!({
-                            "type": "object",
-                            #desc_prop
-                        });
-                        let value_schema = <#val_ty as ::rstructor::schema::SchemaType>::schema();
-                        if let ::serde_json::Value::Object(map) = &mut schema {
-                            map.insert("additionalProperties".to_string(), value_schema.to_json());
-                        }
-                        schema
-                    }
-                };
-            } else {
-                return quote! {
-                    ::serde_json::json!({
+        && let Some((_key_ty, val_ty)) = get_map_types(actual_type)
+    {
+        let val_schema_type = get_schema_type_from_rust_type(val_ty);
+        if val_schema_type == "object" {
+            return quote! {
+                {
+                    let mut schema = ::serde_json::json!({
                         "type": "object",
                         #desc_prop
-                        "additionalProperties": {
-                            "type": #val_schema_type
-                        }
-                    })
-                };
-            }
+                    });
+                    let value_schema = <#val_ty as ::rstructor::schema::SchemaType>::schema();
+                    if let ::serde_json::Value::Object(map) = &mut schema {
+                        map.insert("additionalProperties".to_string(), value_schema.to_json());
+                    }
+                    schema
+                }
+            };
+        } else {
+            return quote! {
+                ::serde_json::json!({
+                    "type": "object",
+                    #desc_prop
+                    "additionalProperties": {
+                        "type": #val_schema_type
+                    }
+                })
+            };
         }
+    }
 
     // Handle Box<T>
     if is_box_type(actual_type)
-        && let Some(inner_ty) = get_box_inner_type(actual_type) {
-            return generate_field_schema(inner_ty, description);
-        }
+        && let Some(inner_ty) = get_box_inner_type(actual_type)
+    {
+        return generate_field_schema(inner_ty, description);
+    }
 
     // Handle tuples
     if is_tuple_type(actual_type)
-        && let Some(element_types) = get_tuple_element_types(actual_type) {
-            let element_count = element_types.len();
-            let element_schemas: Vec<TokenStream> = element_types
-                .iter()
-                .map(|elem_ty| {
-                    let elem_schema_type = get_schema_type_from_rust_type(elem_ty);
-                    if elem_schema_type == "object" {
-                        quote! {
-                            <#elem_ty as ::rstructor::schema::SchemaType>::schema().to_json()
-                        }
-                    } else {
-                        quote! {
-                            ::serde_json::json!({"type": #elem_schema_type})
-                        }
+        && let Some(element_types) = get_tuple_element_types(actual_type)
+    {
+        let element_count = element_types.len();
+        let element_schemas: Vec<TokenStream> = element_types
+            .iter()
+            .map(|elem_ty| {
+                let elem_schema_type = get_schema_type_from_rust_type(elem_ty);
+                if elem_schema_type == "object" {
+                    quote! {
+                        <#elem_ty as ::rstructor::schema::SchemaType>::schema().to_json()
                     }
-                })
-                .collect();
-            return quote! {
-                {
-                    let prefix_items = vec![
-                        #(#element_schemas),*
-                    ];
-                    ::serde_json::json!({
-                        "type": "array",
-                        #desc_prop
-                        "prefixItems": prefix_items,
-                        "minItems": #element_count,
-                        "maxItems": #element_count
-                    })
+                } else {
+                    quote! {
+                        ::serde_json::json!({"type": #elem_schema_type})
+                    }
                 }
-            };
-        }
+            })
+            .collect();
+        return quote! {
+            {
+                let prefix_items = vec![
+                    #(#element_schemas),*
+                ];
+                ::serde_json::json!({
+                    "type": "array",
+                    #desc_prop
+                    "prefixItems": prefix_items,
+                    "minItems": #element_count,
+                    "maxItems": #element_count
+                })
+            }
+        };
+    }
 
     // Handle array types
     if is_array_type(actual_type) {
@@ -836,6 +834,12 @@ fn generate_adjacently_tagged_enum_schema(
                     let field = fields.unnamed.first().unwrap();
                     let field_schema = generate_field_schema(&field.ty, &None);
 
+                    // Create an explicit description for single unnamed field
+                    let explicit_description = format!(
+                        "{} - MUST be an object with '{}' (set to '{}') and '{}' (the value) at the top level",
+                        description_str, tag_name_str, variant_name_str, content_name_str
+                    );
+
                     variant_schemas.push(quote! {
                         {
                             let mut schema_obj = ::serde_json::Map::new();
@@ -854,7 +858,7 @@ fn generate_adjacently_tagged_enum_schema(
                                 ::serde_json::Value::String(#content_name_str.to_string())
                             ];
                             schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
-                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#explicit_description.to_string()));
                             schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
 
                             ::serde_json::Value::Object(schema_obj)
@@ -868,6 +872,16 @@ fn generate_adjacently_tagged_enum_schema(
                         field_schemas.push(field_schema);
                     }
                     let field_count = fields.unnamed.len();
+
+                    // Create an explicit description for multiple unnamed fields
+                    let explicit_description = format!(
+                        "{} - MUST be an object with '{}' (set to '{}') and '{}' (array with {} elements) at the top level",
+                        description_str,
+                        tag_name_str,
+                        variant_name_str,
+                        content_name_str,
+                        field_count
+                    );
 
                     variant_schemas.push(quote! {
                         {
@@ -898,7 +912,7 @@ fn generate_adjacently_tagged_enum_schema(
                                 ::serde_json::Value::String(#content_name_str.to_string())
                             ];
                             schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
-                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#explicit_description.to_string()));
                             schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
 
                             ::serde_json::Value::Object(schema_obj)
@@ -910,6 +924,7 @@ fn generate_adjacently_tagged_enum_schema(
                 // Struct variant: {"tag": "Variant", "content": {field1: ..., field2: ...}}
                 let mut prop_setters = Vec::new();
                 let mut required_content_fields = Vec::new();
+                let mut field_names = Vec::new();
 
                 for field in &fields.named {
                     if let Some(field_ident) = &field.ident {
@@ -921,6 +936,8 @@ fn generate_adjacently_tagged_enum_schema(
                         } else {
                             original_field_name.clone()
                         };
+
+                        field_names.push(field_name_str.clone());
 
                         let field_desc = field_attrs
                             .description
@@ -949,6 +966,7 @@ fn generate_adjacently_tagged_enum_schema(
                 let description_str = description.clone();
                 let tag_name_str = tag_name.to_string();
                 let content_name_str = content_name.to_string();
+                let field_names_list = field_names.join(", ");
                 let required_content_code = if !required_content_fields.is_empty() {
                     quote! {
                         let required_content = vec![#(#required_content_fields),*];
@@ -958,18 +976,26 @@ fn generate_adjacently_tagged_enum_schema(
                     quote! {}
                 };
 
+                // Create an explicit description that emphasizes the nested structure
+                let explicit_description = if !field_names.is_empty() {
+                    format!(
+                        "{} - MUST be an object with '{}' (set to '{}') and '{}' (object with fields: {}) at the top level",
+                        description_str,
+                        tag_name_str,
+                        variant_name_str,
+                        content_name_str,
+                        field_names_list
+                    )
+                } else {
+                    description_str.clone()
+                };
+
                 variant_schemas.push(quote! {
                     {
                         let mut schema_obj = ::serde_json::Map::new();
                         schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
 
-                        let mut properties = ::serde_json::Map::new();
-                        properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
-                            "type": "string",
-                            "enum": [#variant_name_str]
-                        }));
-
-                        // Build content schema as an object
+                        // Build content schema as an object first
                         let mut content_properties = ::serde_json::Map::new();
                         #(#prop_setters)*
 
@@ -978,7 +1004,18 @@ fn generate_adjacently_tagged_enum_schema(
                         content_schema.insert("properties".to_string(), ::serde_json::Value::Object(content_properties));
                         #required_content_code
                         content_schema.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+                        // Add explicit description to content field to emphasize it's a required nested object
+                        let content_field_desc = format!("REQUIRED nested object containing fields: {}", #field_names_list);
+                        content_schema.insert("description".to_string(), ::serde_json::Value::String(content_field_desc));
 
+                        // Insert properties in order: status first, then data
+                        // This ordering may help some LLMs understand the structure better
+                        let mut properties = ::serde_json::Map::new();
+                        properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
+                            "type": "string",
+                            "enum": [#variant_name_str],
+                            "description": format!("Must be the string '{}'", #variant_name_str)
+                        }));
                         properties.insert(#content_name_str.to_string(), ::serde_json::Value::Object(content_schema));
                         schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
 
@@ -987,7 +1024,7 @@ fn generate_adjacently_tagged_enum_schema(
                             ::serde_json::Value::String(#content_name_str.to_string())
                         ];
                         schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
-                        schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                        schema_obj.insert("description".to_string(), ::serde_json::Value::String(#explicit_description.to_string()));
                         schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
 
                         ::serde_json::Value::Object(schema_obj)

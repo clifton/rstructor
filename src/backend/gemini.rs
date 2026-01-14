@@ -376,6 +376,10 @@ impl GeminiClient {
             None
         };
 
+        // Extract adjacently tagged enum info before transformation (for response conversion)
+        let adjacently_tagged_info =
+            crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
+
         // Prepare schema for Gemini by stripping unsupported keywords (examples, additionalProperties, etc.)
         let gemini_schema = crate::backend::utils::prepare_gemini_schema(&schema);
         let generation_config = GenerationConfig {
@@ -460,10 +464,22 @@ impl GeminiClient {
         debug!(parts = parts.len(), "Processing candidate content parts");
         for part in parts {
             if let Some(text) = &part.text {
-                let raw_response = text.clone();
+                let mut raw_response = text.clone();
                 debug!(content_len = raw_response.len(), "Processing text part");
                 // With native response_schema, the response is guaranteed to be valid JSON
                 trace!(json = %raw_response, "Parsing structured output response");
+
+                // Transform internally tagged enums back to adjacently tagged format if needed
+                if let Some(ref enum_info) = adjacently_tagged_info
+                    && let Ok(mut json_value) =
+                        serde_json::from_str::<serde_json::Value>(&raw_response)
+                {
+                    crate::backend::utils::transform_internally_to_adjacently_tagged(
+                        &mut json_value,
+                        enum_info,
+                    );
+                    raw_response = serde_json::to_string(&json_value).unwrap_or(raw_response);
+                }
 
                 // Parse and validate the response using shared utility
                 return parse_validate_and_create_output(raw_response, usage);

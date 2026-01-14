@@ -32,7 +32,10 @@ mod weird_types_tests {
     #[tokio::test]
     async fn test_gemini_weird_types() {
         let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
-        let client = GeminiClient::new(api_key).unwrap().temperature(0.0).model("gemini-2.5-flash-preview-09-2025");
+        let client = GeminiClient::new(api_key)
+            .unwrap()
+            .temperature(0.0)
+            .no_retries();
 
         let prompt = "Generate a WeirdStruct where point is at 10,20. User is (1, 'Admin', true). Log counts: 5 info, 2 error. Raw metadata is any JSON object.";
         let result: rstructor::Result<WeirdStruct> = client.materialize(prompt).await;

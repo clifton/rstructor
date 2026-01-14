@@ -18,3 +18,5 @@ Cargo.lock
 
 # Temporary files directory (ad-hoc scripts, temporary markdown, etc.)
 tmp/
+
+.claude/

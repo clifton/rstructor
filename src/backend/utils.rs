@@ -164,6 +164,122 @@ fn add_additional_properties_false(schema: &mut Value) {
     }
 }
 
+/// Information about adjacently tagged enum transformations for response conversion
+#[derive(Debug, Clone)]
+pub struct AdjacentlyTaggedEnumInfo {
+    pub tag_key: String,
+    pub content_key: String,
+    pub tag_values: Vec<String>,
+}
+
+/// Extract adjacently tagged enum info from a schema (before Gemini transformation)
+/// Searches recursively through the schema tree
+pub fn extract_adjacently_tagged_info(schema: &Value) -> Option<AdjacentlyTaggedEnumInfo> {
+    // First check if this level has oneOf
+    if let Some(one_of) = schema.get("oneOf").and_then(|v| v.as_array()) {
+        let mut tag_key = None;
+        let mut content_key = None;
+        let mut tag_values = Vec::new();
+
+        for variant in one_of {
+            if let Some((t, c, v)) = detect_adjacently_tagged_variant(variant) {
+                if tag_key.is_none() {
+                    tag_key = Some(t);
+                    content_key = Some(c);
+                }
+                tag_values.push(v);
+            }
+        }
+
+        if let (Some(tag), Some(content)) = (tag_key, content_key) {
+            return Some(AdjacentlyTaggedEnumInfo {
+                tag_key: tag,
+                content_key: content,
+                tag_values,
+            });
+        }
+    }
+
+    // Recursively search in properties
+    if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {
+        for (_key, prop_schema) in properties {
+            if let Some(info) = extract_adjacently_tagged_info(prop_schema) {
+                return Some(info);
+            }
+        }
+    }
+
+    // Recursively search in array items
+    if let Some(items) = schema.get("items")
+        && let Some(info) = extract_adjacently_tagged_info(items)
+    {
+        return Some(info);
+    }
+
+    // Search in allOf, anyOf, oneOf
+    for key in &["allOf", "anyOf"] {
+        if let Some(arr) = schema.get(key).and_then(|v| v.as_array()) {
+            for item in arr {
+                if let Some(info) = extract_adjacently_tagged_info(item) {
+                    return Some(info);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Transform internally tagged JSON back to adjacently tagged format
+pub fn transform_internally_to_adjacently_tagged(
+    json: &mut Value,
+    enum_info: &AdjacentlyTaggedEnumInfo,
+) {
+    match json {
+        Value::Object(obj) => {
+            // Check if this object is an internally tagged enum instance
+            if let Some(tag_value) = obj.get(&enum_info.tag_key).and_then(|v| v.as_str())
+                && enum_info.tag_values.contains(&tag_value.to_string())
+            {
+                // This is an enum instance - extract all fields except the tag
+                let mut content_fields = serde_json::Map::new();
+                let mut keys_to_move: Vec<String> = Vec::new();
+
+                for (key, _value) in obj.iter() {
+                    if key != &enum_info.tag_key {
+                        keys_to_move.push(key.clone());
+                    }
+                }
+
+                // Move fields to content (unless it's a unit variant with only tag)
+                if !keys_to_move.is_empty() {
+                    for key in &keys_to_move {
+                        if let Some(value) = obj.remove(key) {
+                            content_fields.insert(key.clone(), value);
+                        }
+                    }
+
+                    // Add content field
+                    obj.insert(enum_info.content_key.clone(), Value::Object(content_fields));
+                }
+                // For unit variants (only tag), don't add content field
+                return;
+            }
+
+            // Recursively process nested objects and arrays
+            for value in obj.values_mut() {
+                transform_internally_to_adjacently_tagged(value, enum_info);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                transform_internally_to_adjacently_tagged(item, enum_info);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Prepare a JSON schema for Gemini by stripping unsupported keywords.
 ///
 /// Gemini's structured outputs API doesn't support certain JSON Schema keywords like
@@ -309,6 +425,132 @@ fn inline_refs_recursive(schema: &mut Value, defs: &Value, depth: usize) {
     }
 }
 
+/// Detects if a oneOf variant looks like an adjacently tagged enum variant.
+/// Returns Some((tag_key, content_key, tag_value)) if it matches the pattern.
+fn detect_adjacently_tagged_variant(variant: &Value) -> Option<(String, String, String)> {
+    let obj = variant.as_object()?;
+
+    // Must be an object type
+    if obj.get("type")?.as_str()? != "object" {
+        return None;
+    }
+
+    let properties = obj.get("properties")?.as_object()?;
+    let required = obj.get("required")?.as_array()?;
+
+    // Must have exactly 2 required fields
+    if required.len() != 2 {
+        return None;
+    }
+
+    // Find the tag field (has enum with single value) and content field (is object)
+    let mut tag_key = None;
+    let mut tag_value = None;
+    let mut content_key = None;
+
+    for (key, prop) in properties.iter() {
+        if let Some(prop_obj) = prop.as_object() {
+            // Check if it's a tag field (has enum with single value)
+            if let Some(enum_array) = prop_obj.get("enum").and_then(|e| e.as_array())
+                && enum_array.len() == 1
+                && let Some(val) = enum_array[0].as_str()
+            {
+                tag_key = Some(key.clone());
+                tag_value = Some(val.to_string());
+                continue;
+            }
+
+            // Check if it's a content field (is object type)
+            if prop_obj.get("type").and_then(|t| t.as_str()) == Some("object")
+                && prop_obj.contains_key("properties")
+            {
+                content_key = Some(key.clone());
+            }
+        }
+    }
+
+    // Must have found both tag and content
+    if let (Some(tag), Some(content), Some(value)) = (tag_key, content_key, tag_value) {
+        Some((tag, content, value))
+    } else {
+        None
+    }
+}
+
+/// Transforms adjacently tagged enum variants to internally tagged format for Gemini.
+/// This is a workaround for Gemini's limitation with nested content objects.
+fn transform_adjacently_tagged_to_internally_tagged(
+    variant: &Value,
+    _tag_key: &str,
+    content_key: &str,
+    _tag_value: &str,
+) -> Value {
+    let mut obj = variant.as_object().unwrap().clone();
+
+    // Clone content properties and required fields before modifying
+    let content_props_to_add: Vec<(String, Value)>;
+    let content_required: Vec<Value>;
+
+    {
+        let properties = obj.get("properties").unwrap().as_object().unwrap();
+
+        // Get the content object properties
+        if let Some(content_obj) = properties.get(content_key).and_then(|c| c.as_object()) {
+            if let Some(content_props) = content_obj.get("properties").and_then(|p| p.as_object()) {
+                // Collect properties to add
+                content_props_to_add = content_props
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+            } else {
+                content_props_to_add = Vec::new();
+            }
+
+            // Collect required fields
+            if let Some(req) = content_obj.get("required").and_then(|r| r.as_array()) {
+                content_required = req.clone();
+            } else {
+                content_required = Vec::new();
+            }
+        } else {
+            content_props_to_add = Vec::new();
+            content_required = Vec::new();
+        }
+    }
+
+    // Now modify properties
+    if let Some(properties) = obj.get_mut("properties").and_then(|p| p.as_object_mut()) {
+        // Add flattened properties
+        for (key, value) in content_props_to_add {
+            properties.insert(key, value);
+        }
+
+        // Remove the content field itself
+        properties.remove(content_key);
+    }
+
+    // Update required array
+    if let Some(required_array) = obj.get_mut("required").and_then(|r| r.as_array_mut()) {
+        // Remove content_key from required
+        required_array.retain(|v| v.as_str() != Some(content_key));
+
+        // Add content's required fields
+        for field in content_required {
+            if !required_array.contains(&field) {
+                required_array.push(field);
+            }
+        }
+    }
+
+    // Update description to note the transformation
+    if let Some(desc) = obj.get("description").and_then(|d| d.as_str()) {
+        let new_desc = format!("{} (flattened for Gemini compatibility)", desc);
+        obj.insert("description".to_string(), Value::String(new_desc));
+    }
+
+    Value::Object(obj)
+}
+
 /// Internal function that strips unsupported keywords after refs are resolved.
 fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
     if let Some(obj) = schema.as_object_mut() {
@@ -355,22 +597,46 @@ fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
             // requires properties to be defined.
             let value_schema = additional.unwrap_or(serde_json::json!({}));
 
+            // Try to extract specific keys from description (e.g., "Keys: [info, warn, error]")
+            // This allows us to provide concrete enum variants as keys instead of generic placeholders
+            let mut keys = vec!["key1".to_string(), "key2".to_string(), "key3".to_string()];
+            if let Some(start) = existing_desc.find("Keys: [")
+                && let Some(end) = existing_desc[start..].find(']')
+            {
+                let keys_str = &existing_desc[start + 7..start + end];
+                let extracted_keys: Vec<String> = keys_str
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if !extracted_keys.is_empty() {
+                    keys = extracted_keys;
+                }
+            }
+
             // Create placeholder properties with the value schema
-            // Using generic key names that indicate these are examples
+            // Using extracted keys if available, otherwise generic key names
             let mut placeholder_props = serde_json::Map::new();
-            placeholder_props.insert("key1".to_string(), value_schema.clone());
-            placeholder_props.insert("key2".to_string(), value_schema.clone());
-            placeholder_props.insert("key3".to_string(), value_schema);
+            for key in &keys {
+                placeholder_props.insert(key.clone(), value_schema.clone());
+            }
 
             obj.insert("properties".to_string(), Value::Object(placeholder_props));
 
-            // Update description to explain this is a map with any keys
-            let map_desc = if existing_desc.is_empty() {
-                "Object with any string keys (key1, key2, key3 are examples - use actual meaningful key names)".to_string()
+            // Update description to explain this is a map with specific or example keys
+            let map_desc = if existing_desc.contains("Keys: [") {
+                // If keys were specified, keep the original description as-is
+                existing_desc
+            } else if existing_desc.is_empty() {
+                format!(
+                    "Object with any string keys ({} are examples - use actual meaningful key names)",
+                    keys.join(", ")
+                )
             } else {
                 format!(
-                    "{} (key1, key2, key3 are example keys - use actual meaningful key names)",
-                    existing_desc
+                    "{} ({} are example keys - use actual meaningful key names)",
+                    existing_desc,
+                    keys.join(", ")
                 )
             };
             obj.insert("description".to_string(), Value::String(map_desc));
@@ -466,6 +732,62 @@ fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
         if let Some(one_of) = obj.get_mut("oneOf")
             && let Some(arr) = one_of.as_array_mut()
         {
+            // First, check if this looks like an adjacently tagged enum
+            // All variants should have the same tag/content keys
+            let mut adjacently_tagged_info: Option<(String, String)> = None;
+            let mut all_adjacently_tagged = true;
+
+            for item in arr.iter() {
+                if let Some((tag_key, content_key, _tag_value)) =
+                    detect_adjacently_tagged_variant(item)
+                {
+                    if let Some((ref existing_tag, ref existing_content)) = adjacently_tagged_info {
+                        // Check if keys match
+                        if tag_key != *existing_tag || content_key != *existing_content {
+                            all_adjacently_tagged = false;
+                            break;
+                        }
+                    } else {
+                        adjacently_tagged_info = Some((tag_key, content_key));
+                    }
+                } else {
+                    // Unit variant (only tag, no content) is still okay
+                    // Check if it has just one required field with enum
+                    if let Some(variant_obj) = item.as_object()
+                        && let Some(props) =
+                            variant_obj.get("properties").and_then(|p| p.as_object())
+                        && props.len() == 1
+                        && variant_obj
+                            .get("required")
+                            .and_then(|r| r.as_array())
+                            .map(|a| a.len())
+                            == Some(1)
+                    {
+                        // This is a unit variant, keep checking
+                        continue;
+                    }
+                    all_adjacently_tagged = false;
+                    break;
+                }
+            }
+
+            // If all variants are adjacently tagged, transform them
+            if all_adjacently_tagged && adjacently_tagged_info.is_some() {
+                // Transform each variant
+                *arr = arr
+                    .iter()
+                    .map(|item| {
+                        if let Some((t, c, v)) = detect_adjacently_tagged_variant(item) {
+                            transform_adjacently_tagged_to_internally_tagged(item, &t, &c, &v)
+                        } else {
+                            // Unit variant - leave as is
+                            item.clone()
+                        }
+                    })
+                    .collect();
+            }
+
+            // Now recursively process all variants
             for item in arr.iter_mut() {
                 strip_gemini_unsupported_keywords_recursive(item);
             }

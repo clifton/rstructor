@@ -12,6 +12,7 @@ mod recursive_tests {
         #[llm(description = "If true, this is a directory and can have children")]
         is_dir: bool,
         #[llm(description = "Children nodes if this is a directory")]
+        #[allow(clippy::vec_box)]
         children: Option<Vec<Box<FileNode>>>,
         #[llm(description = "Size in bytes if this is a file")]
         size: Option<u64>,
@@ -20,7 +21,10 @@ mod recursive_tests {
     #[tokio::test]
     async fn test_gemini_recursive_schema() {
         let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
-        let client = GeminiClient::new(api_key).unwrap().temperature(0.0).model("gemini-2.5-flash-preview-09-2025");
+        let client = GeminiClient::new(api_key)
+            .unwrap()
+            .temperature(0.0)
+            .no_retries();
 
         let prompt = "Represent a small directory structure: A root folder 'src' containing a file 'lib.rs' (500 bytes) and a subfolder 'backend' which is empty.";
         let result: rstructor::Result<FileNode> = client.materialize(prompt).await;

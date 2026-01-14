@@ -233,14 +233,31 @@ pub fn generate_struct_schema(
                     } else {
                         &field.ty
                     };
-                    if let Some((_key_ty, val_ty)) = get_map_types(actual_type) {
+                    if let Some((key_ty, val_ty)) = get_map_types(actual_type) {
                         // Use SchemaType::schema() for all value types to get complete schema
                         // This ensures arrays get proper `items`, objects get properties, etc.
+                        // For enum keys, extract the enum variants and add them to description
+                        // so that Gemini can use the correct keys instead of generic placeholders
                         quote! {
                             let mut props = ::serde_json::Map::new();
                             props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
                             let value_schema = <#val_ty as ::rstructor::schema::SchemaType>::schema();
                             props.insert("additionalProperties".to_string(), value_schema.to_json());
+
+                            // Try to extract enum keys from key type schema (for enum keys)
+                            let key_schema = <#key_ty as ::rstructor::schema::SchemaType>::schema();
+                            if let Some(enum_values) = key_schema.to_json().get("enum")
+                                .and_then(|e| e.as_array())
+                            {
+                                let keys: Vec<String> = enum_values
+                                    .iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect();
+                                if !keys.is_empty() {
+                                    let keys_hint = format!("Keys: [{}]", keys.join(", "));
+                                    props.insert("description".to_string(), ::serde_json::Value::String(keys_hint));
+                                }
+                            }
                         }
                     } else {
                         // Fallback for map without detectable types
@@ -366,7 +383,16 @@ pub fn generate_struct_schema(
                 // Add description if available
                 if let Some(desc) = attrs.description {
                     let desc_prop = quote! {
-                        props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
+                        // Check if there's already a description (e.g., from enum keys hint)
+                        // If so, merge them; otherwise, use the user's description
+                        if let Some(existing_desc) = props.get("description")
+                            .and_then(|d| d.as_str())
+                        {
+                            let merged_desc = format!("{}. {}", #desc, existing_desc);
+                            props.insert("description".to_string(), ::serde_json::Value::String(merged_desc));
+                        } else {
+                            props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
+                        }
                     };
                     property_setters.push(desc_prop);
                 }
