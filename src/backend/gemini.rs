@@ -163,8 +163,17 @@ struct Content {
 }
 
 #[derive(Debug, Serialize)]
-struct Part {
-    text: String,
+#[serde(untagged)]
+enum Part {
+    Text { text: String },
+    FileData { #[serde(rename = "fileData")] file_data: FileData },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileData {
+    mime_type: String,
+    file_uri: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -355,11 +364,23 @@ impl GeminiClient {
                 } else {
                     msg.role.as_str()
                 };
+                let mut parts = Vec::new();
+                if !msg.content.is_empty() {
+                    parts.push(Part::Text {
+                        text: msg.content.clone(),
+                    });
+                }
+                for media in &msg.media {
+                    parts.push(Part::FileData {
+                        file_data: FileData {
+                            mime_type: media.mime_type.clone(),
+                            file_uri: media.uri.clone(),
+                        },
+                    });
+                }
                 Content {
                     role: Some(role.to_string()),
-                    parts: vec![Part {
-                        text: msg.content.clone(),
-                    }],
+                    parts,
                 }
             })
             .collect();
@@ -597,6 +618,28 @@ impl LLMClient for GeminiClient {
     }
 
     #[instrument(
+        name = "gemini_materialize_with_media",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media<T>(&self, prompt: &str, media: &[super::MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        // For media support, we need to create a ChatMessage with media and pass it directly
+        // We can't use generate_with_retry_with_history since it only takes a string prompt
+        let initial_message = ChatMessage::user_with_media(prompt, media.to_vec());
+        let output = self.materialize_internal::<T>(&vec![initial_message]).await
+            .map_err(|(err, _)| err)?;
+        Ok(output.data)
+    }
+
+    #[instrument(
         name = "gemini_materialize_with_metadata",
         skip(self, prompt),
         fields(
@@ -662,7 +705,7 @@ impl LLMClient for GeminiClient {
         let request = GenerateContentRequest {
             contents: vec![Content {
                 role: Some("user".to_string()),
-                parts: vec![Part {
+                parts: vec![Part::Text {
                     text: prompt.to_string(),
                 }],
             }],

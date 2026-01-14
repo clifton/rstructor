@@ -6,6 +6,23 @@ use crate::backend::usage::{GenerateResult, MaterializeResult};
 use crate::error::Result;
 use crate::model::Instructor;
 
+/// File reference for media-aware prompts (e.g., Gemini file URI + MIME type).
+#[derive(Debug, Clone)]
+pub struct MediaFile {
+    pub uri: String,
+    pub mime_type: String,
+}
+
+impl MediaFile {
+    #[must_use]
+    pub fn new(uri: impl Into<String>, mime_type: impl Into<String>) -> Self {
+        Self {
+            uri: uri.into(),
+            mime_type: mime_type.into(),
+        }
+    }
+}
+
 /// LLMClient trait defines the interface for all LLM API clients.
 ///
 /// This trait is the core abstraction for interacting with different LLM providers
@@ -125,6 +142,16 @@ pub trait LLMClient {
     async fn materialize<T>(&self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static;
+
+    /// Materialize a structured object with media references (if supported).
+    ///
+    /// Providers that do not support media inputs ignore the `media` parameter.
+    async fn materialize_with_media<T>(&self, prompt: &str, _media: &[MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        self.materialize(prompt).await
+    }
 
     /// Materialize a structured object with metadata (token usage).
     ///

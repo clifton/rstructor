@@ -12,7 +12,7 @@ pub mod grok;
 #[cfg(feature = "openai")]
 pub mod openai;
 
-pub use client::LLMClient;
+pub use client::{LLMClient, MediaFile};
 pub use messages::{ChatMessage, ChatRole, MaterializeInternalOutput, ValidationFailureContext};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
