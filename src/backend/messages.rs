@@ -3,6 +3,8 @@
 //! This module provides types for representing chat messages in a provider-agnostic way,
 //! enabling conversation history to be maintained across retry attempts for prompt caching benefits.
 
+use super::client::MediaFile;
+
 /// Role of a chat message participant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatRole {
@@ -35,6 +37,8 @@ pub struct ChatMessage {
     pub role: ChatRole,
     /// The message content
     pub content: String,
+    /// Media references attached to this message (if supported by provider)
+    pub media: Vec<MediaFile>,
 }
 
 impl ChatMessage {
@@ -43,6 +47,7 @@ impl ChatMessage {
         Self {
             role,
             content: content.into(),
+            media: Vec::new(),
         }
     }
 
@@ -58,6 +63,13 @@ impl ChatMessage {
     /// ```
     pub fn user(content: impl Into<String>) -> Self {
         Self::new(ChatRole::User, content)
+    }
+
+    /// Create a user message with attached media references.
+    pub fn user_with_media(content: impl Into<String>, media: Vec<MediaFile>) -> Self {
+        let mut msg = Self::new(ChatRole::User, content);
+        msg.media = media;
+        msg
     }
 
     /// Create an assistant message.

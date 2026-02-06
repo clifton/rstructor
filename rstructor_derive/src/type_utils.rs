@@ -213,3 +213,122 @@ pub fn is_array_type(ty: &Type) -> bool {
     }
     false
 }
+
+/// Check if a type is a HashMap or BTreeMap
+pub fn is_map_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.first()
+    {
+        let type_name = segment.ident.to_string();
+        return matches!(type_name.as_str(), "HashMap" | "BTreeMap");
+    }
+    false
+}
+
+/// Get the key and value types from a HashMap<K, V> or BTreeMap<K, V>
+pub fn get_map_types(ty: &Type) -> Option<(&Type, &Type)> {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.first()
+    {
+        let type_name = segment.ident.to_string();
+        if matches!(type_name.as_str(), "HashMap" | "BTreeMap") {
+            if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                let mut args_iter = args.args.iter();
+                if let (Some(GenericArgument::Type(key_ty)), Some(GenericArgument::Type(val_ty))) =
+                    (args_iter.next(), args_iter.next())
+                {
+                    return Some((key_ty, val_ty));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check if a type is a Box<T>
+pub fn is_box_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.first()
+    {
+        return segment.ident == "Box";
+    }
+    false
+}
+
+/// Get the inner type of a Box<T>
+pub fn get_box_inner_type(ty: &Type) -> Option<&Type> {
+    if let Type::Path(type_path) = ty
+        && let Some(segment) = type_path.path.segments.first()
+        && segment.ident == "Box"
+        && let PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
+    {
+        return Some(inner_ty);
+    }
+    None
+}
+
+/// Check if a type is serde_json::Value
+pub fn is_json_value_type(ty: &Type) -> bool {
+    if let Type::Path(type_path) = ty {
+        // Check for "Value" or "serde_json::Value"
+        let path_str = type_path
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::");
+        return path_str == "Value" || path_str == "serde_json::Value";
+    }
+    false
+}
+
+/// Check if a type is a tuple (e.g., (i32, String))
+pub fn is_tuple_type(ty: &Type) -> bool {
+    matches!(ty, Type::Tuple(_))
+}
+
+/// Get the element types of a tuple
+pub fn get_tuple_element_types(ty: &Type) -> Option<Vec<&Type>> {
+    if let Type::Tuple(tuple) = ty {
+        return Some(tuple.elems.iter().collect());
+    }
+    None
+}
+
+/// Get the final type name after unwrapping Option and Box
+/// Returns the core type name for detecting self-references
+pub fn get_core_type_name(ty: &Type) -> Option<String> {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.first() {
+            let type_name = segment.ident.to_string();
+            match type_name.as_str() {
+                "Option" | "Box" => {
+                    // Unwrap and recurse
+                    if let PathArguments::AngleBracketed(args) = &segment.arguments
+                        && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
+                    {
+                        return get_core_type_name(inner_ty);
+                    }
+                }
+                "Vec" | "Array" | "HashSet" | "BTreeSet" => {
+                    // For collections, get the inner type
+                    if let PathArguments::AngleBracketed(args) = &segment.arguments
+                        && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
+                    {
+                        return get_core_type_name(inner_ty);
+                    }
+                }
+                _ => return Some(type_name),
+            }
+        }
+    }
+    None
+}
+
+/// Check if a type is a self-reference (matches the given struct name)
+/// Unwraps Option, Box, Vec, etc. to find the core type
+pub fn is_self_reference(ty: &Type, struct_name: &str) -> bool {
+    get_core_type_name(ty).is_some_and(|name| name == struct_name)
+}

@@ -54,16 +54,14 @@ pub enum Model {
     Gemini20Flash,
     /// Gemini 2.0 Flash 001 (specific version of 2.0 Flash)
     Gemini20Flash001,
-    /// Gemini 2.0 Flash Experimental (experimental 2.0 Flash variant)
-    Gemini20FlashExp,
     /// Gemini 2.0 Flash Lite (smaller 2.0 Flash variant)
     Gemini20FlashLite,
-    /// Gemini 2.0 Pro Experimental (experimental 2.0 Pro model)
-    Gemini20ProExp,
     /// Gemini Pro Latest (alias for latest Pro model)
     GeminiProLatest,
     /// Gemini Flash Latest (alias for latest Flash model)
     GeminiFlashLatest,
+    /// Gemini Flash Lite Latest (alias for latest Flash Lite model)
+    GeminiFlashLiteLatest,
     /// Custom model name (for new models or Gemini-compatible endpoints)
     Custom(String),
 }
@@ -78,11 +76,10 @@ impl Model {
             Model::Gemini25FlashLite => "gemini-2.5-flash-lite",
             Model::Gemini20Flash => "gemini-2.0-flash",
             Model::Gemini20Flash001 => "gemini-2.0-flash-001",
-            Model::Gemini20FlashExp => "gemini-2.0-flash-exp",
             Model::Gemini20FlashLite => "gemini-2.0-flash-lite",
-            Model::Gemini20ProExp => "gemini-2.0-pro-exp",
             Model::GeminiProLatest => "gemini-pro-latest",
             Model::GeminiFlashLatest => "gemini-flash-latest",
+            Model::GeminiFlashLiteLatest => "gemini-flash-lite-latest",
             Model::Custom(name) => name,
         }
     }
@@ -101,11 +98,10 @@ impl Model {
             "gemini-2.5-flash-lite" => Model::Gemini25FlashLite,
             "gemini-2.0-flash" => Model::Gemini20Flash,
             "gemini-2.0-flash-001" => Model::Gemini20Flash001,
-            "gemini-2.0-flash-exp" => Model::Gemini20FlashExp,
             "gemini-2.0-flash-lite" => Model::Gemini20FlashLite,
-            "gemini-2.0-pro-exp" => Model::Gemini20ProExp,
             "gemini-pro-latest" => Model::GeminiProLatest,
             "gemini-flash-latest" => Model::GeminiFlashLatest,
+            "gemini-flash-lite-latest" => Model::GeminiFlashLiteLatest,
             _ => Model::Custom(name),
         }
     }
@@ -163,8 +159,33 @@ struct Content {
 }
 
 #[derive(Debug, Serialize)]
-struct Part {
-    text: String,
+#[serde(untagged)]
+enum Part {
+    Text {
+        text: String,
+    },
+    FileData {
+        #[serde(rename = "fileData")]
+        file_data: FileData,
+    },
+    InlineData {
+        #[serde(rename = "inlineData")]
+        inline_data: InlineData,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileData {
+    mime_type: String,
+    file_uri: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InlineData {
+    mime_type: String,
+    data: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -355,11 +376,32 @@ impl GeminiClient {
                 } else {
                     msg.role.as_str()
                 };
+                let mut parts = Vec::new();
+                if !msg.content.is_empty() {
+                    parts.push(Part::Text {
+                        text: msg.content.clone(),
+                    });
+                }
+                for media in &msg.media {
+                    if let Some(ref base64_data) = media.data {
+                        parts.push(Part::InlineData {
+                            inline_data: InlineData {
+                                mime_type: media.mime_type.clone(),
+                                data: base64_data.clone(),
+                            },
+                        });
+                    } else {
+                        parts.push(Part::FileData {
+                            file_data: FileData {
+                                mime_type: media.mime_type.clone(),
+                                file_uri: media.uri.clone(),
+                            },
+                        });
+                    }
+                }
                 Content {
                     role: Some(role.to_string()),
-                    parts: vec![Part {
-                        text: msg.content.clone(),
-                    }],
+                    parts,
                 }
             })
             .collect();
@@ -375,6 +417,10 @@ impl GeminiClient {
         } else {
             None
         };
+
+        // Extract adjacently tagged enum info before transformation (for response conversion)
+        let adjacently_tagged_info =
+            crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
 
         // Prepare schema for Gemini by stripping unsupported keywords (examples, additionalProperties, etc.)
         let gemini_schema = crate::backend::utils::prepare_gemini_schema(&schema);
@@ -460,10 +506,22 @@ impl GeminiClient {
         debug!(parts = parts.len(), "Processing candidate content parts");
         for part in parts {
             if let Some(text) = &part.text {
-                let raw_response = text.clone();
+                let mut raw_response = text.clone();
                 debug!(content_len = raw_response.len(), "Processing text part");
                 // With native response_schema, the response is guaranteed to be valid JSON
                 trace!(json = %raw_response, "Parsing structured output response");
+
+                // Transform internally tagged enums back to adjacently tagged format if needed
+                if let Some(ref enum_info) = adjacently_tagged_info
+                    && let Ok(mut json_value) =
+                        serde_json::from_str::<serde_json::Value>(&raw_response)
+                {
+                    crate::backend::utils::transform_internally_to_adjacently_tagged(
+                        &mut json_value,
+                        enum_info,
+                    );
+                    raw_response = serde_json::to_string(&json_value).unwrap_or(raw_response);
+                }
 
                 // Parse and validate the response using shared utility
                 return parse_validate_and_create_output(raw_response, usage);
@@ -581,6 +639,30 @@ impl LLMClient for GeminiClient {
     }
 
     #[instrument(
+        name = "gemini_materialize_with_media",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media<T>(&self, prompt: &str, media: &[super::MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        // For media support, we need to create a ChatMessage with media and pass it directly
+        // We can't use generate_with_retry_with_history since it only takes a string prompt
+        let initial_message = ChatMessage::user_with_media(prompt, media.to_vec());
+        let output = self
+            .materialize_internal::<T>(&[initial_message])
+            .await
+            .map_err(|(err, _)| err)?;
+        Ok(output.data)
+    }
+
+    #[instrument(
         name = "gemini_materialize_with_metadata",
         skip(self, prompt),
         fields(
@@ -646,7 +728,7 @@ impl LLMClient for GeminiClient {
         let request = GenerateContentRequest {
             contents: vec![Content {
                 role: Some("user".to_string()),
-                parts: vec![Part {
+                parts: vec![Part::Text {
                     text: prompt.to_string(),
                 }],
             }],

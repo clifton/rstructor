@@ -80,7 +80,7 @@
    - OpenAI: `gpt-4-turbo`, `gpt-5-chat-latest`
    - Anthropic: `claude-sonnet-4-20250514` (includes date)
    - Grok: `grok-4-0709` (includes date)
-   - Gemini: `gemini-1.5-flash`, `gemini-2.0-flash-exp` (may include version and suffix)
+   - Gemini: `gemini-1.5-flash`, `gemini-2.0-flash` (may include version and suffix)
 10. **Filter for chat completion models** - Only include models suitable for chat completions:
     - **OpenAI**: Filter for chat completion models (exclude `whisper-*`, `text-embedding-*`, `text-moderation-*`, etc.)
     - **Anthropic**: Filter for chat completion models (exclude specialized variants unless needed)

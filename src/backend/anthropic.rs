@@ -39,6 +39,10 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnthropicModel {
+    /// Claude Opus 4.6 (latest most capable model)
+    ClaudeOpus46,
+    /// Claude Opus 4.5 (enhanced Opus 4.5)
+    ClaudeOpus45,
     /// Claude Haiku 4.5 (latest fastest model)
     ClaudeHaiku45,
     /// Claude Sonnet 4.5 (latest balanced model)
@@ -64,6 +68,8 @@ pub enum AnthropicModel {
 impl AnthropicModel {
     pub fn as_str(&self) -> &str {
         match self {
+            AnthropicModel::ClaudeOpus46 => "claude-opus-4-6",
+            AnthropicModel::ClaudeOpus45 => "claude-opus-4-5-20251101",
             AnthropicModel::ClaudeHaiku45 => "claude-haiku-4-5-20251001",
             AnthropicModel::ClaudeSonnet45 => "claude-sonnet-4-5-20250929",
             AnthropicModel::ClaudeOpus41 => "claude-opus-4-1-20250805",
@@ -84,6 +90,8 @@ impl AnthropicModel {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
+            "claude-opus-4-6" => AnthropicModel::ClaudeOpus46,
+            "claude-opus-4-5-20251101" => AnthropicModel::ClaudeOpus45,
             "claude-haiku-4-5-20251001" => AnthropicModel::ClaudeHaiku45,
             "claude-sonnet-4-5-20250929" => AnthropicModel::ClaudeSonnet45,
             "claude-opus-4-1-20250805" => AnthropicModel::ClaudeOpus41,

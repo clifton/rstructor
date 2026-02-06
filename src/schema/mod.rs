@@ -1,5 +1,6 @@
 mod builder;
 mod custom_type;
+mod primitives;
 pub use builder::SchemaBuilder;
 pub use custom_type::CustomTypeSchema;
 

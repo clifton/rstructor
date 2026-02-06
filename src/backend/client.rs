@@ -6,6 +6,93 @@ use crate::backend::usage::{GenerateResult, MaterializeResult};
 use crate::error::Result;
 use crate::model::Instructor;
 
+/// File reference for media-aware prompts (e.g., Gemini file URI or inline data).
+///
+/// `MediaFile` supports two modes:
+///
+/// - **URI-based**: Reference a file by URI (e.g., Google Cloud Storage or Gemini Files API).
+///   Created with [`MediaFile::new`].
+/// - **Inline data**: Embed base64-encoded file content directly in the request.
+///   Created with [`MediaFile::from_bytes`]. This is useful for public images
+///   downloaded over HTTPS.
+///
+/// # Examples
+///
+/// ```no_run
+/// use rstructor::MediaFile;
+///
+/// // URI-based (Gemini Files API or GCS)
+/// let media = MediaFile::new(
+///     "https://generativelanguage.googleapis.com/v1beta/files/abc123",
+///     "image/png",
+/// );
+///
+/// // Inline data from bytes
+/// let image_bytes = std::fs::read("photo.png").unwrap();
+/// let media = MediaFile::from_bytes(&image_bytes, "image/png");
+/// ```
+#[derive(Debug, Clone)]
+pub struct MediaFile {
+    pub uri: String,
+    pub mime_type: String,
+    /// Base64-encoded inline data. When set, backends that support inline data
+    /// will use this instead of the URI.
+    pub data: Option<String>,
+}
+
+impl MediaFile {
+    /// Create a URI-based media file reference.
+    ///
+    /// Use this for Gemini Files API URIs or Google Cloud Storage URIs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rstructor::MediaFile;
+    ///
+    /// let media = MediaFile::new(
+    ///     "https://generativelanguage.googleapis.com/v1beta/files/abc123",
+    ///     "image/png",
+    /// );
+    /// assert!(media.data.is_none());
+    /// ```
+    #[must_use]
+    pub fn new(uri: impl Into<String>, mime_type: impl Into<String>) -> Self {
+        Self {
+            uri: uri.into(),
+            mime_type: mime_type.into(),
+            data: None,
+        }
+    }
+
+    /// Create a media file from raw bytes, base64-encoding them for inline use.
+    ///
+    /// This is useful when you have image data in memory (e.g., downloaded from
+    /// a public URL) and want to send it directly without uploading to the
+    /// Gemini Files API first.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rstructor::MediaFile;
+    ///
+    /// let bytes = b"fake image data";
+    /// let media = MediaFile::from_bytes(bytes, "image/png");
+    /// assert!(media.data.is_some());
+    /// assert!(media.uri.is_empty());
+    /// ```
+    #[must_use]
+    pub fn from_bytes(data: impl AsRef<[u8]>, mime_type: impl Into<String>) -> Self {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(data.as_ref());
+        Self {
+            uri: String::new(),
+            mime_type: mime_type.into(),
+            data: Some(encoded),
+        }
+    }
+}
+
 /// LLMClient trait defines the interface for all LLM API clients.
 ///
 /// This trait is the core abstraction for interacting with different LLM providers
@@ -125,6 +212,16 @@ pub trait LLMClient {
     async fn materialize<T>(&self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static;
+
+    /// Materialize a structured object with media references (if supported).
+    ///
+    /// Providers that do not support media inputs ignore the `media` parameter.
+    async fn materialize_with_media<T>(&self, prompt: &str, _media: &[MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        self.materialize(prompt).await
+    }
 
     /// Materialize a structured object with metadata (token usage).
     ///

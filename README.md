@@ -65,7 +65,7 @@ use rstructor::{OpenAIClient, AnthropicClient, GrokClient, GeminiClient, LLMClie
 let client = OpenAIClient::from_env()?.model("gpt-5.2");
 
 // Anthropic (reads ANTHROPIC_API_KEY)
-let client = AnthropicClient::from_env()?.model("claude-sonnet-4-5-20250929");
+let client = AnthropicClient::from_env()?.model("claude-opus-4-6");
 
 // Grok/xAI (reads XAI_API_KEY)
 let client = GrokClient::from_env()?.model("grok-4-1-fast-non-reasoning");
@@ -199,6 +199,41 @@ struct Event {
 }
 ```
 
+## Multimodal (Image Input)
+
+Analyze images with structured extraction using Gemini's inline data support:
+
+```rust
+use rstructor::{Instructor, LLMClient, GeminiClient, MediaFile};
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct ImageAnalysis {
+    subject: String,
+    colors: Vec<String>,
+    is_logo: bool,
+    description: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Download or load image bytes
+    let image_bytes = reqwest::get("https://example.com/image.png")
+        .await?.bytes().await?;
+
+    // Create inline media from bytes (base64-encoded automatically)
+    let media = MediaFile::from_bytes(&image_bytes, "image/png");
+
+    let client = GeminiClient::from_env()?;
+    let analysis: ImageAnalysis = client
+        .materialize_with_media("Describe this image", &[media])
+        .await?;
+    println!("{:?}", analysis);
+    Ok(())
+}
+```
+
+`MediaFile::new(uri, mime_type)` is also available for Gemini Files API / GCS URIs.
+
 ## Extended Thinking
 
 Configure reasoning depth for supported models:
@@ -266,6 +301,7 @@ cargo run --example structured_movie_info
 cargo run --example nested_objects_example
 cargo run --example enum_with_data_example
 cargo run --example serde_rename_example
+cargo run --example gemini_multimodal_example
 ```
 
 ## For Python Developers

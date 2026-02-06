@@ -55,8 +55,6 @@ pub enum Model {
     Grok3Mini,
     /// Grok Code Fast 1 (optimized for coding tasks)
     GrokCodeFast1,
-    /// Grok-2-1212 (enhanced accuracy and instruction adherence)
-    Grok21212,
     /// Grok-2 Vision (multimodal vision model)
     Grok2Vision,
     /// Custom model name (for new models or Grok-compatible endpoints)
@@ -74,7 +72,6 @@ impl Model {
             Model::Grok3 => "grok-3",
             Model::Grok3Mini => "grok-3-mini",
             Model::GrokCodeFast1 => "grok-code-fast-1",
-            Model::Grok21212 => "grok-2-1212",
             Model::Grok2Vision => "grok-2-vision-1212",
             Model::Custom(name) => name,
         }
@@ -95,7 +92,6 @@ impl Model {
             "grok-3" => Model::Grok3,
             "grok-3-mini" => Model::Grok3Mini,
             "grok-code-fast-1" => Model::GrokCodeFast1,
-            "grok-2-1212" => Model::Grok21212,
             "grok-2-vision-1212" => Model::Grok2Vision,
             _ => Model::Custom(name),
         }
