@@ -54,16 +54,14 @@ pub enum Model {
     Gemini20Flash,
     /// Gemini 2.0 Flash 001 (specific version of 2.0 Flash)
     Gemini20Flash001,
-    /// Gemini 2.0 Flash Experimental (experimental 2.0 Flash variant)
-    Gemini20FlashExp,
     /// Gemini 2.0 Flash Lite (smaller 2.0 Flash variant)
     Gemini20FlashLite,
-    /// Gemini 2.0 Pro Experimental (experimental 2.0 Pro model)
-    Gemini20ProExp,
     /// Gemini Pro Latest (alias for latest Pro model)
     GeminiProLatest,
     /// Gemini Flash Latest (alias for latest Flash model)
     GeminiFlashLatest,
+    /// Gemini Flash Lite Latest (alias for latest Flash Lite model)
+    GeminiFlashLiteLatest,
     /// Custom model name (for new models or Gemini-compatible endpoints)
     Custom(String),
 }
@@ -78,11 +76,10 @@ impl Model {
             Model::Gemini25FlashLite => "gemini-2.5-flash-lite",
             Model::Gemini20Flash => "gemini-2.0-flash",
             Model::Gemini20Flash001 => "gemini-2.0-flash-001",
-            Model::Gemini20FlashExp => "gemini-2.0-flash-exp",
             Model::Gemini20FlashLite => "gemini-2.0-flash-lite",
-            Model::Gemini20ProExp => "gemini-2.0-pro-exp",
             Model::GeminiProLatest => "gemini-pro-latest",
             Model::GeminiFlashLatest => "gemini-flash-latest",
+            Model::GeminiFlashLiteLatest => "gemini-flash-lite-latest",
             Model::Custom(name) => name,
         }
     }
@@ -101,11 +98,10 @@ impl Model {
             "gemini-2.5-flash-lite" => Model::Gemini25FlashLite,
             "gemini-2.0-flash" => Model::Gemini20Flash,
             "gemini-2.0-flash-001" => Model::Gemini20Flash001,
-            "gemini-2.0-flash-exp" => Model::Gemini20FlashExp,
             "gemini-2.0-flash-lite" => Model::Gemini20FlashLite,
-            "gemini-2.0-pro-exp" => Model::Gemini20ProExp,
             "gemini-pro-latest" => Model::GeminiProLatest,
             "gemini-flash-latest" => Model::GeminiFlashLatest,
+            "gemini-flash-lite-latest" => Model::GeminiFlashLiteLatest,
             _ => Model::Custom(name),
         }
     }

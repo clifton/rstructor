@@ -50,7 +50,6 @@ mod tests {
             GrokModel::Grok3,
             GrokModel::Grok3Mini,
             GrokModel::GrokCodeFast1,
-            GrokModel::Grok21212,
             GrokModel::Grok2Vision,
         ];
 
@@ -72,7 +71,6 @@ mod tests {
             "grok-3",
             "grok-3-mini",
             "grok-code-fast-1",
-            "grok-2-1212",
             "grok-2-vision-1212",
         ];
 

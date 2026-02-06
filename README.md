@@ -65,7 +65,7 @@ use rstructor::{OpenAIClient, AnthropicClient, GrokClient, GeminiClient, LLMClie
 let client = OpenAIClient::from_env()?.model("gpt-5.2");
 
 // Anthropic (reads ANTHROPIC_API_KEY)
-let client = AnthropicClient::from_env()?.model("claude-sonnet-4-5-20250929");
+let client = AnthropicClient::from_env()?.model("claude-opus-4-6");
 
 // Grok/xAI (reads XAI_API_KEY)
 let client = GrokClient::from_env()?.model("grok-4-1-fast-non-reasoning");
