@@ -168,6 +168,10 @@ enum Part {
         #[serde(rename = "fileData")]
         file_data: FileData,
     },
+    InlineData {
+        #[serde(rename = "inlineData")]
+        inline_data: InlineData,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -175,6 +179,13 @@ enum Part {
 struct FileData {
     mime_type: String,
     file_uri: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InlineData {
+    mime_type: String,
+    data: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -372,12 +383,21 @@ impl GeminiClient {
                     });
                 }
                 for media in &msg.media {
-                    parts.push(Part::FileData {
-                        file_data: FileData {
-                            mime_type: media.mime_type.clone(),
-                            file_uri: media.uri.clone(),
-                        },
-                    });
+                    if let Some(ref base64_data) = media.data {
+                        parts.push(Part::InlineData {
+                            inline_data: InlineData {
+                                mime_type: media.mime_type.clone(),
+                                data: base64_data.clone(),
+                            },
+                        });
+                    } else {
+                        parts.push(Part::FileData {
+                            file_data: FileData {
+                                mime_type: media.mime_type.clone(),
+                                file_uri: media.uri.clone(),
+                            },
+                        });
+                    }
                 }
                 Content {
                     role: Some(role.to_string()),
