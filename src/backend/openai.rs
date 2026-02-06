@@ -787,7 +787,11 @@ impl LLMClient for OpenAIClient {
                     .filter_map(|model| {
                         let id = model.get("id").and_then(|id| id.as_str())?;
                         // Filter to only GPT models (chat completion models)
-                        if id.starts_with("gpt-") || id.starts_with("o1") || id.starts_with("o3") || id.starts_with("o4") {
+                        if id.starts_with("gpt-")
+                            || id.starts_with("o1")
+                            || id.starts_with("o3")
+                            || id.starts_with("o4")
+                        {
                             Some(ModelInfo {
                                 id: id.to_string(),
                                 name: None,

@@ -161,8 +161,13 @@ struct Content {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 enum Part {
-    Text { text: String },
-    FileData { #[serde(rename = "fileData")] file_data: FileData },
+    Text {
+        text: String,
+    },
+    FileData {
+        #[serde(rename = "fileData")]
+        file_data: FileData,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -630,7 +635,9 @@ impl LLMClient for GeminiClient {
         // For media support, we need to create a ChatMessage with media and pass it directly
         // We can't use generate_with_retry_with_history since it only takes a string prompt
         let initial_message = ChatMessage::user_with_media(prompt, media.to_vec());
-        let output = self.materialize_internal::<T>(&[initial_message]).await
+        let output = self
+            .materialize_internal::<T>(&[initial_message])
+            .await
             .map_err(|(err, _)| err)?;
         Ok(output.data)
     }
