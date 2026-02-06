@@ -380,19 +380,10 @@ pub fn generate_struct_schema(
                 };
                 property_setters.push(field_prop);
 
-                // Add description if available
+                // Add description if available - field-level description always takes priority
                 if let Some(desc) = attrs.description {
                     let desc_prop = quote! {
-                        // Check if there's already a description (e.g., from enum keys hint)
-                        // If so, merge them; otherwise, use the user's description
-                        if let Some(existing_desc) = props.get("description")
-                            .and_then(|d| d.as_str())
-                        {
-                            let merged_desc = format!("{}. {}", #desc, existing_desc);
-                            props.insert("description".to_string(), ::serde_json::Value::String(merged_desc));
-                        } else {
-                            props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
-                        }
+                        props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
                     };
                     property_setters.push(desc_prop);
                 }

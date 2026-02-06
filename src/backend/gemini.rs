@@ -634,7 +634,7 @@ impl LLMClient for GeminiClient {
         // For media support, we need to create a ChatMessage with media and pass it directly
         // We can't use generate_with_retry_with_history since it only takes a string prompt
         let initial_message = ChatMessage::user_with_media(prompt, media.to_vec());
-        let output = self.materialize_internal::<T>(&vec![initial_message]).await
+        let output = self.materialize_internal::<T>(&[initial_message]).await
             .map_err(|(err, _)| err)?;
         Ok(output.data)
     }
