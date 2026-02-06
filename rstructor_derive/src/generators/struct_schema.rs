@@ -256,6 +256,12 @@ pub fn generate_struct_schema(
                                 if !keys.is_empty() {
                                     let keys_hint = format!("Keys: [{}]", keys.join(", "));
                                     props.insert("description".to_string(), ::serde_json::Value::String(keys_hint));
+                                    // Also store enum keys as a structured extension field
+                                    // so backends can extract them without parsing the description
+                                    let keys_json: Vec<::serde_json::Value> = keys.iter()
+                                        .map(|k| ::serde_json::Value::String(k.clone()))
+                                        .collect();
+                                    props.insert("x-enum-keys".to_string(), ::serde_json::Value::Array(keys_json));
                                 }
                             }
                         }
@@ -380,10 +386,20 @@ pub fn generate_struct_schema(
                 };
                 property_setters.push(field_prop);
 
-                // Add description if available - field-level description always takes priority
+                // Add description if available - merge with existing keys hint if present
                 if let Some(desc) = attrs.description {
                     let desc_prop = quote! {
-                        props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
+                        if let Some(existing) = props.get("description").and_then(|v| v.as_str()) {
+                            if existing.contains("Keys: [") {
+                                // Merge user description with the keys hint
+                                let merged = format!("{}. {}", #desc, existing);
+                                props.insert("description".to_string(), ::serde_json::Value::String(merged));
+                            } else {
+                                props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
+                            }
+                        } else {
+                            props.insert("description".to_string(), ::serde_json::Value::String(#desc.to_string()));
+                        }
                     };
                     property_setters.push(desc_prop);
                 }

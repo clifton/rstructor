@@ -597,10 +597,20 @@ fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
             // requires properties to be defined.
             let value_schema = additional.unwrap_or(serde_json::json!({}));
 
-            // Try to extract specific keys from description (e.g., "Keys: [info, warn, error]")
-            // This allows us to provide concrete enum variants as keys instead of generic placeholders
+            // Try to extract specific keys from x-enum-keys extension field first,
+            // then fall back to parsing the description string for backward compatibility
             let mut keys = vec!["key1".to_string(), "key2".to_string(), "key3".to_string()];
-            if let Some(start) = existing_desc.find("Keys: [")
+            if let Some(enum_keys) = obj.remove("x-enum-keys")
+                && let Some(arr) = enum_keys.as_array()
+            {
+                let extracted_keys: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                if !extracted_keys.is_empty() {
+                    keys = extracted_keys;
+                }
+            } else if let Some(start) = existing_desc.find("Keys: [")
                 && let Some(end) = existing_desc[start..].find(']')
             {
                 let keys_str = &existing_desc[start + 7..start + end];
@@ -641,6 +651,9 @@ fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
             };
             obj.insert("description".to_string(), Value::String(map_desc));
         }
+
+        // Strip x-enum-keys extension (consumed above for maps, not needed in final schema)
+        obj.remove("x-enum-keys");
 
         // Recursively process nested schemas
         if let Some(properties) = obj.get_mut("properties")
@@ -1886,6 +1899,80 @@ mod tests {
         assert!(
             schema_json["properties"]["name"].get("title").is_none(),
             "nested title should be stripped"
+        );
+    }
+
+    #[test]
+    fn test_gemini_map_with_x_enum_keys() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "counts": {
+                    "type": "object",
+                    "additionalProperties": { "type": "integer" },
+                    "description": "Map using enum keys. Keys: [info, warn, error]",
+                    "x-enum-keys": ["info", "warn", "error"]
+                }
+            }
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+        let props = schema["properties"]["counts"]["properties"]
+            .as_object()
+            .unwrap();
+        assert!(props.contains_key("info"), "should have 'info' key");
+        assert!(props.contains_key("warn"), "should have 'warn' key");
+        assert!(props.contains_key("error"), "should have 'error' key");
+        assert!(
+            !props.contains_key("key1"),
+            "should not have placeholder 'key1'"
+        );
+        assert!(
+            schema["properties"]["counts"].get("x-enum-keys").is_none(),
+            "x-enum-keys should be stripped from final schema"
+        );
+    }
+
+    #[test]
+    fn test_gemini_map_with_description_only_keys_hint() {
+        // Backward compat: description-only "Keys: [...]" pattern still works
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "counts": {
+                    "type": "object",
+                    "additionalProperties": { "type": "integer" },
+                    "description": "Keys: [alpha, beta, gamma]"
+                }
+            }
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+        let props = schema["properties"]["counts"]["properties"]
+            .as_object()
+            .unwrap();
+        assert!(props.contains_key("alpha"), "should have 'alpha' key");
+        assert!(props.contains_key("beta"), "should have 'beta' key");
+        assert!(props.contains_key("gamma"), "should have 'gamma' key");
+        assert!(
+            !props.contains_key("key1"),
+            "should not have placeholder 'key1'"
+        );
+    }
+
+    #[test]
+    fn test_gemini_x_enum_keys_stripped_from_non_map_schema() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "x-enum-keys": ["a", "b"]
+                }
+            }
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+        assert!(
+            schema["properties"]["name"].get("x-enum-keys").is_none(),
+            "x-enum-keys should be stripped from non-map schemas"
         );
     }
 }
