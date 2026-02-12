@@ -263,7 +263,7 @@ impl GeminiClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini25Flash))]
+    #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini3FlashPreview))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {

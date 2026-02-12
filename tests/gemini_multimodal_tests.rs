@@ -10,7 +10,7 @@
 #[cfg(test)]
 mod gemini_multimodal_tests {
     #[cfg(feature = "gemini")]
-    use rstructor::GeminiClient;
+    use rstructor::{GeminiClient, GeminiModel};
     use rstructor::{Instructor, LLMClient, MediaFile};
     use serde::{Deserialize, Serialize};
 
@@ -43,6 +43,7 @@ mod gemini_multimodal_tests {
 
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
+            .model(GeminiModel::Gemini3FlashPreview)
             .temperature(0.0);
 
         let result: ImageDescription = client
