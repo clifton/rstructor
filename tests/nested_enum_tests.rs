@@ -96,9 +96,9 @@ mod nested_enum_tests {
         let schema = TaskState::schema();
         let schema_json = schema.to_json();
 
-        // Verify it's a oneOf schema (complex enum)
-        assert!(schema_json["oneOf"].is_array());
-        let variants = schema_json["oneOf"].as_array().unwrap();
+        // Verify it's an anyOf schema (complex enum)
+        assert!(schema_json["anyOf"].is_array());
+        let variants = schema_json["anyOf"].as_array().unwrap();
         assert_eq!(variants.len(), 3);
 
         // Verify Pending variant has priority field
@@ -160,8 +160,8 @@ mod nested_enum_tests {
         // Verify items are objects (since TaskState is a complex enum)
         let items = &tasks_prop["items"];
         assert!(items.is_object());
-        // Complex enums should have oneOf schema
-        assert!(items.get("oneOf").is_some() || items.get("type").is_some());
+        // Complex enums should have anyOf schema
+        assert!(items.get("anyOf").is_some() || items.get("type").is_some());
     }
 
     #[test]
@@ -248,9 +248,9 @@ mod nested_enum_tests {
         let schema = DeepNestedEnum::schema();
         let schema_json = schema.to_json();
 
-        // Verify it's a oneOf schema
-        assert!(schema_json["oneOf"].is_array());
-        let variants = schema_json["oneOf"].as_array().unwrap();
+        // Verify it's an anyOf schema
+        assert!(schema_json["anyOf"].is_array());
+        let variants = schema_json["anyOf"].as_array().unwrap();
         assert_eq!(variants.len(), 1);
 
         // Verify Level1 variant has both status and priority fields

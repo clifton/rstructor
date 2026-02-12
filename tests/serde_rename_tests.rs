@@ -301,8 +301,8 @@ mod serde_rename_tests {
         let schema = PaymentMethod::schema();
         let schema_json = schema.to_json();
 
-        // Complex enums use oneOf
-        let one_of = schema_json["oneOf"].as_array().unwrap();
+        // Complex enums use anyOf
+        let one_of = schema_json["anyOf"].as_array().unwrap();
         assert_eq!(one_of.len(), 3);
 
         // Check that variant names are properly renamed
