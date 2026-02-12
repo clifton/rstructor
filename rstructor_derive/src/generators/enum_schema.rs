@@ -400,7 +400,7 @@ fn generate_externally_tagged_enum_schema(
                 ];
 
                 let mut schema_obj = ::serde_json::json!({
-                    "oneOf": variant_schemas,
+                    "anyOf": variant_schemas,
                     "title": stringify!(#name)
                 });
 
@@ -754,7 +754,7 @@ fn generate_internally_tagged_enum_schema(
                 ];
 
                 let mut schema_obj = ::serde_json::json!({
-                    "oneOf": variant_schemas,
+                    "anyOf": variant_schemas,
                     "title": stringify!(#name)
                 });
 
@@ -1045,7 +1045,7 @@ fn generate_adjacently_tagged_enum_schema(
                 ];
 
                 let mut schema_obj = ::serde_json::json!({
-                    "oneOf": variant_schemas,
+                    "anyOf": variant_schemas,
                     "title": stringify!(#name)
                 });
 
@@ -1202,7 +1202,7 @@ fn generate_untagged_enum_schema(
                 ];
 
                 let mut schema_obj = ::serde_json::json!({
-                    "oneOf": variant_schemas,
+                    "anyOf": variant_schemas,
                     "title": stringify!(#name)
                 });
 

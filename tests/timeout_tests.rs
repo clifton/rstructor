@@ -5,10 +5,10 @@
 
 #[cfg(test)]
 mod timeout_tests {
-    #[cfg(feature = "gemini")]
-    use rstructor::GeminiClient;
     #[cfg(feature = "anthropic")]
     use rstructor::{AnthropicClient, AnthropicModel};
+    #[cfg(feature = "gemini")]
+    use rstructor::{GeminiClient, GeminiModel};
     #[cfg(feature = "grok")]
     use rstructor::{GrokClient, GrokModel};
     use rstructor::{Instructor, LLMClient, RStructorError};
@@ -200,9 +200,9 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_gemini_timeout_configuration() {
         // Test that timeout can be set via builder pattern
-        // Uses default model (Gemini 3 Flash Preview with Low thinking)
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
+            .model(GeminiModel::Gemini3FlashPreview)
             .temperature(0.0)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
@@ -224,9 +224,9 @@ mod timeout_tests {
     #[tokio::test]
     async fn test_gemini_timeout_chaining() {
         // Test that timeout can be chained with other configuration methods
-        // Uses default model (Gemini 3 Flash Preview with Low thinking)
         let _client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
+            .model(GeminiModel::Gemini3FlashPreview)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
@@ -239,9 +239,10 @@ mod timeout_tests {
     #[cfg(feature = "gemini")]
     #[tokio::test]
     async fn test_gemini_no_timeout_default() {
-        // Test that default client has no timeout
-        // Test with empty string to use GEMINI_API_KEY env var
-        let _client = GeminiClient::from_env().expect("GEMINI_API_KEY must be set for this test");
+        // Test that client can be created with explicit Gemini 3 Flash Preview and no timeout
+        let _client = GeminiClient::from_env()
+            .expect("GEMINI_API_KEY must be set for this test")
+            .model(GeminiModel::Gemini3FlashPreview);
 
         // Verify that client was created successfully without timeout
         // (We can't access config directly, but default behavior means no timeout)
