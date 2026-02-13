@@ -7,9 +7,10 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ResponseFormat, TokenUsage, ValidationFailureContext, check_response_status,
+    ModelInfo, OpenAICompatibleMessageContent, ResponseFormat, TokenUsage,
+    ValidationFailureContext, build_openai_compatible_message_content, check_response_status,
     generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
-    media_to_url, parse_validate_and_create_output, prepare_strict_schema,
+    parse_validate_and_create_output, prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -98,35 +99,6 @@ impl Model {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backend::MediaFile;
-
-    #[test]
-    fn test_grok_message_content_text_only_serializes_as_string() {
-        let msg = ChatMessage::user("hello");
-        let content = GrokClient::build_message_content(&msg).expect("content should build");
-        let json = serde_json::to_value(&content).expect("content should serialize");
-        assert_eq!(json, serde_json::json!("hello"));
-    }
-
-    #[test]
-    fn test_grok_message_content_with_media_serializes_as_parts() {
-        let msg = ChatMessage::user_with_media(
-            "describe image",
-            vec![MediaFile::from_bytes(b"abc", "image/png")],
-        );
-        let content = GrokClient::build_message_content(&msg).expect("content should build");
-        let json = serde_json::to_value(&content).expect("content should serialize");
-
-        assert_eq!(json[0]["type"], "text");
-        assert_eq!(json[0]["text"], "describe image");
-        assert_eq!(json[1]["type"], "image_url");
-        assert_eq!(json[1]["image_url"]["url"], "data:image/png;base64,YWJj");
-    }
-}
-
 impl FromStr for Model {
     type Err = std::convert::Infallible;
 
@@ -171,28 +143,7 @@ pub struct GrokClient {
 #[derive(Debug, Serialize)]
 struct GrokChatMessage {
     role: String,
-    content: GrokMessageContent,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum GrokMessageContent {
-    Text(String),
-    Parts(Vec<GrokMessagePart>),
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum GrokMessagePart {
-    Text { text: String },
-    ImageUrl { image_url: GrokImageUrl },
-}
-
-#[derive(Debug, Serialize)]
-struct GrokImageUrl {
-    url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
+    content: OpenAICompatibleMessageContent,
 }
 
 // ResponseFormat and JsonSchemaFormat are now imported from utils
@@ -329,31 +280,6 @@ impl GrokClient {
 }
 
 impl GrokClient {
-    fn build_message_content(msg: &ChatMessage) -> Result<GrokMessageContent> {
-        if msg.media.is_empty() {
-            return Ok(GrokMessageContent::Text(msg.content.clone()));
-        }
-
-        let mut parts = Vec::new();
-        if !msg.content.is_empty() {
-            parts.push(GrokMessagePart::Text {
-                text: msg.content.clone(),
-            });
-        }
-
-        for media in &msg.media {
-            let url = media_to_url(media, "Grok")?;
-            parts.push(GrokMessagePart::ImageUrl {
-                image_url: GrokImageUrl {
-                    url,
-                    detail: Some("auto".to_string()),
-                },
-            });
-        }
-
-        Ok(GrokMessageContent::Parts(parts))
-    }
-
     /// Internal implementation of materialize (without retry logic)
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
@@ -390,7 +316,7 @@ impl GrokClient {
             .map(|msg| {
                 Ok(GrokChatMessage {
                     role: msg.role.as_str().to_string(),
-                    content: Self::build_message_content(msg)?,
+                    content: build_openai_compatible_message_content(msg, "Grok")?,
                 })
             })
             .collect::<Result<Vec<_>>>()
@@ -630,7 +556,7 @@ impl LLMClient for GrokClient {
             model: self.config.model.as_str().to_string(),
             messages: vec![GrokChatMessage {
                 role: "user".to_string(),
-                content: GrokMessageContent::Text(prompt.to_string()),
+                content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
             }],
             response_format: None,
             temperature: self.config.temperature,

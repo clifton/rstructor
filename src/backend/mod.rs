@@ -1,4 +1,5 @@
 pub mod client;
+mod media;
 mod messages;
 pub mod usage;
 mod utils;
@@ -44,10 +45,14 @@ pub struct ModelInfo {
     /// Description of the model's capabilities
     pub description: Option<String>,
 }
+pub(crate) use media::{
+    AnthropicMessageContent, OpenAICompatibleMessageContent, build_anthropic_message_content,
+    build_openai_compatible_message_content,
+};
 pub(crate) use utils::{
     ResponseFormat, check_response_status, generate_with_retry_with_history,
-    generate_with_retry_with_initial_messages, handle_http_error, media_to_url,
-    parse_validate_and_create_output, prepare_strict_schema,
+    generate_with_retry_with_initial_messages, handle_http_error, parse_validate_and_create_output,
+    prepare_strict_schema,
 };
 
 /// Thinking level configuration for models that support extended reasoning.

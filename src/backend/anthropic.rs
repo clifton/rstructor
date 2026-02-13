@@ -7,10 +7,11 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
-    parse_validate_and_create_output, prepare_strict_schema,
+    AnthropicMessageContent, ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput,
+    MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext,
+    build_anthropic_message_content, check_response_status, generate_with_retry_with_history,
+    generate_with_retry_with_initial_messages, handle_http_error, parse_validate_and_create_output,
+    prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -106,37 +107,6 @@ impl AnthropicModel {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backend::MediaFile;
-
-    #[test]
-    fn test_anthropic_message_content_text_only_serializes_as_string() {
-        let msg = ChatMessage::user("hello");
-        let content = AnthropicClient::build_message_content(&msg).expect("content should build");
-        let json = serde_json::to_value(&content).expect("content should serialize");
-        assert_eq!(json, serde_json::json!("hello"));
-    }
-
-    #[test]
-    fn test_anthropic_message_content_with_inline_media_serializes_blocks() {
-        let msg = ChatMessage::user_with_media(
-            "describe image",
-            vec![MediaFile::from_bytes(b"abc", "image/png")],
-        );
-        let content = AnthropicClient::build_message_content(&msg).expect("content should build");
-        let json = serde_json::to_value(&content).expect("content should serialize");
-
-        assert_eq!(json[0]["type"], "text");
-        assert_eq!(json[0]["text"], "describe image");
-        assert_eq!(json[1]["type"], "image");
-        assert_eq!(json[1]["source"]["type"], "base64");
-        assert_eq!(json[1]["source"]["media_type"], "image/png");
-        assert_eq!(json[1]["source"]["data"], "YWJj");
-    }
-}
-
 impl FromStr for AnthropicModel {
     type Err = std::convert::Infallible;
 
@@ -185,27 +155,6 @@ pub struct AnthropicClient {
 struct AnthropicMessage {
     role: String,
     content: AnthropicMessageContent,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum AnthropicMessageContent {
-    Text(String),
-    Blocks(Vec<AnthropicContentBlock>),
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum AnthropicContentBlock {
-    Text { text: String },
-    Image { source: AnthropicImageSource },
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum AnthropicImageSource {
-    Base64 { media_type: String, data: String },
-    Url { url: String },
 }
 
 /// Output format for structured outputs (native Anthropic structured outputs)
@@ -348,53 +297,6 @@ impl AnthropicClient {
 }
 
 impl AnthropicClient {
-    fn build_message_content(msg: &ChatMessage) -> Result<AnthropicMessageContent> {
-        if msg.media.is_empty() {
-            return Ok(AnthropicMessageContent::Text(msg.content.clone()));
-        }
-
-        let mut blocks = Vec::new();
-        if !msg.content.is_empty() {
-            blocks.push(AnthropicContentBlock::Text {
-                text: msg.content.clone(),
-            });
-        }
-
-        for media in &msg.media {
-            if let Some(data) = media.data.as_ref() {
-                if media.mime_type.is_empty() {
-                    return Err(RStructorError::api_error(
-                        "Anthropic",
-                        ApiErrorKind::BadRequest {
-                            details: "MediaFile mime_type cannot be empty".to_string(),
-                        },
-                    ));
-                }
-                blocks.push(AnthropicContentBlock::Image {
-                    source: AnthropicImageSource::Base64 {
-                        media_type: media.mime_type.clone(),
-                        data: data.clone(),
-                    },
-                });
-            } else if !media.uri.is_empty() {
-                blocks.push(AnthropicContentBlock::Image {
-                    source: AnthropicImageSource::Url {
-                        url: media.uri.clone(),
-                    },
-                });
-            } else {
-                return Err(RStructorError::api_error(
-                    "Anthropic",
-                    ApiErrorKind::BadRequest {
-                        details: "MediaFile must include either inline data or uri".to_string(),
-                    },
-                ));
-            }
-        }
-
-        Ok(AnthropicMessageContent::Blocks(blocks))
-    }
-
     /// Internal implementation of materialize (without retry logic)
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
@@ -430,7 +332,7 @@ impl AnthropicClient {
             .map(|msg| {
                 Ok(AnthropicMessage {
                     role: msg.role.as_str().to_string(),
-                    content: Self::build_message_content(msg)?,
+                    content: build_anthropic_message_content(msg)?,
                 })
             })
             .collect::<Result<Vec<_>>>()

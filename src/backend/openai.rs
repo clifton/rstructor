@@ -7,9 +7,9 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ResponseFormat, ThinkingLevel, TokenUsage, ValidationFailureContext,
-    check_response_status, generate_with_retry_with_history,
-    generate_with_retry_with_initial_messages, handle_http_error, media_to_url,
+    ModelInfo, OpenAICompatibleMessageContent, ResponseFormat, ThinkingLevel, TokenUsage,
+    ValidationFailureContext, build_openai_compatible_message_content, check_response_status,
+    generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
     parse_validate_and_create_output, prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
@@ -158,35 +158,6 @@ impl Model {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::backend::MediaFile;
-
-    #[test]
-    fn test_openai_message_content_text_only_serializes_as_string() {
-        let msg = ChatMessage::user("hello");
-        let content = OpenAIClient::build_message_content(&msg).expect("content should build");
-        let json = serde_json::to_value(&content).expect("content should serialize");
-        assert_eq!(json, serde_json::json!("hello"));
-    }
-
-    #[test]
-    fn test_openai_message_content_with_media_serializes_as_parts() {
-        let msg = ChatMessage::user_with_media(
-            "what is in this image?",
-            vec![MediaFile::from_bytes(b"abc", "image/png")],
-        );
-        let content = OpenAIClient::build_message_content(&msg).expect("content should build");
-        let json = serde_json::to_value(&content).expect("content should serialize");
-
-        assert_eq!(json[0]["type"], "text");
-        assert_eq!(json[0]["text"], "what is in this image?");
-        assert_eq!(json[1]["type"], "image_url");
-        assert_eq!(json[1]["image_url"]["url"], "data:image/png;base64,YWJj");
-    }
-}
-
 impl FromStr for Model {
     type Err = std::convert::Infallible;
 
@@ -234,28 +205,7 @@ pub struct OpenAIClient {
 #[derive(Debug, Serialize)]
 struct OpenAIChatMessage {
     role: String,
-    content: OpenAIMessageContent,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum OpenAIMessageContent {
-    Text(String),
-    Parts(Vec<OpenAIMessagePart>),
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum OpenAIMessagePart {
-    Text { text: String },
-    ImageUrl { image_url: OpenAIImageUrl },
-}
-
-#[derive(Debug, Serialize)]
-struct OpenAIImageUrl {
-    url: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
+    content: OpenAICompatibleMessageContent,
 }
 
 // ResponseFormat and JsonSchemaFormat are now imported from utils
@@ -472,31 +422,6 @@ impl OpenAIClient {
         self
     }
 
-    fn build_message_content(msg: &ChatMessage) -> Result<OpenAIMessageContent> {
-        if msg.media.is_empty() {
-            return Ok(OpenAIMessageContent::Text(msg.content.clone()));
-        }
-
-        let mut parts = Vec::new();
-        if !msg.content.is_empty() {
-            parts.push(OpenAIMessagePart::Text {
-                text: msg.content.clone(),
-            });
-        }
-
-        for media in &msg.media {
-            let url = media_to_url(media, "OpenAI")?;
-            parts.push(OpenAIMessagePart::ImageUrl {
-                image_url: OpenAIImageUrl {
-                    url,
-                    detail: Some("auto".to_string()),
-                },
-            });
-        }
-
-        Ok(OpenAIMessageContent::Parts(parts))
-    }
-
     /// Internal implementation of materialize (without retry logic)
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
@@ -557,7 +482,7 @@ impl OpenAIClient {
             .map(|msg| {
                 Ok(OpenAIChatMessage {
                     role: msg.role.as_str().to_string(),
-                    content: Self::build_message_content(msg)?,
+                    content: build_openai_compatible_message_content(msg, "OpenAI")?,
                 })
             })
             .collect::<Result<Vec<_>>>()
@@ -787,7 +712,7 @@ impl LLMClient for OpenAIClient {
             model: self.config.model.as_str().to_string(),
             messages: vec![OpenAIChatMessage {
                 role: "user".to_string(),
-                content: OpenAIMessageContent::Text(prompt.to_string()),
+                content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
             }],
             response_format: None,
             temperature: effective_temp,
