@@ -23,13 +23,13 @@ fn test_enum_with_data_schema() {
     let schema_obj = UserStatus::schema();
     let schema = schema_obj.to_json();
 
-    // Check that we're using oneOf for complex enums
+    // Check that we're using anyOf for complex enums
     assert!(
-        schema.get("oneOf").is_some(),
-        "Schema should use oneOf for enums with associated data"
+        schema.get("anyOf").is_some(),
+        "Schema should use anyOf for enums with associated data"
     );
 
-    if let Some(Value::Array(variants)) = schema.get("oneOf") {
+    if let Some(Value::Array(variants)) = schema.get("anyOf") {
         // Should have 4 variants
         assert_eq!(variants.len(), 4, "Should have 4 variants");
     }

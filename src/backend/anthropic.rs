@@ -184,6 +184,29 @@ struct ClaudeThinkingConfig {
     budget_tokens: u32,
 }
 
+const DEFAULT_ANTHROPIC_MAX_TOKENS: u32 = 1024;
+
+fn effective_max_tokens(
+    configured_max_tokens: Option<u32>,
+    thinking_config: Option<&ClaudeThinkingConfig>,
+) -> u32 {
+    let configured = configured_max_tokens.unwrap_or(DEFAULT_ANTHROPIC_MAX_TOKENS);
+
+    match thinking_config {
+        Some(thinking) if configured <= thinking.budget_tokens => {
+            let required_min = thinking.budget_tokens.saturating_add(1);
+            warn!(
+                configured_max_tokens = configured,
+                thinking_budget_tokens = thinking.budget_tokens,
+                adjusted_max_tokens = required_min,
+                "Adjusted max_tokens to satisfy Anthropic requirement: max_tokens must be greater than thinking.budget_tokens"
+            );
+            required_min
+        }
+        _ => configured,
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ContentBlock {
     #[serde(rename = "type")]
@@ -374,7 +397,7 @@ impl AnthropicClient {
             model: self.config.model.as_str().to_string(),
             messages: api_messages,
             temperature: effective_temp,
-            max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
+            max_tokens: effective_max_tokens(self.config.max_tokens, thinking_config.as_ref()),
             thinking: thinking_config,
             output_format: Some(output_format),
         };
@@ -490,6 +513,8 @@ impl AnthropicClient {
     ///
     /// When thinking is enabled, the model will engage in extended reasoning before responding.
     /// Note: Temperature is automatically set to 1.0 when thinking is enabled, as required by the API.
+    /// If `max_tokens` is not set (or is too low), it is automatically adjusted so it remains greater
+    /// than the configured thinking budget.
     ///
     /// # Thinking Levels
     ///
@@ -658,7 +683,7 @@ impl LLMClient for AnthropicClient {
                 content: AnthropicMessageContent::Text(prompt.to_string()),
             }],
             temperature: effective_temp,
-            max_tokens: self.config.max_tokens.unwrap_or(1024), // Default to 1024 if not specified
+            max_tokens: effective_max_tokens(self.config.max_tokens, thinking_config.as_ref()),
             thinking: thinking_config,
             output_format: None, // Raw text generation doesn't use structured outputs
         };
@@ -792,5 +817,57 @@ impl LLMClient for AnthropicClient {
 
         debug!(count = models.len(), "Fetched Anthropic models");
         Ok(models)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClaudeThinkingConfig, DEFAULT_ANTHROPIC_MAX_TOKENS, effective_max_tokens};
+
+    fn thinking_config_with_budget(budget_tokens: u32) -> ClaudeThinkingConfig {
+        ClaudeThinkingConfig {
+            thinking_type: "enabled".to_string(),
+            budget_tokens,
+        }
+    }
+
+    #[test]
+    fn effective_max_tokens_uses_default_without_thinking() {
+        let result = effective_max_tokens(None, None);
+        assert_eq!(result, DEFAULT_ANTHROPIC_MAX_TOKENS);
+    }
+
+    #[test]
+    fn effective_max_tokens_uses_configured_without_thinking() {
+        let result = effective_max_tokens(Some(2048), None);
+        assert_eq!(result, 2048);
+    }
+
+    #[test]
+    fn effective_max_tokens_adjusts_default_when_thinking_budget_is_higher() {
+        let thinking = thinking_config_with_budget(2048);
+        let result = effective_max_tokens(None, Some(&thinking));
+        assert_eq!(result, 2049);
+    }
+
+    #[test]
+    fn effective_max_tokens_adjusts_when_configured_equals_budget() {
+        let thinking = thinking_config_with_budget(4096);
+        let result = effective_max_tokens(Some(4096), Some(&thinking));
+        assert_eq!(result, 4097);
+    }
+
+    #[test]
+    fn effective_max_tokens_keeps_configured_when_already_valid() {
+        let thinking = thinking_config_with_budget(2048);
+        let result = effective_max_tokens(Some(8192), Some(&thinking));
+        assert_eq!(result, 8192);
+    }
+
+    #[test]
+    fn effective_max_tokens_saturates_on_extreme_budget() {
+        let thinking = thinking_config_with_budget(u32::MAX);
+        let result = effective_max_tokens(None, Some(&thinking));
+        assert_eq!(result, u32::MAX);
     }
 }
