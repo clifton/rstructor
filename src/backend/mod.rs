@@ -1,6 +1,7 @@
 pub mod client;
 mod media;
 mod messages;
+mod openai_compatible;
 pub mod usage;
 mod utils;
 
@@ -48,6 +49,10 @@ pub struct ModelInfo {
 pub(crate) use media::{
     AnthropicMessageContent, OpenAICompatibleMessageContent, build_anthropic_message_content,
     build_openai_compatible_message_content,
+};
+pub(crate) use openai_compatible::{
+    OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
+    OpenAICompatibleChatMessage, convert_openai_compatible_chat_messages,
 };
 pub(crate) use utils::{
     ResponseFormat, check_response_status, generate_with_retry_with_history, handle_http_error,
