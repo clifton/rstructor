@@ -1,15 +1,16 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ResponseFormat, ThinkingLevel, TokenUsage, ValidationFailureContext,
-    check_response_status, generate_with_retry_with_history, handle_http_error,
-    parse_validate_and_create_output, prepare_strict_schema,
+    ModelInfo, OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
+    OpenAICompatibleChatMessage, OpenAICompatibleMessageContent, ResponseFormat, ThinkingLevel,
+    TokenUsage, ValidationFailureContext, check_response_status,
+    convert_openai_compatible_chat_messages, generate_with_retry_with_history, handle_http_error,
+    materialize_with_media_with_retry, parse_validate_and_create_output, prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -42,6 +43,10 @@ pub enum Model {
     Gpt52Pro,
     /// GPT-5.2 (latest GPT-5 model)
     Gpt52,
+    /// GPT-5.2 Chat Latest (rolling latest chat-optimized GPT-5.2 model)
+    Gpt52ChatLatest,
+    /// GPT-5.2 Codex (latest coding-focused GPT-5.2 model)
+    Gpt52Codex,
     /// GPT-5.1 (GPT-5.1 model)
     Gpt51,
     /// GPT-5 Chat Latest (latest GPT-5 model for chat)
@@ -91,6 +96,8 @@ impl Model {
         match self {
             Model::Gpt52Pro => "gpt-5.2-pro",
             Model::Gpt52 => "gpt-5.2",
+            Model::Gpt52ChatLatest => "gpt-5.2-chat-latest",
+            Model::Gpt52Codex => "gpt-5.2-codex",
             Model::Gpt51 => "gpt-5.1",
             Model::Gpt5ChatLatest => "gpt-5-chat-latest",
             Model::Gpt5Pro => "gpt-5-pro",
@@ -124,6 +131,8 @@ impl Model {
         match name.as_str() {
             "gpt-5.2-pro" => Model::Gpt52Pro,
             "gpt-5.2" => Model::Gpt52,
+            "gpt-5.2-chat-latest" => Model::Gpt52ChatLatest,
+            "gpt-5.2-codex" => Model::Gpt52Codex,
             "gpt-5.1" => Model::Gpt51,
             "gpt-5-chat-latest" => Model::Gpt5ChatLatest,
             "gpt-5-pro" => Model::Gpt5Pro,
@@ -192,59 +201,8 @@ pub struct OpenAIClient {
     client: reqwest::Client,
 }
 
-// OpenAI API request and response structures
-#[derive(Debug, Serialize)]
-struct OpenAIChatMessage {
-    role: String,
-    content: String,
-}
-
-// ResponseFormat and JsonSchemaFormat are now imported from utils
-
-#[derive(Debug, Serialize)]
-struct ChatCompletionRequest {
-    model: String,
-    messages: Vec<OpenAIChatMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    response_format: Option<ResponseFormat>,
-    temperature: f32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u32>,
-    /// Reasoning effort for GPT-5.x models
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning_effort: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ResponseMessage {
-    role: String,
-    content: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct ChatCompletionChoice {
-    message: ResponseMessage,
-    finish_reason: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct UsageInfo {
-    prompt_tokens: u64,
-    completion_tokens: u64,
-    #[serde(default)]
-    total_tokens: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatCompletionResponse {
-    choices: Vec<ChatCompletionChoice>,
-    #[serde(default)]
-    usage: Option<UsageInfo>,
-    model: Option<String>,
-}
+// ResponseFormat and JsonSchemaFormat are imported from utils and shared
+// OpenAI-compatible chat completion request/response types are in openai_compatible.rs.
 
 impl OpenAIClient {
     /// Create a new OpenAI client with the provided API key.
@@ -468,20 +426,15 @@ impl OpenAIClient {
         };
 
         // Convert ChatMessage to OpenAI's format
-        let api_messages: Vec<OpenAIChatMessage> = messages
-            .iter()
-            .map(|msg| OpenAIChatMessage {
-                role: msg.role.as_str().to_string(),
-                content: msg.content.clone(),
-            })
-            .collect();
+        let api_messages =
+            convert_openai_compatible_chat_messages(messages, "OpenAI").map_err(|e| (e, None))?;
 
         // Build the request with native structured outputs
         debug!(
             "Building OpenAI API request with structured outputs (history_len={})",
             api_messages.len()
         );
-        let request = ChatCompletionRequest {
+        let request = OpenAICompatibleChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
             messages: api_messages,
             response_format: Some(response_format),
@@ -514,10 +467,11 @@ impl OpenAIClient {
             .map_err(|e| (e, None))?;
 
         debug!("Successfully received response from OpenAI");
-        let completion: ChatCompletionResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from OpenAI");
-            (RStructorError::from(e), None)
-        })?;
+        let completion: OpenAICompatibleChatCompletionResponse =
+            response.json().await.map_err(|e| {
+                error!(error = %e, "Failed to parse JSON response from OpenAI");
+                (RStructorError::from(e), None)
+            })?;
 
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
@@ -602,6 +556,32 @@ impl LLMClient for OpenAIClient {
     }
 
     #[instrument(
+        name = "openai_materialize_with_media",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media<T>(&self, prompt: &str, media: &[super::MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        materialize_with_media_with_retry(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            media,
+            self.config.max_retries,
+        )
+        .await
+    }
+
+    #[instrument(
         name = "openai_materialize_with_metadata",
         skip(self, prompt),
         fields(
@@ -669,11 +649,11 @@ impl LLMClient for OpenAIClient {
 
         // Build the request for text generation (no structured output)
         debug!("Building OpenAI API request for text generation");
-        let request = ChatCompletionRequest {
+        let request = OpenAICompatibleChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
-            messages: vec![OpenAIChatMessage {
+            messages: vec![OpenAICompatibleChatMessage {
                 role: "user".to_string(),
-                content: prompt.to_string(),
+                content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
             }],
             response_format: None,
             temperature: effective_temp,
@@ -703,10 +683,11 @@ impl LLMClient for OpenAIClient {
         let response = check_response_status(response, "OpenAI").await?;
 
         debug!("Successfully received response from OpenAI");
-        let completion: ChatCompletionResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from OpenAI");
-            e
-        })?;
+        let completion: OpenAICompatibleChatCompletionResponse =
+            response.json().await.map_err(|e| {
+                error!(error = %e, "Failed to parse JSON response from OpenAI");
+                e
+            })?;
 
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");

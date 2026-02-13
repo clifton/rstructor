@@ -1137,7 +1137,7 @@ pub async fn check_response_status(response: Response, provider_name: &str) -> R
 /// * `prompt` - The initial user prompt
 /// * `max_retries` - Maximum number of retry attempts (None or 0 means no retries)
 pub async fn generate_with_retry_with_history<F, Fut, T>(
-    mut generate_fn: F,
+    generate_fn: F,
     prompt: &str,
     max_retries: Option<usize>,
 ) -> Result<MaterializeInternalOutput<T>>
@@ -1150,16 +1150,42 @@ where
             >,
         >,
 {
+    generate_with_retry_with_initial_messages(
+        generate_fn,
+        vec![ChatMessage::user(prompt)],
+        max_retries,
+    )
+    .await
+}
+
+/// Helper function to execute generation with retry logic using a custom initial
+/// conversation history.
+///
+/// This is primarily used for multimodal prompts where the initial user message
+/// may contain attached media in addition to text.
+pub async fn generate_with_retry_with_initial_messages<F, Fut, T>(
+    mut generate_fn: F,
+    initial_messages: Vec<ChatMessage>,
+    max_retries: Option<usize>,
+) -> Result<MaterializeInternalOutput<T>>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<
+                MaterializeInternalOutput<T>,
+                (RStructorError, Option<ValidationFailureContext>),
+            >,
+        >,
+{
     let Some(max_retries) = max_retries.filter(|&n| n > 0) else {
-        // No retries configured - just run once with a single user message
-        let messages = vec![ChatMessage::user(prompt)];
-        return generate_fn(messages).await.map_err(|(err, _)| err);
+        // No retries configured - just run once with the provided initial messages
+        return generate_fn(initial_messages).await.map_err(|(err, _)| err);
     };
 
     let max_attempts = max_retries + 1; // +1 for initial attempt
 
-    // Initialize conversation history with the original user prompt
-    let mut messages = vec![ChatMessage::user(prompt)];
+    // Initialize conversation history with the provided starting messages.
+    let mut messages = initial_messages;
 
     trace!(
         "Starting structured generation with conversation history: max_attempts={}",
@@ -1276,6 +1302,31 @@ where
 
     // This should never be reached due to the returns in the loop
     unreachable!()
+}
+
+/// Helper for provider implementations of `materialize_with_media`.
+///
+/// Builds an initial media-bearing user message and runs the shared retry/history flow.
+pub async fn materialize_with_media_with_retry<F, Fut, T>(
+    generate_fn: F,
+    prompt: &str,
+    media: &[crate::backend::client::MediaFile],
+    max_retries: Option<usize>,
+) -> Result<T>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<
+                MaterializeInternalOutput<T>,
+                (RStructorError, Option<ValidationFailureContext>),
+            >,
+        >,
+{
+    let initial_messages = vec![ChatMessage::user_with_media(prompt, media.to_vec())];
+    let output =
+        generate_with_retry_with_initial_messages(generate_fn, initial_messages, max_retries)
+            .await?;
+    Ok(output.data)
 }
 
 /// Macro to generate standard builder methods for LLM clients.
@@ -2070,5 +2121,80 @@ mod tests {
             schema["properties"]["name"].get("x-enum-keys").is_none(),
             "x-enum-keys should be stripped from non-map schemas"
         );
+    }
+
+    #[tokio::test]
+    async fn test_generate_with_retry_with_initial_messages_preserves_media() {
+        let initial = vec![ChatMessage::user_with_media(
+            "describe image",
+            vec![crate::backend::client::MediaFile::from_bytes(
+                b"hello-image",
+                "image/png",
+            )],
+        )];
+
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| async move {
+                assert_eq!(messages.len(), 1);
+                assert_eq!(messages[0].media.len(), 1);
+                Ok(MaterializeInternalOutput::new(
+                    "ok".to_string(),
+                    "{\"ok\":true}".to_string(),
+                    None,
+                ))
+            },
+            initial,
+            Some(0),
+        )
+        .await
+        .expect("generation should succeed");
+
+        assert_eq!(output.data, "ok");
+    }
+
+    #[tokio::test]
+    async fn test_generate_with_retry_with_initial_messages_adds_feedback_history() {
+        let initial = vec![ChatMessage::user_with_media(
+            "describe image",
+            vec![crate::backend::client::MediaFile::from_bytes(
+                b"hello-image",
+                "image/png",
+            )],
+        )];
+
+        let mut attempts = 0usize;
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                attempts += 1;
+                async move {
+                    if attempts == 1 {
+                        Err((
+                            RStructorError::ValidationError("schema validation failed".to_string()),
+                            Some(ValidationFailureContext::new(
+                                "missing required field: summary",
+                                "{\"subject\":\"rust\"}",
+                            )),
+                        ))
+                    } else {
+                        assert_eq!(messages.len(), 3);
+                        assert_eq!(messages[0].media.len(), 1);
+                        assert_eq!(messages[1].role, crate::backend::ChatRole::Assistant);
+                        assert_eq!(messages[2].role, crate::backend::ChatRole::User);
+                        Ok(MaterializeInternalOutput::new(
+                            "ok".to_string(),
+                            "{\"ok\":true}".to_string(),
+                            None,
+                        ))
+                    }
+                }
+            },
+            initial,
+            Some(1),
+        )
+        .await
+        .expect("generation should succeed after retry");
+
+        assert_eq!(attempts, 2);
+        assert_eq!(output.data, "ok");
     }
 }

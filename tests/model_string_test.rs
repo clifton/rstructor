@@ -20,6 +20,12 @@ mod tests {
         let model = OpenAIModel::from_str("gpt-4o-mini").unwrap();
         assert_eq!(model, OpenAIModel::Gpt4OMini);
 
+        let model = OpenAIModel::from_str("gpt-5.2-chat-latest").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt52ChatLatest);
+
+        let model = OpenAIModel::from_str("gpt-5.2-codex").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt52Codex);
+
         // Test From<&str>
         let model: OpenAIModel = "gpt-3.5-turbo".into();
         assert_eq!(model, OpenAIModel::Gpt35Turbo);
@@ -94,6 +100,9 @@ mod tests {
         // Test known model
         let model = GeminiModel::from_string("gemini-2.5-flash");
         assert_eq!(model, GeminiModel::Gemini25Flash);
+
+        let model = GeminiModel::from_string("gemini-2.5-flash-image");
+        assert_eq!(model, GeminiModel::Gemini25FlashImage);
 
         // Test custom model
         let model = GeminiModel::from_string("gemini-custom");

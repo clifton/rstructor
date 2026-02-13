@@ -9,7 +9,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error, parse_validate_and_create_output,
+    generate_with_retry_with_history, handle_http_error, materialize_with_media_with_retry,
+    parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -50,12 +51,16 @@ pub enum Model {
     Gemini25Flash,
     /// Gemini 2.5 Flash Lite (smaller, faster variant)
     Gemini25FlashLite,
+    /// Gemini 2.5 Flash Image (image generation/analysis tuned variant)
+    Gemini25FlashImage,
     /// Gemini 2.0 Flash (stable 2.0 Flash model)
     Gemini20Flash,
     /// Gemini 2.0 Flash 001 (specific version of 2.0 Flash)
     Gemini20Flash001,
     /// Gemini 2.0 Flash Lite (smaller 2.0 Flash variant)
     Gemini20FlashLite,
+    /// Gemini 2.0 Flash Lite 001 (specific version of 2.0 Flash Lite)
+    Gemini20FlashLite001,
     /// Gemini Pro Latest (alias for latest Pro model)
     GeminiProLatest,
     /// Gemini Flash Latest (alias for latest Flash model)
@@ -74,9 +79,11 @@ impl Model {
             Model::Gemini25Pro => "gemini-2.5-pro",
             Model::Gemini25Flash => "gemini-2.5-flash",
             Model::Gemini25FlashLite => "gemini-2.5-flash-lite",
+            Model::Gemini25FlashImage => "gemini-2.5-flash-image",
             Model::Gemini20Flash => "gemini-2.0-flash",
             Model::Gemini20Flash001 => "gemini-2.0-flash-001",
             Model::Gemini20FlashLite => "gemini-2.0-flash-lite",
+            Model::Gemini20FlashLite001 => "gemini-2.0-flash-lite-001",
             Model::GeminiProLatest => "gemini-pro-latest",
             Model::GeminiFlashLatest => "gemini-flash-latest",
             Model::GeminiFlashLiteLatest => "gemini-flash-lite-latest",
@@ -96,9 +103,11 @@ impl Model {
             "gemini-2.5-pro" => Model::Gemini25Pro,
             "gemini-2.5-flash" => Model::Gemini25Flash,
             "gemini-2.5-flash-lite" => Model::Gemini25FlashLite,
+            "gemini-2.5-flash-image" => Model::Gemini25FlashImage,
             "gemini-2.0-flash" => Model::Gemini20Flash,
             "gemini-2.0-flash-001" => Model::Gemini20Flash001,
             "gemini-2.0-flash-lite" => Model::Gemini20FlashLite,
+            "gemini-2.0-flash-lite-001" => Model::Gemini20FlashLite001,
             "gemini-pro-latest" => Model::GeminiProLatest,
             "gemini-flash-latest" => Model::GeminiFlashLatest,
             "gemini-flash-lite-latest" => Model::GeminiFlashLiteLatest,
@@ -652,14 +661,16 @@ impl LLMClient for GeminiClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        // For media support, we need to create a ChatMessage with media and pass it directly
-        // We can't use generate_with_retry_with_history since it only takes a string prompt
-        let initial_message = ChatMessage::user_with_media(prompt, media.to_vec());
-        let output = self
-            .materialize_internal::<T>(&[initial_message])
-            .await
-            .map_err(|(err, _)| err)?;
-        Ok(output.data)
+        materialize_with_media_with_retry(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            media,
+            self.config.max_retries,
+        )
+        .await
     }
 
     #[instrument(

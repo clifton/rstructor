@@ -7,9 +7,10 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
-    ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error, parse_validate_and_create_output,
+    AnthropicMessageContent, ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput,
+    MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext,
+    build_anthropic_message_content, check_response_status, generate_with_retry_with_history,
+    handle_http_error, materialize_with_media_with_retry, parse_validate_and_create_output,
     prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
@@ -153,7 +154,7 @@ pub struct AnthropicClient {
 #[derive(Debug, Serialize)]
 struct AnthropicMessage {
     role: String,
-    content: String,
+    content: AnthropicMessageContent,
 }
 
 /// Output format for structured outputs (native Anthropic structured outputs)
@@ -351,11 +352,14 @@ impl AnthropicClient {
         // With native structured outputs, we don't need to include schema instructions in the prompt
         let api_messages: Vec<AnthropicMessage> = messages
             .iter()
-            .map(|msg| AnthropicMessage {
-                role: msg.role.as_str().to_string(),
-                content: msg.content.clone(),
+            .map(|msg| {
+                Ok(AnthropicMessage {
+                    role: msg.role.as_str().to_string(),
+                    content: build_anthropic_message_content(msg)?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()
+            .map_err(|e| (e, None))?;
 
         // Build thinking config for Claude 4.x models
         let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
@@ -575,6 +579,32 @@ impl LLMClient for AnthropicClient {
     }
 
     #[instrument(
+        name = "anthropic_materialize_with_media",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media<T>(&self, prompt: &str, media: &[super::MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        materialize_with_media_with_retry(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            media,
+            self.config.max_retries,
+        )
+        .await
+    }
+
+    #[instrument(
         name = "anthropic_materialize_with_metadata",
         skip(self, prompt),
         fields(
@@ -650,7 +680,7 @@ impl LLMClient for AnthropicClient {
             model: self.config.model.as_str().to_string(),
             messages: vec![AnthropicMessage {
                 role: "user".to_string(),
-                content: prompt.to_string(),
+                content: AnthropicMessageContent::Text(prompt.to_string()),
             }],
             temperature: effective_temp,
             max_tokens: effective_max_tokens(self.config.max_tokens, thinking_config.as_ref()),
