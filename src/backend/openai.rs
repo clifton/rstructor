@@ -8,7 +8,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, ResponseFormat, ThinkingLevel, TokenUsage, ValidationFailureContext,
-    check_response_status, generate_with_retry_with_history, handle_http_error,
+    check_response_status, generate_with_retry_with_history,
+    generate_with_retry_with_initial_messages, handle_http_error, media_to_url,
     parse_validate_and_create_output, prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
@@ -42,6 +43,10 @@ pub enum Model {
     Gpt52Pro,
     /// GPT-5.2 (latest GPT-5 model)
     Gpt52,
+    /// GPT-5.2 Chat Latest (rolling latest chat-optimized GPT-5.2 model)
+    Gpt52ChatLatest,
+    /// GPT-5.2 Codex (latest coding-focused GPT-5.2 model)
+    Gpt52Codex,
     /// GPT-5.1 (GPT-5.1 model)
     Gpt51,
     /// GPT-5 Chat Latest (latest GPT-5 model for chat)
@@ -91,6 +96,8 @@ impl Model {
         match self {
             Model::Gpt52Pro => "gpt-5.2-pro",
             Model::Gpt52 => "gpt-5.2",
+            Model::Gpt52ChatLatest => "gpt-5.2-chat-latest",
+            Model::Gpt52Codex => "gpt-5.2-codex",
             Model::Gpt51 => "gpt-5.1",
             Model::Gpt5ChatLatest => "gpt-5-chat-latest",
             Model::Gpt5Pro => "gpt-5-pro",
@@ -124,6 +131,8 @@ impl Model {
         match name.as_str() {
             "gpt-5.2-pro" => Model::Gpt52Pro,
             "gpt-5.2" => Model::Gpt52,
+            "gpt-5.2-chat-latest" => Model::Gpt52ChatLatest,
+            "gpt-5.2-codex" => Model::Gpt52Codex,
             "gpt-5.1" => Model::Gpt51,
             "gpt-5-chat-latest" => Model::Gpt5ChatLatest,
             "gpt-5-pro" => Model::Gpt5Pro,
@@ -146,6 +155,35 @@ impl Model {
             "o1-pro" => Model::O1Pro,
             _ => Model::Custom(name),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::MediaFile;
+
+    #[test]
+    fn test_openai_message_content_text_only_serializes_as_string() {
+        let msg = ChatMessage::user("hello");
+        let content = OpenAIClient::build_message_content(&msg).expect("content should build");
+        let json = serde_json::to_value(&content).expect("content should serialize");
+        assert_eq!(json, serde_json::json!("hello"));
+    }
+
+    #[test]
+    fn test_openai_message_content_with_media_serializes_as_parts() {
+        let msg = ChatMessage::user_with_media(
+            "what is in this image?",
+            vec![MediaFile::from_bytes(b"abc", "image/png")],
+        );
+        let content = OpenAIClient::build_message_content(&msg).expect("content should build");
+        let json = serde_json::to_value(&content).expect("content should serialize");
+
+        assert_eq!(json[0]["type"], "text");
+        assert_eq!(json[0]["text"], "what is in this image?");
+        assert_eq!(json[1]["type"], "image_url");
+        assert_eq!(json[1]["image_url"]["url"], "data:image/png;base64,YWJj");
     }
 }
 
@@ -196,7 +234,28 @@ pub struct OpenAIClient {
 #[derive(Debug, Serialize)]
 struct OpenAIChatMessage {
     role: String,
-    content: String,
+    content: OpenAIMessageContent,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum OpenAIMessageContent {
+    Text(String),
+    Parts(Vec<OpenAIMessagePart>),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum OpenAIMessagePart {
+    Text { text: String },
+    ImageUrl { image_url: OpenAIImageUrl },
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAIImageUrl {
+    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 // ResponseFormat and JsonSchemaFormat are now imported from utils
@@ -413,6 +472,31 @@ impl OpenAIClient {
         self
     }
 
+    fn build_message_content(msg: &ChatMessage) -> Result<OpenAIMessageContent> {
+        if msg.media.is_empty() {
+            return Ok(OpenAIMessageContent::Text(msg.content.clone()));
+        }
+
+        let mut parts = Vec::new();
+        if !msg.content.is_empty() {
+            parts.push(OpenAIMessagePart::Text {
+                text: msg.content.clone(),
+            });
+        }
+
+        for media in &msg.media {
+            let url = media_to_url(media, "OpenAI")?;
+            parts.push(OpenAIMessagePart::ImageUrl {
+                image_url: OpenAIImageUrl {
+                    url,
+                    detail: Some("auto".to_string()),
+                },
+            });
+        }
+
+        Ok(OpenAIMessageContent::Parts(parts))
+    }
+
     /// Internal implementation of materialize (without retry logic)
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
@@ -470,11 +554,14 @@ impl OpenAIClient {
         // Convert ChatMessage to OpenAI's format
         let api_messages: Vec<OpenAIChatMessage> = messages
             .iter()
-            .map(|msg| OpenAIChatMessage {
-                role: msg.role.as_str().to_string(),
-                content: msg.content.clone(),
+            .map(|msg| {
+                Ok(OpenAIChatMessage {
+                    role: msg.role.as_str().to_string(),
+                    content: Self::build_message_content(msg)?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()
+            .map_err(|e| (e, None))?;
 
         // Build the request with native structured outputs
         debug!(
@@ -602,6 +689,33 @@ impl LLMClient for OpenAIClient {
     }
 
     #[instrument(
+        name = "openai_materialize_with_media",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media<T>(&self, prompt: &str, media: &[super::MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let initial_messages = vec![ChatMessage::user_with_media(prompt, media.to_vec())];
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            initial_messages,
+            self.config.max_retries,
+        )
+        .await?;
+        Ok(output.data)
+    }
+
+    #[instrument(
         name = "openai_materialize_with_metadata",
         skip(self, prompt),
         fields(
@@ -673,7 +787,7 @@ impl LLMClient for OpenAIClient {
             model: self.config.model.as_str().to_string(),
             messages: vec![OpenAIChatMessage {
                 role: "user".to_string(),
-                content: prompt.to_string(),
+                content: OpenAIMessageContent::Text(prompt.to_string()),
             }],
             response_format: None,
             temperature: effective_temp,

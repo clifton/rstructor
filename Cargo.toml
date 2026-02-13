@@ -60,7 +60,7 @@ tracing-subscriber = { version = "0.3", features = [
 tracing-futures = { version = "0.2", optional = true }
 rstructor_derive = { version = "0.2.8", path = "./rstructor_derive", optional = true }
 chrono = "0.4" # For date/time validation in examples
-base64 = { version = "0.22", optional = true }
+base64 = "0.22"
 
 # Feature flags
 [features]
@@ -68,7 +68,7 @@ default = ["openai", "anthropic", "grok", "gemini", "derive", "logging"]
 openai = ["reqwest", "tokio"]
 anthropic = ["reqwest", "tokio"]
 grok = ["reqwest", "tokio"]
-gemini = ["reqwest", "tokio", "base64"]
+gemini = ["reqwest", "tokio"]
 derive = ["rstructor_derive"]
 logging = ["tracing-subscriber", "tracing-futures"]
 

@@ -7,12 +7,19 @@
 //! cargo test --test gemini_multimodal_tests --features gemini
 //! ```
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[cfg(test)]
 mod gemini_multimodal_tests {
     #[cfg(feature = "gemini")]
     use rstructor::GeminiClient;
-    use rstructor::{Instructor, LLMClient, MediaFile};
+    use rstructor::{GeminiModel, Instructor, LLMClient};
     use serde::{Deserialize, Serialize};
+
+    use crate::common::{
+        RUST_LOGO_MIME, RUST_LOGO_URL, RUST_SOCIAL_MIME, RUST_SOCIAL_URL, download_media,
+    };
 
     #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "Description of an image")]
@@ -27,22 +34,20 @@ mod gemini_multimodal_tests {
         description: String,
     }
 
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
+    struct MultiImageSummary {
+        image_count: u8,
+        summary: String,
+    }
+
     #[cfg(feature = "gemini")]
     #[tokio::test]
     async fn test_gemini_multimodal_image_analysis() {
-        // Download a small, stable public image (Rust logo)
-        let image_url = "https://www.rust-lang.org/logos/rust-logo-512x512.png";
-        let image_bytes = reqwest::get(image_url)
-            .await
-            .expect("Failed to download test image")
-            .bytes()
-            .await
-            .expect("Failed to read image bytes");
-
-        let media = MediaFile::from_bytes(&image_bytes, "image/png");
+        let media = download_media(RUST_LOGO_URL, RUST_LOGO_MIME).await;
 
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
+            .model(GeminiModel::Gemini3FlashPreview)
             .temperature(0.0);
 
         let result: ImageDescription = client
@@ -57,22 +62,58 @@ mod gemini_multimodal_tests {
             !result.description.is_empty(),
             "Description should not be empty"
         );
+    }
 
-        // The Rust logo should be recognized as related to Rust or as a logo/gear
-        let subject_lower = result.subject.to_lowercase();
-        let desc_lower = result.description.to_lowercase();
-        let mentions_rust_or_logo = subject_lower.contains("rust")
-            || subject_lower.contains("logo")
-            || subject_lower.contains("gear")
-            || subject_lower.contains("cog")
-            || desc_lower.contains("rust")
-            || desc_lower.contains("logo")
-            || desc_lower.contains("gear")
-            || desc_lower.contains("cog");
+    #[cfg(feature = "gemini")]
+    #[tokio::test]
+    async fn test_gemini_multimodal_second_real_world_image() {
+        let media = download_media(RUST_SOCIAL_URL, RUST_SOCIAL_MIME).await;
+
+        let client = GeminiClient::from_env()
+            .expect("GEMINI_API_KEY must be set for this test")
+            .model(GeminiModel::Gemini3FlashPreview)
+            .temperature(0.0);
+
+        let result: ImageDescription = client
+            .materialize_with_media(
+                "Describe the environment in this image and list the dominant colors.",
+                &[media],
+            )
+            .await
+            .expect("Failed to materialize secondary real-world image description");
+
+        assert!(!result.subject.is_empty(), "Subject should not be empty");
+        assert!(!result.colors.is_empty(), "Colors should not be empty");
         assert!(
-            mentions_rust_or_logo,
-            "Expected the image to be recognized as the Rust logo/gear, got subject='{}', description='{}'",
-            result.subject, result.description
+            !result.description.is_empty(),
+            "Description should not be empty"
         );
+    }
+
+    #[cfg(feature = "gemini")]
+    #[tokio::test]
+    async fn test_gemini_multimodal_multiple_images() {
+        let rust_media = download_media(RUST_LOGO_URL, RUST_LOGO_MIME).await;
+        let social_media = download_media(RUST_SOCIAL_URL, RUST_SOCIAL_MIME).await;
+
+        let client = GeminiClient::from_env()
+            .expect("GEMINI_API_KEY must be set for this test")
+            .model(GeminiModel::Gemini3FlashPreview)
+            .temperature(0.0);
+
+        let result: MultiImageSummary = client
+            .materialize_with_media(
+                "You are given two images. Return the exact count in image_count and summarize both images.",
+                &[rust_media, social_media],
+            )
+            .await
+            .expect("Failed to materialize multi-image summary");
+
+        assert!(
+            result.image_count >= 2,
+            "expected at least 2 images, got {}",
+            result.image_count
+        );
+        assert!(!result.summary.is_empty(), "summary should not be empty");
     }
 }

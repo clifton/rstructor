@@ -8,8 +8,8 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, ResponseFormat, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error, parse_validate_and_create_output,
-    prepare_strict_schema,
+    generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
+    media_to_url, parse_validate_and_create_output, prepare_strict_schema,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -98,6 +98,35 @@ impl Model {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::MediaFile;
+
+    #[test]
+    fn test_grok_message_content_text_only_serializes_as_string() {
+        let msg = ChatMessage::user("hello");
+        let content = GrokClient::build_message_content(&msg).expect("content should build");
+        let json = serde_json::to_value(&content).expect("content should serialize");
+        assert_eq!(json, serde_json::json!("hello"));
+    }
+
+    #[test]
+    fn test_grok_message_content_with_media_serializes_as_parts() {
+        let msg = ChatMessage::user_with_media(
+            "describe image",
+            vec![MediaFile::from_bytes(b"abc", "image/png")],
+        );
+        let content = GrokClient::build_message_content(&msg).expect("content should build");
+        let json = serde_json::to_value(&content).expect("content should serialize");
+
+        assert_eq!(json[0]["type"], "text");
+        assert_eq!(json[0]["text"], "describe image");
+        assert_eq!(json[1]["type"], "image_url");
+        assert_eq!(json[1]["image_url"]["url"], "data:image/png;base64,YWJj");
+    }
+}
+
 impl FromStr for Model {
     type Err = std::convert::Infallible;
 
@@ -142,7 +171,28 @@ pub struct GrokClient {
 #[derive(Debug, Serialize)]
 struct GrokChatMessage {
     role: String,
-    content: String,
+    content: GrokMessageContent,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum GrokMessageContent {
+    Text(String),
+    Parts(Vec<GrokMessagePart>),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum GrokMessagePart {
+    Text { text: String },
+    ImageUrl { image_url: GrokImageUrl },
+}
+
+#[derive(Debug, Serialize)]
+struct GrokImageUrl {
+    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 // ResponseFormat and JsonSchemaFormat are now imported from utils
@@ -279,6 +329,31 @@ impl GrokClient {
 }
 
 impl GrokClient {
+    fn build_message_content(msg: &ChatMessage) -> Result<GrokMessageContent> {
+        if msg.media.is_empty() {
+            return Ok(GrokMessageContent::Text(msg.content.clone()));
+        }
+
+        let mut parts = Vec::new();
+        if !msg.content.is_empty() {
+            parts.push(GrokMessagePart::Text {
+                text: msg.content.clone(),
+            });
+        }
+
+        for media in &msg.media {
+            let url = media_to_url(media, "Grok")?;
+            parts.push(GrokMessagePart::ImageUrl {
+                image_url: GrokImageUrl {
+                    url,
+                    detail: Some("auto".to_string()),
+                },
+            });
+        }
+
+        Ok(GrokMessageContent::Parts(parts))
+    }
+
     /// Internal implementation of materialize (without retry logic)
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
@@ -312,11 +387,14 @@ impl GrokClient {
         // With native structured outputs, we don't need to include schema instructions in the prompt
         let api_messages: Vec<GrokChatMessage> = messages
             .iter()
-            .map(|msg| GrokChatMessage {
-                role: msg.role.as_str().to_string(),
-                content: msg.content.clone(),
+            .map(|msg| {
+                Ok(GrokChatMessage {
+                    role: msg.role.as_str().to_string(),
+                    content: Self::build_message_content(msg)?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()
+            .map_err(|e| (e, None))?;
 
         // Create response format for native structured outputs
         let response_format = ResponseFormat::json_schema(schema_name.clone(), schema_json, None);
@@ -471,6 +549,33 @@ impl LLMClient for GrokClient {
     }
 
     #[instrument(
+        name = "grok_materialize_with_media",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media<T>(&self, prompt: &str, media: &[super::MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let initial_messages = vec![ChatMessage::user_with_media(prompt, media.to_vec())];
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            initial_messages,
+            self.config.max_retries,
+        )
+        .await?;
+        Ok(output.data)
+    }
+
+    #[instrument(
         name = "grok_materialize_with_metadata",
         skip(self, prompt),
         fields(
@@ -525,7 +630,7 @@ impl LLMClient for GrokClient {
             model: self.config.model.as_str().to_string(),
             messages: vec![GrokChatMessage {
                 role: "user".to_string(),
-                content: prompt.to_string(),
+                content: GrokMessageContent::Text(prompt.to_string()),
             }],
             response_format: None,
             temperature: self.config.temperature,

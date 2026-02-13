@@ -11,6 +11,47 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, trace, warn};
 
+/// Convert a `MediaFile` into a provider-ready URL string.
+///
+/// - If inline base64 data is present, this returns a RFC 2397 data URL:
+///   `data:{mime_type};base64,{data}`.
+/// - Otherwise, it returns the media URI.
+///
+/// Returns a `BadRequest` error if both data and URI are missing.
+pub(crate) fn media_to_url(
+    media: &crate::backend::client::MediaFile,
+    provider_name: &str,
+) -> Result<String> {
+    if let Some(data) = media.data.as_ref() {
+        if data.is_empty() {
+            return Err(RStructorError::api_error(
+                provider_name,
+                ApiErrorKind::BadRequest {
+                    details: "MediaFile inline data cannot be empty".to_string(),
+                },
+            ));
+        }
+        if media.mime_type.is_empty() {
+            return Err(RStructorError::api_error(
+                provider_name,
+                ApiErrorKind::BadRequest {
+                    details: "MediaFile mime_type cannot be empty".to_string(),
+                },
+            ));
+        }
+        Ok(format!("data:{};base64,{}", media.mime_type, data))
+    } else if !media.uri.is_empty() {
+        Ok(media.uri.clone())
+    } else {
+        Err(RStructorError::api_error(
+            provider_name,
+            ApiErrorKind::BadRequest {
+                details: "MediaFile must include either inline data or uri".to_string(),
+            },
+        ))
+    }
+}
+
 /// Prepare a JSON schema for strict mode by recursively adding required fields
 /// to all object types in the schema.
 ///
@@ -1138,7 +1179,7 @@ pub async fn check_response_status(response: Response, provider_name: &str) -> R
 /// * `prompt` - The initial user prompt
 /// * `max_retries` - Maximum number of retry attempts (None or 0 means no retries)
 pub async fn generate_with_retry_with_history<F, Fut, T>(
-    mut generate_fn: F,
+    generate_fn: F,
     prompt: &str,
     max_retries: Option<usize>,
 ) -> Result<MaterializeInternalOutput<T>>
@@ -1151,16 +1192,42 @@ where
             >,
         >,
 {
+    generate_with_retry_with_initial_messages(
+        generate_fn,
+        vec![ChatMessage::user(prompt)],
+        max_retries,
+    )
+    .await
+}
+
+/// Helper function to execute generation with retry logic using a custom initial
+/// conversation history.
+///
+/// This is primarily used for multimodal prompts where the initial user message
+/// may contain attached media in addition to text.
+pub async fn generate_with_retry_with_initial_messages<F, Fut, T>(
+    mut generate_fn: F,
+    initial_messages: Vec<ChatMessage>,
+    max_retries: Option<usize>,
+) -> Result<MaterializeInternalOutput<T>>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<
+                MaterializeInternalOutput<T>,
+                (RStructorError, Option<ValidationFailureContext>),
+            >,
+        >,
+{
     let Some(max_retries) = max_retries.filter(|&n| n > 0) else {
-        // No retries configured - just run once with a single user message
-        let messages = vec![ChatMessage::user(prompt)];
-        return generate_fn(messages).await.map_err(|(err, _)| err);
+        // No retries configured - just run once with the provided initial messages
+        return generate_fn(initial_messages).await.map_err(|(err, _)| err);
     };
 
     let max_attempts = max_retries + 1; // +1 for initial attempt
 
-    // Initialize conversation history with the original user prompt
-    let mut messages = vec![ChatMessage::user(prompt)];
+    // Initialize conversation history with the provided starting messages.
+    let mut messages = initial_messages;
 
     trace!(
         "Starting structured generation with conversation history: max_attempts={}",
@@ -1974,5 +2041,98 @@ mod tests {
             schema["properties"]["name"].get("x-enum-keys").is_none(),
             "x-enum-keys should be stripped from non-map schemas"
         );
+    }
+
+    #[test]
+    fn test_media_to_url_inline_data() {
+        let media = crate::backend::client::MediaFile::from_bytes(b"abc", "image/png");
+        let url = media_to_url(&media, "TestProvider").expect("media_to_url should succeed");
+        assert_eq!(url, "data:image/png;base64,YWJj");
+    }
+
+    #[test]
+    fn test_media_to_url_requires_data_or_uri() {
+        let media = crate::backend::client::MediaFile::new("", "image/png");
+        let err = media_to_url(&media, "TestProvider")
+            .expect_err("media_to_url should fail for empty uri and no data");
+        assert!(matches!(
+            err.api_error_kind(),
+            Some(ApiErrorKind::BadRequest { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_generate_with_retry_with_initial_messages_preserves_media() {
+        let initial = vec![ChatMessage::user_with_media(
+            "describe image",
+            vec![crate::backend::client::MediaFile::from_bytes(
+                b"hello-image",
+                "image/png",
+            )],
+        )];
+
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| async move {
+                assert_eq!(messages.len(), 1);
+                assert_eq!(messages[0].media.len(), 1);
+                Ok(MaterializeInternalOutput::new(
+                    "ok".to_string(),
+                    "{\"ok\":true}".to_string(),
+                    None,
+                ))
+            },
+            initial,
+            Some(0),
+        )
+        .await
+        .expect("generation should succeed");
+
+        assert_eq!(output.data, "ok");
+    }
+
+    #[tokio::test]
+    async fn test_generate_with_retry_with_initial_messages_adds_feedback_history() {
+        let initial = vec![ChatMessage::user_with_media(
+            "describe image",
+            vec![crate::backend::client::MediaFile::from_bytes(
+                b"hello-image",
+                "image/png",
+            )],
+        )];
+
+        let mut attempts = 0usize;
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                attempts += 1;
+                async move {
+                    if attempts == 1 {
+                        Err((
+                            RStructorError::ValidationError("schema validation failed".to_string()),
+                            Some(ValidationFailureContext::new(
+                                "missing required field: summary",
+                                "{\"subject\":\"rust\"}",
+                            )),
+                        ))
+                    } else {
+                        assert_eq!(messages.len(), 3);
+                        assert_eq!(messages[0].media.len(), 1);
+                        assert_eq!(messages[1].role, crate::backend::ChatRole::Assistant);
+                        assert_eq!(messages[2].role, crate::backend::ChatRole::User);
+                        Ok(MaterializeInternalOutput::new(
+                            "ok".to_string(),
+                            "{\"ok\":true}".to_string(),
+                            None,
+                        ))
+                    }
+                }
+            },
+            initial,
+            Some(1),
+        )
+        .await
+        .expect("generation should succeed after retry");
+
+        assert_eq!(attempts, 2);
+        assert_eq!(output.data, "ok");
     }
 }

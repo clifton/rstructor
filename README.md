@@ -201,29 +201,28 @@ struct Event {
 
 ## Multimodal (Image Input)
 
-Analyze images with structured extraction using Gemini's inline data support:
+Analyze images with structured extraction across all major providers using `materialize_with_media`:
 
 ```rust
-use rstructor::{Instructor, LLMClient, GeminiClient, MediaFile};
+use rstructor::{Instructor, LLMClient, OpenAIClient, MediaFile};
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 struct ImageAnalysis {
     subject: String,
-    colors: Vec<String>,
-    is_logo: bool,
-    description: String,
+    summary: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Download or load image bytes
+    // Download or load image bytes (real-world fixture)
     let image_bytes = reqwest::get("https://example.com/image.png")
         .await?.bytes().await?;
 
-    // Create inline media from bytes (base64-encoded automatically)
+    // Inline media is base64-encoded automatically
     let media = MediaFile::from_bytes(&image_bytes, "image/png");
 
-    let client = GeminiClient::from_env()?;
+    // Works with OpenAI, Anthropic, Grok, and Gemini clients
+    let client = OpenAIClient::from_env()?;
     let analysis: ImageAnalysis = client
         .materialize_with_media("Describe this image", &[media])
         .await?;
@@ -232,7 +231,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`MediaFile::new(uri, mime_type)` is also available for Gemini Files API / GCS URIs.
+`MediaFile::new(uri, mime_type)` is also available for URL/URI-based media input.
+
+Provider examples:
+- `cargo run --example openai_multimodal_example --features openai`
+- `cargo run --example anthropic_multimodal_example --features anthropic`
+- `cargo run --example grok_multimodal_example --features grok`
+- `cargo run --example gemini_multimodal_example --features gemini`
 
 ## Extended Thinking
 
