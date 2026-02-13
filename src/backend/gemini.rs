@@ -9,7 +9,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
+    generate_with_retry_with_history, handle_http_error, materialize_with_media_with_retry,
     parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
@@ -661,19 +661,16 @@ impl LLMClient for GeminiClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        // Use the same retry/history path as text-only materialize, but seed it with
-        // an initial user message containing media so retries preserve context.
-        let initial_messages = vec![ChatMessage::user_with_media(prompt, media.to_vec())];
-        let output = generate_with_retry_with_initial_messages(
+        materialize_with_media_with_retry(
             |messages: Vec<ChatMessage>| {
                 let this = self;
                 async move { this.materialize_internal::<T>(&messages).await }
             },
-            initial_messages,
+            prompt,
+            media,
             self.config.max_retries,
         )
-        .await?;
-        Ok(output.data)
+        .await
     }
 
     #[instrument(

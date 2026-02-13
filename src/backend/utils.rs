@@ -1305,6 +1305,31 @@ where
     unreachable!()
 }
 
+/// Helper for provider implementations of `materialize_with_media`.
+///
+/// Builds an initial media-bearing user message and runs the shared retry/history flow.
+pub async fn materialize_with_media_with_retry<F, Fut, T>(
+    generate_fn: F,
+    prompt: &str,
+    media: &[crate::backend::client::MediaFile],
+    max_retries: Option<usize>,
+) -> Result<T>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<
+                MaterializeInternalOutput<T>,
+                (RStructorError, Option<ValidationFailureContext>),
+            >,
+        >,
+{
+    let initial_messages = vec![ChatMessage::user_with_media(prompt, media.to_vec())];
+    let output =
+        generate_with_retry_with_initial_messages(generate_fn, initial_messages, max_retries)
+            .await?;
+    Ok(output.data)
+}
+
 /// Macro to generate standard builder methods for LLM clients.
 ///
 /// This macro generates `model()`, `temperature()`, `max_tokens()`, and `timeout()` methods

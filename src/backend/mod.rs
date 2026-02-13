@@ -50,9 +50,8 @@ pub(crate) use media::{
     build_openai_compatible_message_content,
 };
 pub(crate) use utils::{
-    ResponseFormat, check_response_status, generate_with_retry_with_history,
-    generate_with_retry_with_initial_messages, handle_http_error, parse_validate_and_create_output,
-    prepare_strict_schema,
+    ResponseFormat, check_response_status, generate_with_retry_with_history, handle_http_error,
+    materialize_with_media_with_retry, parse_validate_and_create_output, prepare_strict_schema,
 };
 
 /// Thinking level configuration for models that support extended reasoning.
