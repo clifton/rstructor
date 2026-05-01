@@ -482,6 +482,60 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
         return generate_field_schema(inner_ty, description);
     }
 
+    // Extract type name for well-known library types
+    let type_name = if let Type::Path(type_path) = actual_type {
+        type_path.path.segments.first().map(|s| s.ident.to_string())
+    } else {
+        None
+    };
+
+    // Handle date/time types
+    let is_datetime_type = matches!(
+        type_name.as_deref(),
+        Some("DateTime") | Some("NaiveDateTime")
+    );
+    let is_date_only_type = matches!(type_name.as_deref(), Some("NaiveDate") | Some("Date"));
+    let is_uuid_type = matches!(type_name.as_deref(), Some("Uuid"));
+
+    if is_datetime_type {
+        let date_desc = description
+            .clone()
+            .unwrap_or_else(|| "ISO-8601 formatted date and time".to_string());
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "date-time",
+                "description": #date_desc
+            })
+        };
+    }
+
+    if is_date_only_type {
+        let date_desc = description
+            .clone()
+            .unwrap_or_else(|| "ISO-8601 formatted date (YYYY-MM-DD)".to_string());
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "date",
+                "description": #date_desc
+            })
+        };
+    }
+
+    if is_uuid_type {
+        let uuid_desc = description
+            .clone()
+            .unwrap_or_else(|| "UUID identifier string".to_string());
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "uuid",
+                "description": #uuid_desc
+            })
+        };
+    }
+
     // Handle tuples
     if is_tuple_type(actual_type)
         && let Some(element_types) = get_tuple_element_types(actual_type)
@@ -522,6 +576,60 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
     if is_array_type(actual_type) {
         if let Some(inner_type) = get_array_inner_type(actual_type) {
             let inner_schema_type = get_schema_type_from_rust_type(inner_type);
+
+            // Extract inner type name for well-known library types
+            let inner_type_name = if let Type::Path(type_path) = inner_type {
+                type_path.path.segments.first().map(|s| s.ident.to_string())
+            } else {
+                None
+            };
+
+            let is_inner_datetime = matches!(
+                inner_type_name.as_deref(),
+                Some("DateTime") | Some("NaiveDateTime")
+            );
+            let is_inner_date_only =
+                matches!(inner_type_name.as_deref(), Some("NaiveDate") | Some("Date"));
+            let is_inner_uuid = matches!(inner_type_name.as_deref(), Some("Uuid"));
+
+            if is_inner_datetime {
+                return quote! {
+                    ::serde_json::json!({
+                        "type": "array",
+                        #desc_prop
+                        "items": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    })
+                };
+            }
+
+            if is_inner_date_only {
+                return quote! {
+                    ::serde_json::json!({
+                        "type": "array",
+                        #desc_prop
+                        "items": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    })
+                };
+            }
+
+            if is_inner_uuid {
+                return quote! {
+                    ::serde_json::json!({
+                        "type": "array",
+                        #desc_prop
+                        "items": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    })
+                };
+            }
 
             if inner_schema_type == "object" {
                 // For arrays of complex types
