@@ -61,25 +61,54 @@ pub fn generate_struct_schema(
                     None
                 };
 
+                // Also extract the inner type name when the field is Optional,
+                // so Option<NaiveDate>, Option<DateTime>, Option<Uuid> etc. get proper format metadata
+                let inner_type_name = if is_optional {
+                    if let Type::Path(type_path) = get_option_inner_type(&field.ty) {
+                        type_path.path.segments.first().map(|s| s.ident.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 // Check for well-known library types by exact match only (no contains checks)
-                let is_date_type = matches!(
+                let is_datetime_type = matches!(
                     type_name.as_deref(),
-                    Some("DateTime") | Some("NaiveDateTime") | Some("NaiveDate") | Some("Date")
+                    Some("DateTime") | Some("NaiveDateTime")
+                ) || matches!(
+                    inner_type_name.as_deref(),
+                    Some("DateTime") | Some("NaiveDateTime")
                 );
-                let is_uuid_type = matches!(type_name.as_deref(), Some("Uuid"));
+                let is_date_only_type =
+                    matches!(type_name.as_deref(), Some("NaiveDate") | Some("Date"))
+                        || matches!(inner_type_name.as_deref(), Some("NaiveDate") | Some("Date"));
+                let is_uuid_type = matches!(type_name.as_deref(), Some("Uuid"))
+                    || matches!(inner_type_name.as_deref(), Some("Uuid"));
 
                 // Create field property
                 // IMPORTANT: Default to treating unknown types as structs (objects)
                 // Structs are far more common than enums, and this is the safest default
-                let field_prop = if is_date_type {
-                    // For date types
+                let field_prop = if is_datetime_type {
+                    // For date-time types (DateTime, NaiveDateTime)
                     quote! {
-                        // Create property for this date field
+                        // Create property for this date-time field
                         let mut props = ::serde_json::Map::new();
                         props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
                         props.insert("format".to_string(), ::serde_json::Value::String("date-time".to_string()));
                         props.insert("description".to_string(),
                                     ::serde_json::Value::String("ISO-8601 formatted date and time".to_string()));
+                    }
+                } else if is_date_only_type {
+                    // For date-only types (NaiveDate, Date)
+                    quote! {
+                        // Create property for this date field
+                        let mut props = ::serde_json::Map::new();
+                        props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                        props.insert("format".to_string(), ::serde_json::Value::String("date".to_string()));
+                        props.insert("description".to_string(),
+                                    ::serde_json::Value::String("ISO-8601 formatted date (YYYY-MM-DD)".to_string()));
                     }
                 } else if is_uuid_type {
                     // For UUID types
@@ -117,18 +146,33 @@ pub fn generate_struct_schema(
                         };
 
                         // Check for well-known library types by exact match only
-                        let is_date = matches!(
+                        let is_datetime = matches!(
                             inner_type_name.as_deref(),
-                            Some("DateTime")
-                                | Some("NaiveDateTime")
-                                | Some("NaiveDate")
-                                | Some("Date")
+                            Some("DateTime") | Some("NaiveDateTime")
                         );
+                        let is_date_only =
+                            matches!(inner_type_name.as_deref(), Some("NaiveDate") | Some("Date"));
                         let is_uuid = matches!(inner_type_name.as_deref(), Some("Uuid"));
 
                         // Generate items schema
-                        if is_date {
-                            // Handle array of dates
+                        if is_datetime {
+                            // Handle array of date-times
+                            quote! {
+                                // Create property for this array field with date-time items
+                                let mut props = ::serde_json::Map::new();
+                                props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
+
+                                // Add items schema for date-times
+                                let mut items_schema = ::serde_json::Map::new();
+                                items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
+                                items_schema.insert("format".to_string(), ::serde_json::Value::String("date-time".to_string()));
+                                items_schema.insert("description".to_string(),
+                                    ::serde_json::Value::String("ISO-8601 formatted date and time".to_string()));
+
+                                props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
+                            }
+                        } else if is_date_only {
+                            // Handle array of date-only values
                             quote! {
                                 // Create property for this array field with date items
                                 let mut props = ::serde_json::Map::new();
@@ -137,9 +181,9 @@ pub fn generate_struct_schema(
                                 // Add items schema for dates
                                 let mut items_schema = ::serde_json::Map::new();
                                 items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
-                                items_schema.insert("format".to_string(), ::serde_json::Value::String("date-time".to_string()));
+                                items_schema.insert("format".to_string(), ::serde_json::Value::String("date".to_string()));
                                 items_schema.insert("description".to_string(),
-                                    ::serde_json::Value::String("ISO-8601 formatted date and time".to_string()));
+                                    ::serde_json::Value::String("ISO-8601 formatted date (YYYY-MM-DD)".to_string()));
 
                                 props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
                             }
