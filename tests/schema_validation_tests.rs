@@ -53,31 +53,11 @@ mod schema_validation_tests {
                     // Check type
                     let schema_type = field_schema["type"].as_str().unwrap_or("object");
                     match schema_type {
-                        "string" => {
-                            if !field_value.is_string() {
-                                return false;
-                            }
-                        }
-                        "integer" | "number" => {
-                            if !field_value.is_number() {
-                                return false;
-                            }
-                        }
-                        "boolean" => {
-                            if !field_value.is_boolean() {
-                                return false;
-                            }
-                        }
-                        "array" => {
-                            if !field_value.is_array() {
-                                return false;
-                            }
-                        }
-                        "object" => {
-                            if !field_value.is_object() {
-                                return false;
-                            }
-                        }
+                        "string" if !field_value.is_string() => return false,
+                        "integer" | "number" if !field_value.is_number() => return false,
+                        "boolean" if !field_value.is_boolean() => return false,
+                        "array" if !field_value.is_array() => return false,
+                        "object" if !field_value.is_object() => return false,
                         _ => {}
                     }
                 }
