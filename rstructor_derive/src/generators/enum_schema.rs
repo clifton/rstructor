@@ -20,8 +20,9 @@ pub fn generate_enum_schema(
 ) -> TokenStream {
     // Check if it's a simple enum (no data)
     let all_simple = data_enum.variants.iter().all(|v| v.fields.is_empty());
+    let has_tag = container_attrs.serde_tag.is_some();
 
-    if all_simple {
+    if all_simple && !has_tag {
         // Generate implementation for simple enum as before
         generate_simple_enum_schema(name, data_enum, container_attrs)
     } else {
@@ -713,32 +714,83 @@ fn generate_internally_tagged_enum_schema(
                     }
                 });
             }
-            Fields::Unnamed(_) => {
-                // Internal tagging doesn't support tuple variants in serde
-                // Fall back to treating it as a unit variant with the tag only
+            Fields::Unnamed(fields) => {
                 let variant_name_str = variant_name.clone();
                 let description_str = description.clone();
                 let tag_name_str = tag_name.to_string();
-                variant_schemas.push(quote! {
-                    {
-                        let mut schema_obj = ::serde_json::Map::new();
-                        schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
 
-                        let mut properties = ::serde_json::Map::new();
-                        properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
-                            "type": "string",
-                            "enum": [#variant_name_str]
-                        }));
-                        schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
+                if fields.unnamed.len() == 1 {
+                    // Newtype variant (e.g. Present(InnerStruct)):
+                    // serde flattens the inner struct's fields alongside the tag.
+                    let field = fields.unnamed.first().unwrap();
+                    let inner_ty = &field.ty;
 
-                        let required = vec![::serde_json::Value::String(#tag_name_str.to_string())];
-                        schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
-                        schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
-                        schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+                    // Unwrap Box<T> if present — Box<T> doesn't implement SchemaType
+                    let schema_ty = if is_box_type(inner_ty) {
+                        get_box_inner_type(inner_ty).unwrap_or(inner_ty)
+                    } else {
+                        inner_ty
+                    };
 
-                        ::serde_json::Value::Object(schema_obj)
-                    }
-                });
+                    variant_schemas.push(quote! {
+                        {
+                            let inner_schema = <#schema_ty as ::rstructor::schema::SchemaType>::schema().to_json();
+
+                            let mut properties = ::serde_json::Map::new();
+                            properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
+                                "type": "string",
+                                "enum": [#variant_name_str]
+                            }));
+
+                            let mut required = vec![::serde_json::Value::String(#tag_name_str.to_string())];
+
+                            if let Some(inner_obj) = inner_schema.as_object() {
+                                if let Some(::serde_json::Value::Object(inner_props)) = inner_obj.get("properties") {
+                                    for (k, v) in inner_props {
+                                        properties.insert(k.clone(), v.clone());
+                                    }
+                                }
+                                if let Some(::serde_json::Value::Array(inner_req)) = inner_obj.get("required") {
+                                    for r in inner_req {
+                                        required.push(r.clone());
+                                    }
+                                }
+                            }
+
+                            let mut schema_obj = ::serde_json::Map::new();
+                            schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                            schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
+                            schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
+                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                            schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+
+                            ::serde_json::Value::Object(schema_obj)
+                        }
+                    });
+                } else {
+                    // True tuple variants: serde doesn't support these with internal tagging.
+                    // Fall back to treating as a unit variant with the tag only.
+                    variant_schemas.push(quote! {
+                        {
+                            let mut schema_obj = ::serde_json::Map::new();
+                            schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+
+                            let mut properties = ::serde_json::Map::new();
+                            properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
+                                "type": "string",
+                                "enum": [#variant_name_str]
+                            }));
+                            schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
+
+                            let required = vec![::serde_json::Value::String(#tag_name_str.to_string())];
+                            schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
+                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                            schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+
+                            ::serde_json::Value::Object(schema_obj)
+                        }
+                    });
+                }
             }
         }
     }
