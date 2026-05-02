@@ -8,8 +8,8 @@ use crate::parsers::field_parser::parse_field_attributes;
 use crate::parsers::variant_parser::parse_variant_attributes;
 use crate::type_utils::{
     get_array_inner_type, get_box_inner_type, get_map_types, get_option_inner_type,
-    get_schema_type_from_rust_type, get_tuple_element_types, is_array_type, is_box_type,
-    is_json_value_type, is_map_type, is_option_type, is_tuple_type,
+    get_schema_type_from_rust_type, get_tuple_element_types, get_type_name, is_array_type,
+    is_box_type, is_json_value_type, is_map_type, is_option_type, is_tuple_type,
 };
 
 /// Generate the schema implementation for an enum
@@ -20,8 +20,9 @@ pub fn generate_enum_schema(
 ) -> TokenStream {
     // Check if it's a simple enum (no data)
     let all_simple = data_enum.variants.iter().all(|v| v.fields.is_empty());
+    let has_tag = container_attrs.serde_tag.is_some();
 
-    if all_simple {
+    if all_simple && !has_tag {
         // Generate implementation for simple enum as before
         generate_simple_enum_schema(name, data_enum, container_attrs)
     } else {
@@ -481,6 +482,56 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
         return generate_field_schema(inner_ty, description);
     }
 
+    // Extract type name for well-known library types
+    let type_name = get_type_name(actual_type);
+
+    // Handle date/time types
+    let is_datetime_type = matches!(
+        type_name.as_deref(),
+        Some("DateTime") | Some("NaiveDateTime")
+    );
+    let is_date_only_type = matches!(type_name.as_deref(), Some("NaiveDate") | Some("Date"));
+    let is_uuid_type = matches!(type_name.as_deref(), Some("Uuid"));
+
+    if is_datetime_type {
+        let date_desc = description
+            .clone()
+            .unwrap_or_else(|| "ISO-8601 formatted date and time".to_string());
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "date-time",
+                "description": #date_desc
+            })
+        };
+    }
+
+    if is_date_only_type {
+        let date_desc = description
+            .clone()
+            .unwrap_or_else(|| "ISO-8601 formatted date (YYYY-MM-DD)".to_string());
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "date",
+                "description": #date_desc
+            })
+        };
+    }
+
+    if is_uuid_type {
+        let uuid_desc = description
+            .clone()
+            .unwrap_or_else(|| "UUID identifier string".to_string());
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "uuid",
+                "description": #uuid_desc
+            })
+        };
+    }
+
     // Handle tuples
     if is_tuple_type(actual_type)
         && let Some(element_types) = get_tuple_element_types(actual_type)
@@ -521,6 +572,56 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
     if is_array_type(actual_type) {
         if let Some(inner_type) = get_array_inner_type(actual_type) {
             let inner_schema_type = get_schema_type_from_rust_type(inner_type);
+
+            // Extract inner type name for well-known library types
+            let inner_type_name = get_type_name(inner_type);
+
+            let is_inner_datetime = matches!(
+                inner_type_name.as_deref(),
+                Some("DateTime") | Some("NaiveDateTime")
+            );
+            let is_inner_date_only =
+                matches!(inner_type_name.as_deref(), Some("NaiveDate") | Some("Date"));
+            let is_inner_uuid = matches!(inner_type_name.as_deref(), Some("Uuid"));
+
+            if is_inner_datetime {
+                return quote! {
+                    ::serde_json::json!({
+                        "type": "array",
+                        #desc_prop
+                        "items": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    })
+                };
+            }
+
+            if is_inner_date_only {
+                return quote! {
+                    ::serde_json::json!({
+                        "type": "array",
+                        #desc_prop
+                        "items": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    })
+                };
+            }
+
+            if is_inner_uuid {
+                return quote! {
+                    ::serde_json::json!({
+                        "type": "array",
+                        #desc_prop
+                        "items": {
+                            "type": "string",
+                            "format": "uuid"
+                        }
+                    })
+                };
+            }
 
             if inner_schema_type == "object" {
                 // For arrays of complex types
@@ -713,32 +814,106 @@ fn generate_internally_tagged_enum_schema(
                     }
                 });
             }
-            Fields::Unnamed(_) => {
-                // Internal tagging doesn't support tuple variants in serde
-                // Fall back to treating it as a unit variant with the tag only
+            Fields::Unnamed(fields) => {
                 let variant_name_str = variant_name.clone();
                 let description_str = description.clone();
                 let tag_name_str = tag_name.to_string();
-                variant_schemas.push(quote! {
-                    {
-                        let mut schema_obj = ::serde_json::Map::new();
-                        schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
 
-                        let mut properties = ::serde_json::Map::new();
-                        properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
-                            "type": "string",
-                            "enum": [#variant_name_str]
-                        }));
-                        schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
+                if fields.unnamed.len() == 1 {
+                    // Newtype variant (e.g. Present(InnerStruct)):
+                    // serde flattens the inner struct's fields alongside the tag.
+                    let field = fields.unnamed.first().unwrap();
+                    let inner_ty = &field.ty;
 
-                        let required = vec![::serde_json::Value::String(#tag_name_str.to_string())];
-                        schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
-                        schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
-                        schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+                    // Unwrap Box<T> if present — Box<T> doesn't implement SchemaType
+                    let schema_ty = if is_box_type(inner_ty) {
+                        get_box_inner_type(inner_ty).unwrap_or(inner_ty)
+                    } else {
+                        inner_ty
+                    };
 
-                        ::serde_json::Value::Object(schema_obj)
-                    }
-                });
+                    variant_schemas.push(quote! {
+                        {
+                            let inner_schema = <#schema_ty as ::rstructor::schema::SchemaType>::schema().to_json();
+
+                            let mut properties = ::serde_json::Map::new();
+                            properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
+                                "type": "string",
+                                "enum": [#variant_name_str]
+                            }));
+
+                            let mut required = vec![::serde_json::Value::String(#tag_name_str.to_string())];
+                            let mut defs = ::serde_json::Map::new();
+
+                            if let Some(inner_obj) = inner_schema.as_object() {
+                                let resolved_obj = if inner_obj.get("properties").is_some() {
+                                    Some(inner_obj)
+                                } else {
+                                    inner_obj
+                                        .get("$ref")
+                                        .and_then(|r| r.as_str())
+                                        .and_then(|r| r.strip_prefix("#/$defs/"))
+                                        .and_then(|def_name| inner_obj.get("$defs").and_then(|defs| defs.get(def_name)))
+                                        .and_then(|def_schema| def_schema.as_object())
+                                };
+
+                                if let Some(::serde_json::Value::Object(inner_defs)) = inner_obj.get("$defs") {
+                                    for (k, v) in inner_defs {
+                                        defs.insert(k.clone(), v.clone());
+                                    }
+                                }
+
+                                if let Some(resolved_obj) = resolved_obj {
+                                    if let Some(::serde_json::Value::Object(inner_props)) = resolved_obj.get("properties") {
+                                        for (k, v) in inner_props {
+                                            properties.insert(k.clone(), v.clone());
+                                        }
+                                    }
+                                    if let Some(::serde_json::Value::Array(inner_req)) = resolved_obj.get("required") {
+                                        for r in inner_req {
+                                            required.push(r.clone());
+                                        }
+                                    }
+                                }
+                            }
+
+                            let mut schema_obj = ::serde_json::Map::new();
+                            schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                            schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
+                            schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
+                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                            schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+                            if !defs.is_empty() {
+                                schema_obj.insert("$defs".to_string(), ::serde_json::Value::Object(defs));
+                            }
+
+                            ::serde_json::Value::Object(schema_obj)
+                        }
+                    });
+                } else {
+                    // True tuple variants: serde doesn't support these with internal tagging.
+                    // Fall back to treating as a unit variant with the tag only.
+                    variant_schemas.push(quote! {
+                        {
+                            let mut schema_obj = ::serde_json::Map::new();
+                            schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+
+                            let mut properties = ::serde_json::Map::new();
+                            properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
+                                "type": "string",
+                                "enum": [#variant_name_str]
+                            }));
+                            schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
+
+                            let required = vec![::serde_json::Value::String(#tag_name_str.to_string())];
+                            schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
+                            schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                            schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+
+                            ::serde_json::Value::Object(schema_obj)
+                        }
+                    });
+                }
             }
         }
     }
