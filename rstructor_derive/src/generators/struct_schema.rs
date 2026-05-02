@@ -1,13 +1,13 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{DataStruct, Fields, Ident, Type};
+use syn::{DataStruct, Fields, Ident};
 
 use crate::container_attrs::ContainerAttributes;
 use crate::parsers::field_parser::parse_field_attributes;
 use crate::type_utils::{
     get_array_inner_type, get_box_inner_type, get_map_types, get_option_inner_type,
-    get_schema_type_from_rust_type, get_tuple_element_types, is_array_type, is_box_type,
-    is_json_value_type, is_map_type, is_option_type, is_self_reference, is_tuple_type,
+    get_schema_type_from_rust_type, get_tuple_element_types, get_type_name, is_array_type,
+    is_box_type, is_json_value_type, is_map_type, is_option_type, is_self_reference, is_tuple_type,
 };
 
 /// Generate the schema implementation for a struct
@@ -51,24 +51,12 @@ pub fn generate_struct_schema(
                 let schema_type = get_schema_type_from_rust_type(&field.ty);
 
                 // Extract type name for well-known library types only (exact matches, no heuristics)
-                let type_name = if let Type::Path(type_path) = &field.ty {
-                    type_path
-                        .path
-                        .segments
-                        .first()
-                        .map(|segment| segment.ident.to_string())
-                } else {
-                    None
-                };
+                let type_name = get_type_name(&field.ty);
 
                 // Also extract the inner type name when the field is Optional,
                 // so Option<NaiveDate>, Option<DateTime>, Option<Uuid> etc. get proper format metadata
                 let inner_type_name = if is_optional {
-                    if let Type::Path(type_path) = get_option_inner_type(&field.ty) {
-                        type_path.path.segments.first().map(|s| s.ident.to_string())
-                    } else {
-                        None
-                    }
+                    get_type_name(get_option_inner_type(&field.ty))
                 } else {
                     None
                 };
@@ -135,15 +123,7 @@ pub fn generate_struct_schema(
                         let inner_schema_type = get_schema_type_from_rust_type(inner_type);
 
                         // Extract inner type name for well-known library types only
-                        let inner_type_name = if let Type::Path(type_path) = inner_type {
-                            type_path
-                                .path
-                                .segments
-                                .first()
-                                .map(|segment| segment.ident.to_string())
-                        } else {
-                            None
-                        };
+                        let inner_type_name = get_type_name(inner_type);
 
                         // Check for well-known library types by exact match only
                         let is_datetime = matches!(

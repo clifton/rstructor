@@ -51,6 +51,15 @@ struct WithVecNaiveDateTime {
     timestamps: Vec<NaiveDateTime>,
 }
 
+// Struct using fully qualified paths instead of imported type names.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct WithQualifiedDateTypes {
+    date: chrono::NaiveDate,
+    timestamp: std::option::Option<chrono::NaiveDateTime>,
+    id: uuid::Uuid,
+    dates: std::vec::Vec<chrono::NaiveDate>,
+}
+
 #[test]
 fn test_naive_date_gets_date_format() {
     let schema = WithNaiveDate::schema();
@@ -188,4 +197,26 @@ fn test_vec_naive_datetime_items_get_datetime_format() {
         items["format"], "date-time",
         "Vec<NaiveDateTime> items should have format 'date-time'"
     );
+}
+
+#[test]
+fn test_fully_qualified_date_uuid_types_get_formats() {
+    let schema = WithQualifiedDateTypes::schema();
+    let json = schema.to_json();
+
+    assert_eq!(json["properties"]["date"]["type"], "string");
+    assert_eq!(json["properties"]["date"]["format"], "date");
+
+    assert_eq!(json["properties"]["timestamp"]["type"], "string");
+    assert_eq!(json["properties"]["timestamp"]["format"], "date-time");
+
+    assert_eq!(json["properties"]["id"]["type"], "string");
+    assert_eq!(json["properties"]["id"]["format"], "uuid");
+
+    assert_eq!(json["properties"]["dates"]["type"], "array");
+    assert_eq!(json["properties"]["dates"]["items"]["type"], "string");
+    assert_eq!(json["properties"]["dates"]["items"]["format"], "date");
+
+    let required = json["required"].as_array().unwrap();
+    assert!(!required.iter().any(|v| v == "timestamp"));
 }

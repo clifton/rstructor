@@ -8,8 +8,8 @@ use crate::parsers::field_parser::parse_field_attributes;
 use crate::parsers::variant_parser::parse_variant_attributes;
 use crate::type_utils::{
     get_array_inner_type, get_box_inner_type, get_map_types, get_option_inner_type,
-    get_schema_type_from_rust_type, get_tuple_element_types, is_array_type, is_box_type,
-    is_json_value_type, is_map_type, is_option_type, is_tuple_type,
+    get_schema_type_from_rust_type, get_tuple_element_types, get_type_name, is_array_type,
+    is_box_type, is_json_value_type, is_map_type, is_option_type, is_tuple_type,
 };
 
 /// Generate the schema implementation for an enum
@@ -483,11 +483,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
     }
 
     // Extract type name for well-known library types
-    let type_name = if let Type::Path(type_path) = actual_type {
-        type_path.path.segments.first().map(|s| s.ident.to_string())
-    } else {
-        None
-    };
+    let type_name = get_type_name(actual_type);
 
     // Handle date/time types
     let is_datetime_type = matches!(
@@ -578,11 +574,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
             let inner_schema_type = get_schema_type_from_rust_type(inner_type);
 
             // Extract inner type name for well-known library types
-            let inner_type_name = if let Type::Path(type_path) = inner_type {
-                type_path.path.segments.first().map(|s| s.ident.to_string())
-            } else {
-                None
-            };
+            let inner_type_name = get_type_name(inner_type);
 
             let is_inner_datetime = matches!(
                 inner_type_name.as_deref(),

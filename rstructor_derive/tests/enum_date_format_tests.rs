@@ -43,6 +43,17 @@ enum Schedule {
     OneOff { name: String, date: NaiveDate },
 }
 
+// Externally tagged enum using fully qualified date/UUID paths.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+enum QualifiedSchedule {
+    Entry {
+        date: chrono::NaiveDate,
+        created_at: std::option::Option<chrono::NaiveDateTime>,
+        id: uuid::Uuid,
+        checkpoints: std::vec::Vec<chrono::NaiveDate>,
+    },
+}
+
 #[test]
 fn test_externally_tagged_enum_naive_date_format() {
     let schema = EventType::schema();
@@ -177,4 +188,33 @@ fn test_enum_vec_naive_date_items_format() {
         items["format"], "date",
         "Vec<NaiveDate> items in enum should have format 'date'"
     );
+}
+
+#[test]
+fn test_enum_fully_qualified_date_uuid_formats() {
+    let schema = QualifiedSchedule::schema();
+    let json = schema.to_json();
+    let variants = json["anyOf"]
+        .as_array()
+        .expect("Schema should use anyOf for externally tagged enums");
+
+    let entry = variants
+        .iter()
+        .find(|v| {
+            v["properties"]
+                .as_object()
+                .is_some_and(|props| props.contains_key("Entry"))
+        })
+        .expect("Should find Entry variant");
+
+    let props = &entry["properties"]["Entry"]["properties"];
+    assert_eq!(props["date"]["format"], "date");
+    assert_eq!(props["created_at"]["format"], "date-time");
+    assert_eq!(props["id"]["format"], "uuid");
+    assert_eq!(props["checkpoints"]["items"]["format"], "date");
+
+    let required = entry["properties"]["Entry"]["required"]
+        .as_array()
+        .expect("Entry should have required fields");
+    assert!(!required.iter().any(|v| v == "created_at"));
 }

@@ -11,11 +11,13 @@ mod tests {
     fn test_is_option_type() {
         // Create test types
         let option_type: Type = parse_quote!(Option<String>);
+        let qualified_option_type: Type = parse_quote!(std::option::Option<String>);
         let string_type: Type = parse_quote!(String);
         let vec_type: Type = parse_quote!(Vec<u32>);
 
         // Check type detection
         assert!(is_option_type(&option_type));
+        assert!(is_option_type(&qualified_option_type));
         assert!(!is_option_type(&string_type));
         assert!(!is_option_type(&vec_type));
     }
@@ -43,16 +45,23 @@ mod tests {
     fn test_get_type_category() {
         // Create test types
         let string_type: Type = parse_quote!(String);
+        let qualified_string_type: Type = parse_quote!(std::string::String);
         let int_type: Type = parse_quote!(i32);
         let float_type: Type = parse_quote!(f64);
         let bool_type: Type = parse_quote!(bool);
         let vec_type: Type = parse_quote!(Vec<String>);
+        let qualified_vec_type: Type = parse_quote!(std::vec::Vec<String>);
         let map_type: Type = parse_quote!(HashMap<String, i32>);
+        let qualified_map_type: Type = parse_quote!(std::collections::HashMap<String, i32>);
         let custom_type: Type = parse_quote!(MyCustomType);
 
         // Check type categories
         assert!(matches!(
             get_type_category(&string_type),
+            TypeCategory::String
+        ));
+        assert!(matches!(
+            get_type_category(&qualified_string_type),
             TypeCategory::String
         ));
         assert!(matches!(
@@ -68,7 +77,15 @@ mod tests {
             TypeCategory::Boolean
         ));
         assert!(matches!(get_type_category(&vec_type), TypeCategory::Array));
+        assert!(matches!(
+            get_type_category(&qualified_vec_type),
+            TypeCategory::Array
+        ));
         assert!(matches!(get_type_category(&map_type), TypeCategory::Object));
+        assert!(matches!(
+            get_type_category(&qualified_map_type),
+            TypeCategory::Object
+        ));
         assert!(matches!(
             get_type_category(&custom_type),
             TypeCategory::Object
@@ -85,6 +102,10 @@ mod tests {
         let vec_type: Type = parse_quote!(Vec<String>);
         let map_type: Type = parse_quote!(HashMap<String, i32>);
         let option_type: Type = parse_quote!(Option<String>);
+        let qualified_option_type: Type = parse_quote!(std::option::Option<String>);
+        let qualified_vec_type: Type = parse_quote!(std::vec::Vec<String>);
+        let qualified_date_type: Type = parse_quote!(chrono::NaiveDate);
+        let qualified_uuid_type: Type = parse_quote!(uuid::Uuid);
 
         // Check schema types
         assert_eq!(get_schema_type_from_rust_type(&string_type), "string");
@@ -94,6 +115,19 @@ mod tests {
         assert_eq!(get_schema_type_from_rust_type(&vec_type), "array");
         assert_eq!(get_schema_type_from_rust_type(&map_type), "object");
         assert_eq!(get_schema_type_from_rust_type(&option_type), "string"); // Unwrapped
+        assert_eq!(
+            get_schema_type_from_rust_type(&qualified_option_type),
+            "string"
+        );
+        assert_eq!(get_schema_type_from_rust_type(&qualified_vec_type), "array");
+        assert_eq!(
+            get_schema_type_from_rust_type(&qualified_date_type),
+            "string"
+        );
+        assert_eq!(
+            get_schema_type_from_rust_type(&qualified_uuid_type),
+            "string"
+        );
     }
 }
 
@@ -108,10 +142,23 @@ pub enum TypeCategory {
     Object,
 }
 
+/// Get the final path segment for a Rust type, so both `Uuid` and `uuid::Uuid`
+/// are treated as the same logical type by schema detection.
+pub fn get_type_name(ty: &Type) -> Option<String> {
+    if let Type::Path(type_path) = ty {
+        return type_path
+            .path
+            .segments
+            .last()
+            .map(|segment| segment.ident.to_string());
+    }
+    None
+}
+
 /// Determine if a type is an Option<T>
 pub fn is_option_type(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.first()
+        && let Some(segment) = type_path.path.segments.last()
     {
         return segment.ident == "Option";
     }
@@ -121,7 +168,7 @@ pub fn is_option_type(ty: &Type) -> bool {
 /// Get the inner type of an Option<T>
 pub fn get_option_inner_type(ty: &Type) -> &Type {
     if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.first()
+        && let Some(segment) = type_path.path.segments.last()
         && segment.ident == "Option"
         && let PathArguments::AngleBracketed(args) = &segment.arguments
         && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
@@ -133,19 +180,16 @@ pub fn get_option_inner_type(ty: &Type) -> &Type {
 
 /// Get type category from Rust type
 pub fn get_type_category(ty: &Type) -> TypeCategory {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
-            let type_name = segment.ident.to_string();
-            match type_name.as_str() {
-                "String" | "str" | "char" => return TypeCategory::String,
-                "bool" => return TypeCategory::Boolean,
-                "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64"
-                | "u128" | "usize" => return TypeCategory::Integer,
-                "f32" | "f64" => return TypeCategory::Float,
-                "Vec" | "Array" | "HashSet" | "BTreeSet" => return TypeCategory::Array,
-                "HashMap" | "BTreeMap" => return TypeCategory::Object,
-                _ => return TypeCategory::Object, // Default to object for custom types
-            }
+    if let Some(type_name) = get_type_name(ty) {
+        match type_name.as_str() {
+            "String" | "str" | "char" => return TypeCategory::String,
+            "bool" => return TypeCategory::Boolean,
+            "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64"
+            | "u128" | "usize" => return TypeCategory::Integer,
+            "f32" | "f64" => return TypeCategory::Float,
+            "Vec" | "Array" | "HashSet" | "BTreeSet" => return TypeCategory::Array,
+            "HashMap" | "BTreeMap" => return TypeCategory::Object,
+            _ => return TypeCategory::Object, // Default to object for custom types
         }
     }
     TypeCategory::Object // Default
@@ -154,7 +198,7 @@ pub fn get_type_category(ty: &Type) -> TypeCategory {
 /// Get JSON Schema type from Rust type
 pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
     if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
+        if let Some(segment) = type_path.path.segments.last() {
             let type_name = segment.ident.to_string();
             match type_name.as_str() {
                 "String" | "str" | "char" => return "string",
@@ -169,7 +213,7 @@ pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
                     return "string";
                 }
                 // Recognize UUID type
-                "Uuid" | "uuid::Uuid" => return "string",
+                "Uuid" => return "string",
                 "Option" => {
                     // For Option<T>, we need to look at the inner type
                     if let PathArguments::AngleBracketed(args) = &segment.arguments
@@ -189,7 +233,7 @@ pub fn get_schema_type_from_rust_type(ty: &Type) -> &'static str {
 /// Get the inner type of an array type like Vec<T>
 pub fn get_array_inner_type(ty: &Type) -> Option<&Type> {
     if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.first()
+        && let Some(segment) = type_path.path.segments.last()
     {
         let type_name = segment.ident.to_string();
         if matches!(type_name.as_str(), "Vec" | "Array" | "HashSet" | "BTreeSet") {
@@ -206,7 +250,7 @@ pub fn get_array_inner_type(ty: &Type) -> Option<&Type> {
 /// Check if a type is an array type (Vec, Array, etc.)
 pub fn is_array_type(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.first()
+        && let Some(segment) = type_path.path.segments.last()
     {
         let type_name = segment.ident.to_string();
         return matches!(type_name.as_str(), "Vec" | "Array" | "HashSet" | "BTreeSet");
@@ -217,7 +261,7 @@ pub fn is_array_type(ty: &Type) -> bool {
 /// Check if a type is a HashMap or BTreeMap
 pub fn is_map_type(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.first()
+        && let Some(segment) = type_path.path.segments.last()
     {
         let type_name = segment.ident.to_string();
         return matches!(type_name.as_str(), "HashMap" | "BTreeMap");
@@ -228,7 +272,7 @@ pub fn is_map_type(ty: &Type) -> bool {
 /// Get the key and value types from a HashMap<K, V> or BTreeMap<K, V>
 pub fn get_map_types(ty: &Type) -> Option<(&Type, &Type)> {
     if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.first()
+        && let Some(segment) = type_path.path.segments.last()
     {
         let type_name = segment.ident.to_string();
         if matches!(type_name.as_str(), "HashMap" | "BTreeMap") {
@@ -248,7 +292,7 @@ pub fn get_map_types(ty: &Type) -> Option<(&Type, &Type)> {
 /// Check if a type is a Box<T>
 pub fn is_box_type(ty: &Type) -> bool {
     if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.first()
+        && let Some(segment) = type_path.path.segments.last()
     {
         return segment.ident == "Box";
     }
@@ -258,7 +302,7 @@ pub fn is_box_type(ty: &Type) -> bool {
 /// Get the inner type of a Box<T>
 pub fn get_box_inner_type(ty: &Type) -> Option<&Type> {
     if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.first()
+        && let Some(segment) = type_path.path.segments.last()
         && segment.ident == "Box"
         && let PathArguments::AngleBracketed(args) = &segment.arguments
         && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
@@ -301,7 +345,7 @@ pub fn get_tuple_element_types(ty: &Type) -> Option<Vec<&Type>> {
 /// Returns the core type name for detecting self-references
 pub fn get_core_type_name(ty: &Type) -> Option<String> {
     if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.first() {
+        if let Some(segment) = type_path.path.segments.last() {
             let type_name = segment.ident.to_string();
             match type_name.as_str() {
                 "Option" | "Box" => {
