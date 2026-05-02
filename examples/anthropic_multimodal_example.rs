@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let media = MediaFile::from_bytes(&image_bytes, "image/png");
 
     let client = AnthropicClient::from_env()?
-        .model(AnthropicModel::ClaudeOpus46)
+        .model(AnthropicModel::ClaudeSonnet46)
         .temperature(0.0);
 
     let analysis: ImageAnalysis = client

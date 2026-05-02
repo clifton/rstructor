@@ -155,7 +155,7 @@ mod openai_validation_tests {
 
         let client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
-            .model(OpenAIModel::Gpt4O)
+            .model(OpenAIModel::Gpt55)
             .temperature(0.0); // Deterministic for consistent results
 
         // Normal prompt for a typical recipe

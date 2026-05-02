@@ -34,7 +34,7 @@ mod weird_types_tests {
         let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
         let client = GeminiClient::new(api_key)
             .unwrap()
-            .model(GeminiModel::Gemini3FlashPreview)
+            .model(GeminiModel::Gemini31ProPreview)
             .temperature(0.0)
             .no_retries();
 

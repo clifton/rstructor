@@ -67,7 +67,7 @@ pub(crate) use utils::{
 /// # Provider Support
 ///
 /// - **OpenAI (GPT-5.x)**: Uses `reasoning_effort` parameter ("none", "low", "medium", "high")
-/// - **Gemini 3**: Supports `Minimal`, `Low`, `Medium`, `High` (Flash) or `Low`, `High` (Pro)
+/// - **Gemini 3.x**: Supports `Low` and `High` on Pro, with additional levels on some Flash models
 /// - **Anthropic (Claude 4.x)**: Thinking is enabled via budget tokens when level is not `Off`
 ///
 /// # Examples

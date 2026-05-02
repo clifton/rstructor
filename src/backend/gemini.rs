@@ -41,10 +41,16 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
-    /// Gemini 3 Pro Preview (latest preview Pro model)
-    Gemini3ProPreview,
+    /// Gemini 3.1 Pro Preview (latest preview Pro model)
+    Gemini31ProPreview,
+    /// Gemini 3.1 Pro Preview Custom Tools (agentic custom-tool variant)
+    Gemini31ProPreviewCustomTools,
     /// Gemini 3 Flash Preview (latest preview Flash model)
     Gemini3FlashPreview,
+    /// Gemini 3.1 Flash-Lite Preview (latest cost-efficient multimodal model)
+    Gemini31FlashLitePreview,
+    /// Gemini 3 Pro Preview (shut down; use Gemini 3.1 Pro Preview instead)
+    Gemini3ProPreview,
     /// Gemini 2.5 Pro (latest production Pro model)
     Gemini25Pro,
     /// Gemini 2.5 Flash (latest production Flash model, best price/performance)
@@ -53,13 +59,13 @@ pub enum Model {
     Gemini25FlashLite,
     /// Gemini 2.5 Flash Image (image generation/analysis tuned variant)
     Gemini25FlashImage,
-    /// Gemini 2.0 Flash (stable 2.0 Flash model)
+    /// Gemini 2.0 Flash (deprecated 2.0 Flash model)
     Gemini20Flash,
-    /// Gemini 2.0 Flash 001 (specific version of 2.0 Flash)
+    /// Gemini 2.0 Flash 001 (deprecated specific version of 2.0 Flash)
     Gemini20Flash001,
-    /// Gemini 2.0 Flash Lite (smaller 2.0 Flash variant)
+    /// Gemini 2.0 Flash Lite (deprecated smaller 2.0 Flash variant)
     Gemini20FlashLite,
-    /// Gemini 2.0 Flash Lite 001 (specific version of 2.0 Flash Lite)
+    /// Gemini 2.0 Flash Lite 001 (deprecated specific version of 2.0 Flash Lite)
     Gemini20FlashLite001,
     /// Gemini Pro Latest (alias for latest Pro model)
     GeminiProLatest,
@@ -74,8 +80,11 @@ pub enum Model {
 impl Model {
     pub fn as_str(&self) -> &str {
         match self {
-            Model::Gemini3ProPreview => "gemini-3-pro-preview",
+            Model::Gemini31ProPreview => "gemini-3.1-pro-preview",
+            Model::Gemini31ProPreviewCustomTools => "gemini-3.1-pro-preview-customtools",
             Model::Gemini3FlashPreview => "gemini-3-flash-preview",
+            Model::Gemini31FlashLitePreview => "gemini-3.1-flash-lite-preview",
+            Model::Gemini3ProPreview => "gemini-3-pro-preview",
             Model::Gemini25Pro => "gemini-2.5-pro",
             Model::Gemini25Flash => "gemini-2.5-flash",
             Model::Gemini25FlashLite => "gemini-2.5-flash-lite",
@@ -98,8 +107,11 @@ impl Model {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
-            "gemini-3-pro-preview" => Model::Gemini3ProPreview,
+            "gemini-3.1-pro-preview" => Model::Gemini31ProPreview,
+            "gemini-3.1-pro-preview-customtools" => Model::Gemini31ProPreviewCustomTools,
             "gemini-3-flash-preview" => Model::Gemini3FlashPreview,
+            "gemini-3.1-flash-lite-preview" => Model::Gemini31FlashLitePreview,
+            "gemini-3-pro-preview" => Model::Gemini3ProPreview,
             "gemini-2.5-pro" => Model::Gemini25Pro,
             "gemini-2.5-flash" => Model::Gemini25Flash,
             "gemini-2.5-flash-lite" => Model::Gemini25FlashLite,
@@ -148,12 +160,13 @@ pub struct GeminiConfig {
     /// Custom base URL for Gemini-compatible APIs
     /// Defaults to "https://generativelanguage.googleapis.com/v1beta" if not set
     pub base_url: Option<String>,
-    /// Thinking level for Gemini 3 models
+    /// Thinking level for Gemini 3.x models
     /// Controls the depth of reasoning applied to prompts
     pub thinking_level: Option<ThinkingLevel>,
 }
 
 /// Gemini client for generating completions
+#[derive(Clone)]
 pub struct GeminiClient {
     config: GeminiConfig,
     client: reqwest::Client,
@@ -272,7 +285,7 @@ impl GeminiClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini3FlashPreview))]
+    #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini31ProPreview))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -284,13 +297,13 @@ impl GeminiClient {
 
         let config = GeminiConfig {
             api_key,
-            model: Model::Gemini3FlashPreview, // Default to Gemini 3 Flash Preview (latest)
+            model: Model::Gemini31ProPreview, // Default to Gemini 3.1 Pro Preview (latest Pro)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
             base_url: None,       // Default: use official Gemini API
-            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3
+            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3.x
         };
 
         let client = reqwest::Client::new();
@@ -319,20 +332,20 @@ impl GeminiClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini3FlashPreview))]
+    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini31ProPreview))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY")
             .map_err(|_| RStructorError::api_error("Gemini", ApiErrorKind::AuthenticationFailed))?;
 
         let config = GeminiConfig {
             api_key,
-            model: Model::Gemini3FlashPreview, // Default to Gemini 3 Flash Preview (latest)
+            model: Model::Gemini31ProPreview, // Default to Gemini 3.1 Pro Preview (latest Pro)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
             base_url: None,       // Default: use official Gemini API
-            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3
+            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3.x
         };
 
         let client = reqwest::Client::new();
@@ -415,7 +428,7 @@ impl GeminiClient {
             })
             .collect();
 
-        // Build thinking config only for Gemini 3 models
+        // Build thinking config only for Gemini 3.x models
         let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
         let thinking_config = if is_gemini3 {
             self.config.thinking_level.and_then(|level| {
@@ -576,7 +589,7 @@ impl GeminiClient {
         self
     }
 
-    /// Set the thinking level for Gemini 3 models.
+    /// Set the thinking level for Gemini 3.x models.
     ///
     /// Controls the depth of reasoning the model applies to prompts.
     /// Higher thinking levels provide deeper reasoning but increase latency.
@@ -588,7 +601,7 @@ impl GeminiClient {
     /// - `Medium`: Provides balanced reasoning for most tasks
     /// - `High`: Offers deep reasoning, suitable for complex problem-solving
     ///
-    /// # Thinking Levels for Gemini 3 Pro
+    /// # Thinking Levels for Gemini 3.1 Pro
     ///
     /// - `Low`: Minimizes latency and cost, suitable for simple tasks
     /// - `High`: Maximizes reasoning depth for complex tasks
@@ -722,7 +735,7 @@ impl LLMClient for GeminiClient {
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         info!("Generating raw text response with Gemini");
 
-        // Build thinking config only for Gemini 3 models
+        // Build thinking config only for Gemini 3.x models
         let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
         let thinking_config = if is_gemini3 {
             self.config.thinking_level.and_then(|level| {

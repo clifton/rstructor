@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let media = MediaFile::from_bytes(&image_bytes, "image/png");
 
     let client = OpenAIClient::from_env()?
-        .model(OpenAIModel::Gpt52)
+        .model(OpenAIModel::Gpt55)
         .temperature(0.0);
 
     let analysis: ImageAnalysis = client

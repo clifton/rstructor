@@ -3,7 +3,7 @@
 /// # Overview
 ///
 /// rstructor simplifies getting validated, strongly-typed outputs from Large Language Models
-/// (LLMs) like GPT-4 and Claude. It automatically generates JSON Schema from your Rust types,
+/// (LLMs) like GPT-5.5 and Claude. It automatically generates JSON Schema from your Rust types,
 /// sends the schema to LLMs, parses responses, and validates against the schema.
 ///
 /// Key features:

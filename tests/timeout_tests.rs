@@ -35,7 +35,7 @@ mod timeout_tests {
         // Test with a very short timeout (should likely timeout)
         let client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
-            .model(OpenAIModel::Gpt4O)
+            .model(OpenAIModel::Gpt55)
             .temperature(0.0)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
@@ -61,7 +61,7 @@ mod timeout_tests {
 
         let _client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
-            .model(OpenAIModel::Gpt4O)
+            .model(OpenAIModel::Gpt55)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
@@ -81,7 +81,7 @@ mod timeout_tests {
         // Test with a very short timeout (should likely timeout)
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::ClaudeSonnet45)
+            .model(AnthropicModel::ClaudeSonnet46)
             .temperature(0.0)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
@@ -108,7 +108,7 @@ mod timeout_tests {
 
         let _client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::ClaudeSonnet45)
+            .model(AnthropicModel::ClaudeSonnet46)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
@@ -150,7 +150,7 @@ mod timeout_tests {
         // Test with empty string to use XAI_API_KEY env var
         let client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok4)
+            .model(GrokModel::Grok43)
             .temperature(0.0)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
@@ -175,7 +175,7 @@ mod timeout_tests {
         // Test with empty string to use XAI_API_KEY env var
         let _client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok4)
+            .model(GrokModel::Grok43)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
@@ -202,7 +202,7 @@ mod timeout_tests {
         // Test that timeout can be set via builder pattern
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini3FlashPreview)
+            .model(GeminiModel::Gemini31ProPreview)
             .temperature(0.0)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
@@ -226,7 +226,7 @@ mod timeout_tests {
         // Test that timeout can be chained with other configuration methods
         let _client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini3FlashPreview)
+            .model(GeminiModel::Gemini31ProPreview)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
@@ -239,10 +239,10 @@ mod timeout_tests {
     #[cfg(feature = "gemini")]
     #[tokio::test]
     async fn test_gemini_no_timeout_default() {
-        // Test that client can be created with explicit Gemini 3 Flash Preview and no timeout
+        // Test that client can be created with explicit Gemini 3.1 Pro Preview and no timeout
         let _client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini3FlashPreview);
+            .model(GeminiModel::Gemini31ProPreview);
 
         // Verify that client was created successfully without timeout
         // (We can't access config directly, but default behavior means no timeout)

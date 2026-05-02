@@ -34,7 +34,7 @@ mod grok_multimodal_tests {
         let media = download_media(RUST_LOGO_URL, RUST_LOGO_MIME).await;
         let client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok41FastNonReasoning)
+            .model(GrokModel::Grok43)
             .temperature(0.0);
 
         let result: ImageSummary = client
@@ -55,7 +55,7 @@ mod grok_multimodal_tests {
         let media = media_url(RUST_LOGO_URL, RUST_LOGO_MIME);
         let client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok41FastNonReasoning)
+            .model(GrokModel::Grok43)
             .temperature(0.0);
 
         let result: ImageSummary = client
@@ -77,7 +77,7 @@ mod grok_multimodal_tests {
         let lake_media = media_url(RUST_LOGO_URL, RUST_LOGO_MIME);
         let client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok41FastNonReasoning)
+            .model(GrokModel::Grok43)
             .temperature(0.0);
 
         let result: MultiImageSummary = client

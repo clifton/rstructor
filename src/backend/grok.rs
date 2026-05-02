@@ -40,15 +40,17 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
-    /// Grok-4 (latest flagship model with 256k context window)
+    /// Grok 4.3 (latest recommended chat model)
+    Grok43,
+    /// Grok-4 (previous flagship model with 256k context window)
     Grok4,
     /// Grok-4 Fast Reasoning (faster variant optimized for reasoning tasks)
     Grok4FastReasoning,
     /// Grok-4 Fast Non-Reasoning (faster variant optimized for non-reasoning tasks)
     Grok4FastNonReasoning,
-    /// Grok-4.1 Fast Reasoning (latest frontier model with 2M context window)
+    /// Grok-4.1 Fast Reasoning (previous frontier model with 2M context window)
     Grok41FastReasoning,
-    /// Grok-4.1 Fast Non-Reasoning (latest frontier model with 2M context window)
+    /// Grok-4.1 Fast Non-Reasoning (previous frontier model with 2M context window)
     Grok41FastNonReasoning,
     /// Grok-3 (previous generation model with 131k context window)
     Grok3,
@@ -65,6 +67,7 @@ pub enum Model {
 impl Model {
     pub fn as_str(&self) -> &str {
         match self {
+            Model::Grok43 => "grok-4.3",
             Model::Grok4 => "grok-4-0709",
             Model::Grok4FastReasoning => "grok-4-fast-reasoning",
             Model::Grok4FastNonReasoning => "grok-4-fast-non-reasoning",
@@ -85,6 +88,7 @@ impl Model {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
+            "grok-4.3" => Model::Grok43,
             "grok-4-0709" => Model::Grok4,
             "grok-4-fast-reasoning" => Model::Grok4FastReasoning,
             "grok-4-fast-non-reasoning" => Model::Grok4FastNonReasoning,
@@ -134,6 +138,7 @@ pub struct GrokConfig {
 }
 
 /// Grok client for generating completions
+#[derive(Clone)]
 pub struct GrokClient {
     config: GrokConfig,
     client: reqwest::Client,
@@ -157,7 +162,7 @@ impl GrokClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "grok_client_new", skip(api_key), fields(model = ?Model::Grok4))]
+    #[instrument(name = "grok_client_new", skip(api_key), fields(model = ?Model::Grok43))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -172,7 +177,7 @@ impl GrokClient {
 
         let config = GrokConfig {
             api_key,
-            model: Model::Grok41FastNonReasoning, // Default to Grok-4.1 Fast Non-Reasoning
+            model: Model::Grok43, // Default to Grok 4.3 (latest recommended chat model)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
@@ -202,7 +207,7 @@ impl GrokClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "grok_client_from_env", fields(model = ?Model::Grok4))]
+    #[instrument(name = "grok_client_from_env", fields(model = ?Model::Grok43))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("XAI_API_KEY")
             .map_err(|_| RStructorError::api_error("Grok", ApiErrorKind::AuthenticationFailed))?;
@@ -212,7 +217,7 @@ impl GrokClient {
 
         let config = GrokConfig {
             api_key,
-            model: Model::Grok41FastNonReasoning, // Default to Grok-4.1 Fast Non-Reasoning
+            model: Model::Grok43, // Default to Grok 4.3 (latest recommended chat model)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)

@@ -72,7 +72,7 @@ mod grok_validation_tests {
         // Test with empty string to use XAI_API_KEY env var
         let client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok4)
+            .model(GrokModel::Grok43)
             .temperature(0.0);
 
         // First get a valid product response
@@ -159,7 +159,7 @@ mod grok_validation_tests {
         // Test with empty string to use XAI_API_KEY env var
         let client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok4)
+            .model(GrokModel::Grok43)
             .temperature(0.0); // Use deterministic temperature for consistent results
 
         // Normal prompt asking for product information

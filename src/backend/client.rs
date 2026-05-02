@@ -136,7 +136,7 @@ impl MediaFile {
 ///
 /// // Create a client
 /// let client = OpenAIClient::new("your-openai-api-key")?
-///     .model(OpenAIModel::Gpt4OMini)
+///     .model(OpenAIModel::Gpt55)
 ///     .temperature(0.0)
 ///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///

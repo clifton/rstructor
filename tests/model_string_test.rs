@@ -20,11 +20,14 @@ mod tests {
         let model = OpenAIModel::from_str("gpt-4o-mini").unwrap();
         assert_eq!(model, OpenAIModel::Gpt4OMini);
 
-        let model = OpenAIModel::from_str("gpt-5.2-chat-latest").unwrap();
-        assert_eq!(model, OpenAIModel::Gpt52ChatLatest);
+        let model = OpenAIModel::from_str("gpt-5.5").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt55);
 
-        let model = OpenAIModel::from_str("gpt-5.2-codex").unwrap();
-        assert_eq!(model, OpenAIModel::Gpt52Codex);
+        let model = OpenAIModel::from_str("gpt-5.5-pro").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt55Pro);
+
+        let model = OpenAIModel::from_str("gpt-5.4-nano").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt54Nano);
 
         // Test From<&str>
         let model: OpenAIModel = "gpt-3.5-turbo".into();
@@ -34,8 +37,11 @@ mod tests {
     #[test]
     fn test_anthropic_model_from_string() {
         // Test known model
-        let model = AnthropicModel::from_string("claude-sonnet-4-20250514");
-        assert_eq!(model, AnthropicModel::ClaudeSonnet4);
+        let model = AnthropicModel::from_string("claude-sonnet-4-6");
+        assert_eq!(model, AnthropicModel::ClaudeSonnet46);
+
+        let model = AnthropicModel::from_string("claude-opus-4-7");
+        assert_eq!(model, AnthropicModel::ClaudeOpus47);
 
         // Test custom model
         let model = AnthropicModel::from_string("claude-custom");
@@ -48,6 +54,7 @@ mod tests {
     #[test]
     fn test_grok_model_as_str() {
         let models = vec![
+            GrokModel::Grok43,
             GrokModel::Grok4,
             GrokModel::Grok4FastReasoning,
             GrokModel::Grok4FastNonReasoning,
@@ -69,6 +76,7 @@ mod tests {
     #[test]
     fn test_grok_model_from_string() {
         let test_strings = vec![
+            "grok-4.3",
             "grok-4-0709",
             "grok-4-fast-reasoning",
             "grok-4-fast-non-reasoning",
@@ -98,8 +106,14 @@ mod tests {
     #[test]
     fn test_gemini_model_from_string() {
         // Test known model
-        let model = GeminiModel::from_string("gemini-2.5-flash");
-        assert_eq!(model, GeminiModel::Gemini25Flash);
+        let model = GeminiModel::from_string("gemini-3.1-pro-preview");
+        assert_eq!(model, GeminiModel::Gemini31ProPreview);
+
+        let model = GeminiModel::from_string("gemini-3.1-pro-preview-customtools");
+        assert_eq!(model, GeminiModel::Gemini31ProPreviewCustomTools);
+
+        let model = GeminiModel::from_string("gemini-3.1-flash-lite-preview");
+        assert_eq!(model, GeminiModel::Gemini31FlashLitePreview);
 
         let model = GeminiModel::from_string("gemini-2.5-flash-image");
         assert_eq!(model, GeminiModel::Gemini25FlashImage);
