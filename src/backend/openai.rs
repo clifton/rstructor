@@ -39,17 +39,27 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
-    /// GPT-5.2 Pro (most capable GPT-5.2 model)
+    /// GPT-5.5 Pro (most capable GPT-5.5 model)
+    Gpt55Pro,
+    /// GPT-5.5 (latest frontier model for complex professional work)
+    Gpt55,
+    /// GPT-5.4 (more affordable frontier model for complex professional work)
+    Gpt54,
+    /// GPT-5.4 Mini (lower-latency, lower-cost GPT-5.4-class model)
+    Gpt54Mini,
+    /// GPT-5.4 Nano (cheapest GPT-5.4-class model for high-volume tasks)
+    Gpt54Nano,
+    /// GPT-5.2 Pro (previous GPT-5.2 pro model)
     Gpt52Pro,
-    /// GPT-5.2 (latest GPT-5 model)
+    /// GPT-5.2 (previous GPT-5.2 model)
     Gpt52,
-    /// GPT-5.2 Chat Latest (rolling latest chat-optimized GPT-5.2 model)
+    /// GPT-5.2 Chat Latest (ChatGPT GPT-5.2 model)
     Gpt52ChatLatest,
-    /// GPT-5.2 Codex (latest coding-focused GPT-5.2 model)
+    /// GPT-5.2 Codex (coding-focused GPT-5.2 model)
     Gpt52Codex,
     /// GPT-5.1 (GPT-5.1 model)
     Gpt51,
-    /// GPT-5 Chat Latest (latest GPT-5 model for chat)
+    /// GPT-5 Chat Latest (ChatGPT GPT-5 model)
     Gpt5ChatLatest,
     /// GPT-5 Pro (most capable GPT-5 model)
     Gpt5Pro,
@@ -65,7 +75,7 @@ pub enum Model {
     Gpt41Mini,
     /// GPT-4.1 Nano (smallest GPT-4.1)
     Gpt41Nano,
-    /// GPT-4o (latest GPT-4 model, optimized for chat)
+    /// GPT-4o (previous GPT-4o model, optimized for chat)
     Gpt4O,
     /// GPT-4o Mini (smaller, faster, more cost-effective version)
     Gpt4OMini,
@@ -75,7 +85,7 @@ pub enum Model {
     Gpt4,
     /// GPT-3.5 Turbo (efficient model for simple tasks)
     Gpt35Turbo,
-    /// O4 Mini (latest small reasoning model)
+    /// O4 Mini (previous small reasoning model)
     O4Mini,
     /// O3 (reasoning model)
     O3,
@@ -94,6 +104,11 @@ pub enum Model {
 impl Model {
     pub fn as_str(&self) -> &str {
         match self {
+            Model::Gpt55Pro => "gpt-5.5-pro",
+            Model::Gpt55 => "gpt-5.5",
+            Model::Gpt54 => "gpt-5.4",
+            Model::Gpt54Mini => "gpt-5.4-mini",
+            Model::Gpt54Nano => "gpt-5.4-nano",
             Model::Gpt52Pro => "gpt-5.2-pro",
             Model::Gpt52 => "gpt-5.2",
             Model::Gpt52ChatLatest => "gpt-5.2-chat-latest",
@@ -129,6 +144,11 @@ impl Model {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
+            "gpt-5.5-pro" => Model::Gpt55Pro,
+            "gpt-5.5" => Model::Gpt55,
+            "gpt-5.4" => Model::Gpt54,
+            "gpt-5.4-mini" => Model::Gpt54Mini,
+            "gpt-5.4-nano" => Model::Gpt54Nano,
             "gpt-5.2-pro" => Model::Gpt52Pro,
             "gpt-5.2" => Model::Gpt52,
             "gpt-5.2-chat-latest" => Model::Gpt52ChatLatest,
@@ -196,6 +216,7 @@ pub struct OpenAIConfig {
 }
 
 /// OpenAI client for generating completions
+#[derive(Clone)]
 pub struct OpenAIClient {
     config: OpenAIConfig,
     client: reqwest::Client,
@@ -220,7 +241,7 @@ impl OpenAIClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt52))]
+    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt55))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -234,13 +255,13 @@ impl OpenAIClient {
 
         let config = OpenAIConfig {
             api_key,
-            model: Model::Gpt52, // Default to GPT-5.2 (latest GPT-5)
+            model: Model::Gpt55, // Default to GPT-5.5 (latest frontier model)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
             base_url: None,       // Default: use official OpenAI API
-            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for GPT-5.x
+            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.5 defaults to medium reasoning
         };
 
         debug!("OpenAI client created with default configuration");
@@ -265,7 +286,7 @@ impl OpenAIClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt52))]
+    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt55))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| RStructorError::api_error("OpenAI", ApiErrorKind::AuthenticationFailed))?;
@@ -275,13 +296,13 @@ impl OpenAIClient {
 
         let config = OpenAIConfig {
             api_key,
-            model: Model::Gpt52, // Default to GPT-5.2 (latest GPT-5)
+            model: Model::Gpt55, // Default to GPT-5.5 (latest frontier model)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
             max_retries: Some(3), // Default: 3 retries with error feedback
             base_url: None,       // Default: use official OpenAI API
-            thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for GPT-5.x
+            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.5 defaults to medium reasoning
         };
 
         debug!("OpenAI client created with default configuration");

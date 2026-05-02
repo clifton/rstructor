@@ -34,7 +34,7 @@ mod anthropic_multimodal_tests {
         let media = download_media(RUST_LOGO_URL, RUST_LOGO_MIME).await;
         let client = AnthropicClient::from_env()
             .expect("ANTHROPIC_API_KEY must be set for this test")
-            .model(AnthropicModel::ClaudeOpus46)
+            .model(AnthropicModel::ClaudeSonnet46)
             .temperature(0.0);
 
         let result: ImageSummary = client
@@ -55,7 +55,7 @@ mod anthropic_multimodal_tests {
         let media = media_url(RUST_LOGO_URL, RUST_LOGO_MIME);
         let client = AnthropicClient::from_env()
             .expect("ANTHROPIC_API_KEY must be set for this test")
-            .model(AnthropicModel::ClaudeOpus46)
+            .model(AnthropicModel::ClaudeSonnet46)
             .temperature(0.0);
 
         let result: ImageSummary = client
@@ -77,7 +77,7 @@ mod anthropic_multimodal_tests {
         let lake_media = media_url(RUST_LOGO_URL, RUST_LOGO_MIME);
         let client = AnthropicClient::from_env()
             .expect("ANTHROPIC_API_KEY must be set for this test")
-            .model(AnthropicModel::ClaudeOpus46)
+            .model(AnthropicModel::ClaudeSonnet46)
             .temperature(0.0);
 
         let result: MultiImageSummary = client

@@ -47,7 +47,7 @@ mod gemini_multimodal_tests {
 
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini3FlashPreview)
+            .model(GeminiModel::Gemini31ProPreview)
             .temperature(0.0);
 
         let result: ImageDescription = client
@@ -71,7 +71,7 @@ mod gemini_multimodal_tests {
 
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini3FlashPreview)
+            .model(GeminiModel::Gemini31ProPreview)
             .temperature(0.0);
 
         let result: ImageDescription = client
@@ -98,7 +98,7 @@ mod gemini_multimodal_tests {
 
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini3FlashPreview)
+            .model(GeminiModel::Gemini31ProPreview)
             .temperature(0.0);
 
         let result: MultiImageSummary = client

@@ -1060,11 +1060,11 @@ fn extract_model_from_error(error_text: &str) -> Option<String> {
 fn suggest_model(error_text: &str) -> Option<String> {
     // Common model name patterns and their suggestions
     if error_text.contains("gpt") {
-        Some("gpt-5.2".to_string())
+        Some("gpt-5.5".to_string())
     } else if error_text.contains("claude") || error_text.contains("sonnet") {
-        Some("claude-sonnet-4-5-20250929".to_string())
+        Some("claude-sonnet-4-6".to_string())
     } else if error_text.contains("gemini") {
-        Some("gemini-3-flash-preview".to_string())
+        Some("gemini-3.1-pro-preview".to_string())
     } else {
         None
     }

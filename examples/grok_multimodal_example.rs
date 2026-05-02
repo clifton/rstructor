@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let media = MediaFile::from_bytes(&image_bytes, "image/png");
 
     let client = GrokClient::from_env()?
-        .model(GrokModel::Grok41FastNonReasoning)
+        .model(GrokModel::Grok43)
         .temperature(0.0);
 
     let analysis: ImageAnalysis = client

@@ -18,7 +18,7 @@ The Rust equivalent of [Instructor](https://github.com/jxnl/instructor) for Pyth
 - **Multi-provider** — OpenAI, Anthropic, Grok (xAI), and Gemini with unified API
 - **Auto-validation** — Type checking plus custom business rules with automatic retry
 - **Complex types** — Nested objects, arrays, optionals, enums with associated data
-- **Extended thinking** — Native support for reasoning models (GPT-5.2, Claude 4.5, Gemini 3)
+- **Extended thinking** — Native support for reasoning models (GPT-5.5, Claude 4.6, Gemini 3.1)
 
 ## Installation
 
@@ -62,16 +62,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 use rstructor::{OpenAIClient, AnthropicClient, GrokClient, GeminiClient, LLMClient};
 
 // OpenAI (reads OPENAI_API_KEY)
-let client = OpenAIClient::from_env()?.model("gpt-5.2");
+let client = OpenAIClient::from_env()?.model("gpt-5.5");
 
 // Anthropic (reads ANTHROPIC_API_KEY)
-let client = AnthropicClient::from_env()?.model("claude-opus-4-6");
+let client = AnthropicClient::from_env()?.model("claude-sonnet-4-6");
 
 // Grok/xAI (reads XAI_API_KEY)
-let client = GrokClient::from_env()?.model("grok-4-1-fast-non-reasoning");
+let client = GrokClient::from_env()?.model("grok-4.3");
 
 // Gemini (reads GEMINI_API_KEY)
-let client = GeminiClient::from_env()?.model("gemini-3-flash-preview");
+let client = GeminiClient::from_env()?.model("gemini-3.1-pro-preview");
 
 // Custom endpoint (local LLMs, proxies)
 let client = OpenAIClient::new("key")?
@@ -181,21 +181,42 @@ enum CommitType {
 
 Supported case conversions: `lowercase`, `UPPERCASE`, `camelCase`, `PascalCase`, `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case`, `SCREAMING-KEBAB-CASE`.
 
-### Custom Types (Dates, UUIDs)
+### Dates, UUIDs, and Custom Types
 
 ```rust
-use chrono::{DateTime, Utc};
-use rstructor::schema::CustomTypeSchema;
-
-impl CustomTypeSchema for DateTime<Utc> {
-    fn schema_type() -> &'static str { "string" }
-    fn schema_format() -> Option<&'static str> { Some("date-time") }
-}
+use chrono::{DateTime, NaiveDate, Utc};
+use rstructor::Instructor;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Instructor, Serialize, Deserialize)]
-struct Event {
-    name: String,
-    start_time: DateTime<Utc>,
+struct JobRun {
+    id: Uuid,                         // schema format: "uuid"
+    trade_date: NaiveDate,            // schema format: "date"
+    started_at: DateTime<Utc>,        // schema format: "date-time"
+    parent_id: Option<Uuid>,          // optional UUID keeps format metadata
+    related_ids: Vec<Uuid>,           // array items keep format metadata
+}
+```
+
+For your own domain-specific scalar types, implement `CustomTypeSchema` plus `SchemaType`:
+
+```rust
+use rstructor::schema::CustomTypeSchema;
+use rstructor::{Schema, SchemaType};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+struct SecurityId(String);
+
+impl CustomTypeSchema for SecurityId {
+    fn schema_type() -> &'static str { "string" }
+    fn schema_format() -> Option<&'static str> { Some("security-id") }
+}
+
+impl SchemaType for SecurityId {
+    fn schema() -> Schema { Schema::new(Self::json_schema()) }
+    fn schema_name() -> Option<String> { Some("SecurityId".to_string()) }
 }
 ```
 
@@ -246,9 +267,9 @@ Configure reasoning depth for supported models:
 ```rust
 use rstructor::ThinkingLevel;
 
-// GPT-5.2, Claude 4.5 (Sonnet/Opus), Gemini 3
+// GPT-5.5, Claude 4.6 Sonnet, Gemini 3.1
 let client = OpenAIClient::from_env()?
-    .model("gpt-5.2")
+    .model("gpt-5.5")
     .thinking_level(ThinkingLevel::High);
 
 // Levels: Off, Minimal, Low, Medium, High

@@ -38,29 +38,29 @@ categories = [
 ]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-async-trait = "0.1"
-tokio = { version = "1.0", features = [
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+async-trait = "0.1.89"
+tokio = { version = "1.52.1", features = [
   "rt",
   "macros",
   "rt-multi-thread",
   "io-std",
 ], optional = true }
-reqwest = { version = "0.13", features = [
+reqwest = { version = "0.13.3", features = [
   "json",
   "query",
   "default-tls",
 ], default-features = false, optional = true }
-thiserror = "2.0.12"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = [
+thiserror = "2.0.18"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = [
   "env-filter",
 ], optional = true }
-tracing-futures = { version = "0.2", optional = true }
+tracing-futures = { version = "0.2.5", optional = true }
 rstructor_derive = { version = "0.2.9", path = "./rstructor_derive", optional = true }
-chrono = "0.4" # For date/time validation in examples
-base64 = "0.22"
+chrono = "0.4.44" # For date/time validation in examples
+base64 = "0.22.1"
 
 # Feature flags
 [features]

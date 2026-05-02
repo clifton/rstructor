@@ -40,13 +40,17 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnthropicModel {
-    /// Claude Opus 4.6 (latest most capable model)
+    /// Claude Opus 4.7 (latest most capable generally available model)
+    ClaudeOpus47,
+    /// Claude Sonnet 4.6 (latest balanced model)
+    ClaudeSonnet46,
+    /// Claude Opus 4.6 (previous most capable model)
     ClaudeOpus46,
     /// Claude Opus 4.5 (enhanced Opus 4.5)
     ClaudeOpus45,
     /// Claude Haiku 4.5 (latest fastest model)
     ClaudeHaiku45,
-    /// Claude Sonnet 4.5 (latest balanced model)
+    /// Claude Sonnet 4.5 (previous balanced model)
     ClaudeSonnet45,
     /// Claude Opus 4.1 (enhanced reasoning capabilities)
     ClaudeOpus41,
@@ -69,6 +73,8 @@ pub enum AnthropicModel {
 impl AnthropicModel {
     pub fn as_str(&self) -> &str {
         match self {
+            AnthropicModel::ClaudeOpus47 => "claude-opus-4-7",
+            AnthropicModel::ClaudeSonnet46 => "claude-sonnet-4-6",
             AnthropicModel::ClaudeOpus46 => "claude-opus-4-6",
             AnthropicModel::ClaudeOpus45 => "claude-opus-4-5-20251101",
             AnthropicModel::ClaudeHaiku45 => "claude-haiku-4-5-20251001",
@@ -91,6 +97,8 @@ impl AnthropicModel {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
+            "claude-opus-4-7" => AnthropicModel::ClaudeOpus47,
+            "claude-sonnet-4-6" => AnthropicModel::ClaudeSonnet46,
             "claude-opus-4-6" => AnthropicModel::ClaudeOpus46,
             "claude-opus-4-5-20251101" => AnthropicModel::ClaudeOpus45,
             "claude-haiku-4-5-20251001" => AnthropicModel::ClaudeHaiku45,
@@ -145,6 +153,7 @@ pub struct AnthropicConfig {
 }
 
 /// Anthropic client for generating completions
+#[derive(Clone)]
 pub struct AnthropicClient {
     config: AnthropicConfig,
     client: reqwest::Client,
@@ -244,7 +253,7 @@ impl AnthropicClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::ClaudeSonnet45))]
+    #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::ClaudeSonnet46))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -258,7 +267,7 @@ impl AnthropicClient {
 
         let config = AnthropicConfig {
             api_key,
-            model: AnthropicModel::ClaudeSonnet45, // Default to Claude Sonnet 4.5 (latest flagship)
+            model: AnthropicModel::ClaudeSonnet46, // Default to Claude Sonnet 4.6 (latest balanced model)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
@@ -289,7 +298,7 @@ impl AnthropicClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "anthropic_client_from_env", fields(model = ?AnthropicModel::ClaudeSonnet45))]
+    #[instrument(name = "anthropic_client_from_env", fields(model = ?AnthropicModel::ClaudeSonnet46))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
             RStructorError::api_error("Anthropic", ApiErrorKind::AuthenticationFailed)
@@ -300,7 +309,7 @@ impl AnthropicClient {
 
         let config = AnthropicConfig {
             api_key,
-            model: AnthropicModel::ClaudeSonnet45, // Default to Claude Sonnet 4.5 (latest flagship)
+            model: AnthropicModel::ClaudeSonnet46, // Default to Claude Sonnet 4.6 (latest balanced model)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
