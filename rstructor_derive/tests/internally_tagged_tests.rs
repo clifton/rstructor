@@ -419,3 +419,63 @@ fn test_boxed_newtype_variant_fields_appear() {
         }))
     );
 }
+
+// -- Test 10: Recursive inner structs preserve fields through $defs --------
+
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+struct RecursiveNode {
+    #[llm(description = "Node label")]
+    label: String,
+    #[llm(description = "Child nodes")]
+    children: Vec<Box<RecursiveNode>>,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(tag = "kind")]
+enum RecursiveTree {
+    #[llm(description = "A recursive tree root")]
+    Root(RecursiveNode),
+}
+
+#[test]
+fn test_recursive_newtype_variant_fields_appear() {
+    let schema = RecursiveTree::schema().to_json();
+    let any_of = schema["anyOf"].as_array().expect("should have anyOf");
+
+    let root_variant = any_of
+        .iter()
+        .find(|v| v["properties"]["kind"]["enum"][0] == "Root")
+        .expect("should have Root variant");
+
+    assert!(
+        root_variant["properties"].get("label").is_some(),
+        "recursive newtype variant should include fields from the referenced inner schema"
+    );
+    assert!(
+        root_variant["properties"].get("children").is_some(),
+        "recursive newtype variant should include recursive child field"
+    );
+    assert!(
+        root_variant["$defs"].get("RecursiveNode").is_some(),
+        "recursive definitions should be preserved for nested $ref values"
+    );
+
+    let required: Vec<&str> = root_variant["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(required.contains(&"kind"));
+    assert!(required.contains(&"label"));
+    assert!(required.contains(&"children"));
+
+    let tree = RecursiveTree::Root(RecursiveNode {
+        label: "root".to_string(),
+        children: Vec::new(),
+    });
+    let json = serde_json::to_value(&tree).unwrap();
+    assert_eq!(json["kind"], "Root");
+    assert_eq!(json["label"], "root");
+    assert!(json["children"].is_array());
+}

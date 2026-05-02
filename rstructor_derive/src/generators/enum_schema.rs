@@ -843,16 +843,36 @@ fn generate_internally_tagged_enum_schema(
                             }));
 
                             let mut required = vec![::serde_json::Value::String(#tag_name_str.to_string())];
+                            let mut defs = ::serde_json::Map::new();
 
                             if let Some(inner_obj) = inner_schema.as_object() {
-                                if let Some(::serde_json::Value::Object(inner_props)) = inner_obj.get("properties") {
-                                    for (k, v) in inner_props {
-                                        properties.insert(k.clone(), v.clone());
+                                let resolved_obj = if inner_obj.get("properties").is_some() {
+                                    Some(inner_obj)
+                                } else {
+                                    inner_obj
+                                        .get("$ref")
+                                        .and_then(|r| r.as_str())
+                                        .and_then(|r| r.strip_prefix("#/$defs/"))
+                                        .and_then(|def_name| inner_obj.get("$defs").and_then(|defs| defs.get(def_name)))
+                                        .and_then(|def_schema| def_schema.as_object())
+                                };
+
+                                if let Some(::serde_json::Value::Object(inner_defs)) = inner_obj.get("$defs") {
+                                    for (k, v) in inner_defs {
+                                        defs.insert(k.clone(), v.clone());
                                     }
                                 }
-                                if let Some(::serde_json::Value::Array(inner_req)) = inner_obj.get("required") {
-                                    for r in inner_req {
-                                        required.push(r.clone());
+
+                                if let Some(resolved_obj) = resolved_obj {
+                                    if let Some(::serde_json::Value::Object(inner_props)) = resolved_obj.get("properties") {
+                                        for (k, v) in inner_props {
+                                            properties.insert(k.clone(), v.clone());
+                                        }
+                                    }
+                                    if let Some(::serde_json::Value::Array(inner_req)) = resolved_obj.get("required") {
+                                        for r in inner_req {
+                                            required.push(r.clone());
+                                        }
                                     }
                                 }
                             }
@@ -863,6 +883,9 @@ fn generate_internally_tagged_enum_schema(
                             schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
                             schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
                             schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+                            if !defs.is_empty() {
+                                schema_obj.insert("$defs".to_string(), ::serde_json::Value::Object(defs));
+                            }
 
                             ::serde_json::Value::Object(schema_obj)
                         }
