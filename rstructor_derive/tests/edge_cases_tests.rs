@@ -121,9 +121,15 @@ fn test_unusual_field_names() {
             .contains_key("field123")
     );
 
-    // Our implementation currently doesn't respect serde rename attributes
+    // Serde rename attributes should be reflected in the schema.
     assert!(
         schema_json["properties"]
+            .as_object()
+            .unwrap()
+            .contains_key("renamed-field")
+    );
+    assert!(
+        !schema_json["properties"]
             .as_object()
             .unwrap()
             .contains_key("internal_name")
