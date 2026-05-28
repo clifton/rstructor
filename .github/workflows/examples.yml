@@ -30,7 +30,7 @@ jobs:
           cache-on-failure: true
 
       - name: Build all examples
-        run: cargo build --examples
+        run: cargo build --all-features --examples
 
   # Run examples in parallel groups (using cached build artifacts)
   examples:
@@ -70,6 +70,6 @@ jobs:
               echo "=========================================="
               echo "Running example: ${examples[$i]}"
               echo "=========================================="
-              cargo run --example "${examples[$i]}"
+              cargo run --all-features --example "${examples[$i]}"
             fi
           done
