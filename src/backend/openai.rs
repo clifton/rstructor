@@ -453,7 +453,7 @@ impl OpenAIClient {
 
 #[cfg(feature = "tools")]
 impl OpenAIClient {
-    /// Run the agentic tool-calling loop: the model may call the [`Toolbox`]'s
+    /// Begin a tool-calling request. The model may call the [`Toolbox`](crate::Toolbox)'s
     /// tools (whose results are fed back) until it produces a final text answer.
     ///
     /// Requires the `tools` feature.
@@ -473,15 +473,28 @@ impl OpenAIClient {
     /// ));
     ///
     /// let client = OpenAIClient::from_env()?;
-    /// let answer = client.run_with_tools("What's the weather in Paris?", &toolbox).await?;
+    /// let answer = client.with_tools(&toolbox).run("What's the weather in Paris?").await?;
     /// println!("{answer}");
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn run_with_tools(
+    pub fn with_tools<'a>(
+        &'a self,
+        toolbox: &'a crate::backend::tools::Toolbox,
+    ) -> crate::backend::tools::ToolRequest<'a, Self> {
+        crate::backend::tools::ToolRequest::new(self, toolbox)
+    }
+}
+
+#[cfg(feature = "tools")]
+#[async_trait]
+impl crate::backend::tools::ToolRunner for OpenAIClient {
+    async fn run_tool_loop(
         &self,
+        system: Option<&str>,
         prompt: &str,
         toolbox: &crate::backend::tools::Toolbox,
+        max_iterations: usize,
     ) -> Result<String> {
         let base_url = self
             .config
@@ -514,9 +527,10 @@ impl OpenAIClient {
             effective_temp,
             self.config.max_tokens,
             reasoning_effort,
+            system,
             prompt,
             toolbox,
-            crate::backend::tools::DEFAULT_MAX_TOOL_ITERATIONS,
+            max_iterations,
         )
         .await
     }

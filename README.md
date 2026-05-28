@@ -353,10 +353,14 @@ let toolbox = Toolbox::new().with(FnTool::new(
 ));
 
 let client = OpenAIClient::from_env()?;
-let answer = client.run_with_tools("What's the weather in Paris?", &toolbox).await?;
+let answer = client
+    .with_tools(&toolbox)
+    .system("Use tools when relevant.")   // optional
+    .run("What's the weather in Paris?")
+    .await?;
 ```
 
-The agentic loop is currently implemented for the OpenAI-compatible providers (OpenAI, Grok). See `examples/tool_calling_example.rs`.
+Works with all providers (OpenAI, Anthropic, Grok, Gemini). See `examples/tool_calling_example.rs`.
 
 ## Feature Flags
 
@@ -368,7 +372,7 @@ rstructor = { version = "0.2", features = ["openai", "anthropic", "grok", "gemin
 - `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
 - `derive` — Derive macro (default)
 - `logging` — Tracing integration
-- `tools` — Tool/function calling via `Toolbox` + `run_with_tools` (opt-in)
+- `tools` — Tool/function calling via `Toolbox` + `client.with_tools(..).run(..)` (opt-in)
 
 All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:
 

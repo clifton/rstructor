@@ -325,14 +325,26 @@ impl GrokClient {
 
 #[cfg(feature = "tools")]
 impl GrokClient {
-    /// Run the agentic tool-calling loop: the model may call the [`Toolbox`]'s
-    /// tools (whose results are fed back) until it produces a final text answer.
+    /// Begin a tool-calling request: `client.with_tools(&toolbox).run("...").await?`.
     ///
     /// Requires the `tools` feature.
-    pub async fn run_with_tools(
+    pub fn with_tools<'a>(
+        &'a self,
+        toolbox: &'a crate::backend::tools::Toolbox,
+    ) -> crate::backend::tools::ToolRequest<'a, Self> {
+        crate::backend::tools::ToolRequest::new(self, toolbox)
+    }
+}
+
+#[cfg(feature = "tools")]
+#[async_trait]
+impl crate::backend::tools::ToolRunner for GrokClient {
+    async fn run_tool_loop(
         &self,
+        system: Option<&str>,
         prompt: &str,
         toolbox: &crate::backend::tools::Toolbox,
+        max_iterations: usize,
     ) -> Result<String> {
         let base_url = self
             .config
@@ -350,9 +362,10 @@ impl GrokClient {
             self.config.temperature,
             self.config.max_tokens,
             None,
+            system,
             prompt,
             toolbox,
-            crate::backend::tools::DEFAULT_MAX_TOOL_ITERATIONS,
+            max_iterations,
         )
         .await
     }

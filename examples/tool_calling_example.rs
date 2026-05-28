@@ -45,10 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAIClient::from_env()?;
 
     let answer = client
-        .run_with_tools(
-            "What's the weather in Paris, and what is 21 + 21?",
-            &toolbox,
-        )
+        .with_tools(&toolbox)
+        .system("You are a helpful assistant. Use the provided tools when relevant.")
+        .run("What's the weather in Paris, and what is 21 + 21?")
         .await?;
 
     println!("{answer}");

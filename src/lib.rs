@@ -77,4 +77,4 @@ pub use backend::{
     ChatMessage, ChatRole, GenerateResult, MaterializeResult, MediaFile, TokenUsage,
 };
 #[cfg(feature = "tools")]
-pub use backend::{DynTool, FnTool, Tool, Toolbox};
+pub use backend::{DynTool, FnTool, Tool, ToolRequest, ToolRunner, Toolbox};

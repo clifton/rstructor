@@ -30,7 +30,7 @@ pub use messages::{ChatMessage, ChatRole};
 #[cfg(feature = "_client")]
 pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
 #[cfg(feature = "tools")]
-pub use tools::{DynTool, FnTool, Tool, Toolbox};
+pub use tools::{DynTool, FnTool, Tool, ToolRequest, ToolRunner, Toolbox};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
 /// Information about an available model from an LLM provider.
