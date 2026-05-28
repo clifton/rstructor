@@ -304,6 +304,53 @@ pub trait LLMClient {
     /// ```
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult>;
 
+    /// Stream a raw text completion as a sequence of token deltas.
+    ///
+    /// Returns a [`Stream`](futures_util::Stream) of text chunks; concatenating
+    /// every `Ok` item yields the full response. The default implementation falls
+    /// back to a single chunk from [`generate`](Self::generate); the built-in
+    /// providers override it with true server-sent-events streaming.
+    ///
+    /// Requires the `streaming` feature.
+    #[cfg(feature = "streaming")]
+    fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        Box::pin(async_stream::try_stream! {
+            let text = self.generate(prompt).await?;
+            yield text;
+        })
+    }
+
+    /// Stream a structured object as it is generated.
+    ///
+    /// Yields [`StreamedObject::Partial`](crate::StreamedObject::Partial) snapshots
+    /// (the object's JSON filling in) as the response streams, followed by a single
+    /// [`StreamedObject::Complete`](crate::StreamedObject::Complete) carrying the
+    /// fully parsed and validated `T`. The default implementation falls back to a
+    /// single `Complete` from [`materialize`](Self::materialize); the built-in
+    /// providers override it with true streaming.
+    ///
+    /// Note: unlike [`materialize`](Self::materialize), streaming is single-shot —
+    /// a validation failure ends the stream with an error rather than re-asking.
+    ///
+    /// Requires the `streaming` feature.
+    #[cfg(feature = "streaming")]
+    fn materialize_stream<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        Box::pin(async_stream::try_stream! {
+            let value: T = self.materialize(prompt).await?;
+            yield crate::backend::streaming::StreamedObject::Complete(value);
+        })
+    }
+
     /// Create a new client by reading the API key from an environment variable.
     ///
     /// This is a required associated function that all `LLMClient` implementations must provide.

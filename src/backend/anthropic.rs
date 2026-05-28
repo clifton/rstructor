@@ -484,6 +484,80 @@ impl AnthropicClient {
     }
 }
 
+#[cfg(feature = "streaming")]
+impl AnthropicClient {
+    /// Build the JSON request body for a streaming call (`stream: true`),
+    /// optionally with a structured-output `output_format`.
+    fn stream_body(
+        &self,
+        prompt: &str,
+        output_format: Option<serde_json::Value>,
+    ) -> serde_json::Value {
+        let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
+            || self.config.model.as_str().contains("opus-4");
+        let thinking_config = self.config.thinking_level.and_then(|level| {
+            if is_thinking_model && level.claude_thinking_enabled() {
+                Some(ClaudeThinkingConfig {
+                    thinking_type: "enabled".to_string(),
+                    budget_tokens: level.claude_budget_tokens(),
+                })
+            } else {
+                None
+            }
+        });
+        let effective_temp = if thinking_config.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+        let max_tokens = effective_max_tokens(self.config.max_tokens, thinking_config.as_ref());
+
+        let mut body = serde_json::json!({
+            "model": self.config.model.as_str(),
+            "messages": [{ "role": "user", "content": prompt }],
+            "temperature": effective_temp,
+            "max_tokens": max_tokens,
+            "stream": true,
+        });
+        if let Some(tc) = thinking_config {
+            body["thinking"] =
+                serde_json::json!({ "type": tc.thinking_type, "budget_tokens": tc.budget_tokens });
+        }
+        if let Some(of) = output_format {
+            body["output_format"] = of;
+        }
+        body
+    }
+
+    /// Send a streaming request and return the raw SSE response.
+    fn send_stream(
+        &self,
+        body: serde_json::Value,
+    ) -> impl std::future::Future<Output = Result<reqwest::Response>> + Send + 'static {
+        let client = self.client.clone();
+        let api_key = self.config.api_key.clone();
+        let base_url = self
+            .config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string());
+        async move {
+            let url = format!("{}/messages", base_url);
+            let resp = client
+                .post(&url)
+                .header("x-api-key", &api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("anthropic-beta", "structured-outputs-2025-11-13")
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| handle_http_error(e, "Anthropic"))?;
+            check_response_status(resp, "Anthropic").await
+        }
+    }
+}
+
 #[async_trait]
 impl LLMClient for AnthropicClient {
     fn from_env() -> Result<Self> {
@@ -693,6 +767,39 @@ impl LLMClient for AnthropicClient {
             "Successfully extracted text content"
         );
         Ok(GenerateResult::new(content, usage))
+    }
+
+    #[cfg(feature = "streaming")]
+    fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        let body = self.stream_body(prompt, None);
+        crate::backend::streaming::sse_text_stream(
+            self.send_stream(body),
+            crate::backend::streaming::anthropic_delta,
+        )
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_stream<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let schema_json = prepare_strict_schema(&T::schema());
+        let output_format = serde_json::json!({
+            "type": "json_schema",
+            "schema": schema_json,
+        });
+        let body = self.stream_body(prompt, Some(output_format));
+        crate::backend::streaming::object_stream(
+            self.send_stream(body),
+            crate::backend::streaming::anthropic_delta,
+        )
     }
 
     /// Fetch available models from Anthropic's API.

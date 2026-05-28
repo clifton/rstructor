@@ -8,6 +8,8 @@ mod messages;
 mod model_macro;
 #[cfg(feature = "_client")]
 mod openai_compatible;
+#[cfg(feature = "streaming")]
+pub mod streaming;
 pub mod usage;
 #[cfg(feature = "_client")]
 mod utils;
@@ -27,6 +29,8 @@ pub use client::{LLMClient, MediaFile};
 pub use messages::{ChatMessage, ChatRole};
 #[cfg(feature = "_client")]
 pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
+#[cfg(feature = "streaming")]
+pub use streaming::{ObjectStream, StreamedObject, TextStream};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
 /// Information about an available model from an LLM provider.

@@ -325,6 +325,42 @@ match client.materialize::<Movie>("...").await {
 }
 ```
 
+## Streaming
+
+Enable the `streaming` feature to stream responses as they are generated.
+
+```toml
+rstructor = { version = "0.2", features = ["streaming"] }
+```
+
+`materialize_stream` streams a **structured object**: progressive JSON snapshots of the object filling in, followed by a final, validated, typed value.
+
+```rust
+use futures_util::StreamExt;
+use rstructor::{LLMClient, OpenAIClient, Instructor, StreamedObject};
+
+let client = OpenAIClient::from_env()?;
+let mut stream = client.materialize_stream::<Recipe>("A simple pancake recipe");
+
+while let Some(item) = stream.next().await {
+    match item? {
+        StreamedObject::Partial(json) => update_ui(&json), // object filling in
+        StreamedObject::Complete(recipe) => done(recipe),  // typed + validated
+    }
+}
+```
+
+`generate_stream` streams raw text deltas:
+
+```rust
+let mut stream = client.generate_stream("Write a haiku");
+while let Some(chunk) = stream.next().await {
+    print!("{}", chunk?);
+}
+```
+
+Both are available on all providers (OpenAI, Anthropic, Grok, Gemini). See `examples/streaming_example.rs`.
+
 ## Feature Flags
 
 ```toml
@@ -335,6 +371,7 @@ rstructor = { version = "0.2", features = ["openai", "anthropic", "grok", "gemin
 - `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
 - `derive` — Derive macro (default)
 - `logging` — Tracing integration
+- `streaming` — Streaming via `generate_stream` / `materialize_stream` (opt-in)
 
 All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:
 

@@ -60,6 +60,8 @@ tracing-subscriber = { version = "0.3.23", features = [
 tracing-futures = { version = "0.2.5", optional = true }
 rstructor_derive = { version = "0.2.11", path = "./rstructor_derive", optional = true }
 base64 = { version = "0.22.1", optional = true }
+futures-util = { version = "0.3.31", default-features = false, optional = true }
+async-stream = { version = "0.3.6", optional = true }
 
 # Feature flags
 [features]
@@ -76,6 +78,13 @@ logging = ["tracing-subscriber", "tracing-futures"]
 # all providers yields a dependency-light, schema-only build (derive + schema, no
 # tokio/reqwest) suitable for generating JSON Schema without making API calls.
 _client = ["reqwest", "tokio", "base64"]
+# Opt-in streaming: raw text (`generate_stream`) and structured objects
+# (`materialize_stream`). Enable a provider feature too for the HTTP stack.
+streaming = ["_client", "reqwest/stream", "futures-util", "async-stream"]
+
+[[example]]
+name = "streaming_example"
+required-features = ["streaming"]
 
 [dev-dependencies]
 # Used only by examples and tests (date/time fields, custom types); not part of
