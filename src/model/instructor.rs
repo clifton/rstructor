@@ -102,6 +102,11 @@ pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
     /// returned by the LLM; a failure triggers an automatic re-ask with the error
     /// fed back to the model. The default implementation returns `Ok(())`.
     ///
+    /// The derive-generated implementation automatically recurses into nested
+    /// `Instructor` fields — directly, and through `Option`, `Vec`, `Box`, and
+    /// string-keyed maps — before running this type's own validator, so validating
+    /// a parent validates its entire tree.
+    ///
     /// To add custom validation, use the `#[llm(validate = "path")]` container
     /// attribute — the derive macro wires your function into this trait method:
     ///
@@ -141,6 +146,82 @@ pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
 // The blanket implementation is removed
 // Instead, the derive macro will handle implementing Instructor for each type
 // This avoids the conflicting implementation errors
+
+// Container implementations so that validation recurses into nested values.
+// `#[derive(Instructor)]` validates each field via these impls, so a `Vec`,
+// `Option`, `Box`, or string-keyed map of validating types is validated
+// element-by-element as part of its parent.
+
+impl<T: Instructor> Instructor for Option<T> {
+    fn validate(&self) -> Result<()> {
+        match self {
+            Some(value) => value.validate(),
+            None => Ok(()),
+        }
+    }
+}
+
+impl<T: Instructor> Instructor for Vec<T> {
+    fn validate(&self) -> Result<()> {
+        for value in self {
+            value.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: Instructor> Instructor for Box<T> {
+    fn validate(&self) -> Result<()> {
+        (**self).validate()
+    }
+}
+
+impl<V: Instructor> Instructor for std::collections::HashMap<String, V> {
+    fn validate(&self) -> Result<()> {
+        for value in self.values() {
+            value.validate()?;
+        }
+        Ok(())
+    }
+}
+
+/// Internal helpers used by `#[derive(Instructor)]`. Not part of the public API
+/// and exempt from semver guarantees.
+#[doc(hidden)]
+pub mod __private {
+    use super::Instructor;
+    use crate::error::Result;
+
+    /// Autoref-specialization wrapper that lets generated code validate a field
+    /// **iff** its type implements [`Instructor`], and otherwise do nothing —
+    /// without the derive macro having to know which field types are `Instructor`.
+    ///
+    /// `#[derive(Instructor)]` emits `Probe(&self.field).rstructor_probe()?` for
+    /// each field. When the field's type implements `Instructor`, the inherent
+    /// method below is selected (inherent methods take priority over trait
+    /// methods); otherwise method resolution falls back to the [`ProbeFallback`]
+    /// trait, which is a no-op.
+    pub struct Probe<'a, T>(pub &'a T);
+
+    /// Fallback for non-`Instructor` field types (e.g. `String`, `u32`).
+    pub trait ProbeFallback {
+        fn rstructor_probe(&self) -> Result<()>;
+    }
+
+    impl<T> ProbeFallback for Probe<'_, T> {
+        fn rstructor_probe(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<T: Instructor> Probe<'_, T> {
+        /// Validate the wrapped value (selected over the trait method when
+        /// `T: Instructor`).
+        pub fn rstructor_probe(&self) -> Result<()> {
+            self.0.validate()
+        }
+    }
+}
 
 /// Helper trait to mark a type as implementing custom validation.
 ///
