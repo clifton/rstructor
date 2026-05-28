@@ -105,6 +105,7 @@ impl ChatMessage {
 ///
 /// This struct captures both the successfully parsed data and the raw response string,
 /// which is needed for building conversation history during retries.
+#[cfg(feature = "_client")]
 #[derive(Debug)]
 pub struct MaterializeInternalOutput<T> {
     /// The parsed and validated data
@@ -118,6 +119,7 @@ pub struct MaterializeInternalOutput<T> {
     pub usage: Option<crate::backend::TokenUsage>,
 }
 
+#[cfg(feature = "_client")]
 impl<T> MaterializeInternalOutput<T> {
     /// Create a new output with all fields.
     pub fn new(data: T, raw_response: String, usage: Option<crate::backend::TokenUsage>) -> Self {
@@ -133,6 +135,7 @@ impl<T> MaterializeInternalOutput<T> {
 ///
 /// This allows the retry logic to include the failed response in the conversation
 /// history, enabling the model to see what it generated wrong.
+#[cfg(feature = "_client")]
 #[derive(Debug, Clone)]
 pub struct ValidationFailureContext {
     /// The validation error message
@@ -141,6 +144,7 @@ pub struct ValidationFailureContext {
     pub raw_response: String,
 }
 
+#[cfg(feature = "_client")]
 impl ValidationFailureContext {
     /// Create a new validation failure context.
     pub fn new(error_message: impl Into<String>, raw_response: impl Into<String>) -> Self {

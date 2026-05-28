@@ -81,6 +81,7 @@ impl MediaFile {
     /// assert!(media.data.is_some());
     /// assert!(media.uri.is_empty());
     /// ```
+    #[cfg(feature = "_client")]
     #[must_use]
     pub fn from_bytes(data: impl AsRef<[u8]>, mime_type: impl Into<String>) -> Self {
         use base64::Engine;
@@ -215,12 +216,22 @@ pub trait LLMClient {
 
     /// Materialize a structured object with media references (if supported).
     ///
-    /// Providers that do not support media inputs ignore the `media` parameter.
-    async fn materialize_with_media<T>(&self, prompt: &str, _media: &[MediaFile]) -> Result<T>
+    /// The default implementation forwards to [`materialize`](Self::materialize)
+    /// when no media is provided, and otherwise returns
+    /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) so that
+    /// media is never silently dropped. Providers with media support override this
+    /// method. All four built-in clients (OpenAI, Anthropic, Grok, Gemini) support media.
+    async fn materialize_with_media<T>(&self, prompt: &str, media: &[MediaFile]) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        self.materialize(prompt).await
+        if media.is_empty() {
+            self.materialize(prompt).await
+        } else {
+            Err(crate::error::RStructorError::Unsupported(
+                "this client does not support media inputs".to_string(),
+            ))
+        }
     }
 
     /// Materialize a structured object with metadata (token usage).

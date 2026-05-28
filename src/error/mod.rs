@@ -312,7 +312,13 @@ pub enum RStructorError {
     #[error("Timeout error")]
     Timeout,
 
+    /// A requested capability is not supported by this client/provider
+    /// (for example, passing media to a backend that has no media support).
+    #[error("Unsupported operation: {0}")]
+    Unsupported(String),
+
     /// HTTP client error (from reqwest)
+    #[cfg(feature = "_client")]
     #[error("HTTP client error: {0}")]
     HttpError(#[from] reqwest::Error),
 
@@ -415,8 +421,10 @@ impl PartialEq for RStructorError {
             (Self::ValidationError(a), Self::ValidationError(b)) => a == b,
             (Self::SchemaError(a), Self::SchemaError(b)) => a == b,
             (Self::SerializationError(a), Self::SerializationError(b)) => a == b,
+            (Self::Unsupported(a), Self::Unsupported(b)) => a == b,
             (Self::Timeout, Self::Timeout) => true,
             // HttpError and JsonError don't implement PartialEq, so we always return false
+            #[cfg(feature = "_client")]
             (Self::HttpError(_), Self::HttpError(_)) => false,
             (Self::JsonError(_), Self::JsonError(_)) => false,
             _ => false,

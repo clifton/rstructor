@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
-use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
+use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
@@ -15,194 +15,92 @@ use crate::backend::{
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
-/// OpenAI models available for completion
-///
-/// For the latest available models and their identifiers, check the
-/// [OpenAI Models Documentation](https://platform.openai.com/docs/models).
-///
-/// # Using Custom Models
-///
-/// You can specify any model name as a string using `Custom` variant or `FromStr`:
-///
-/// ```rust
-/// use rstructor::OpenAIModel;
-/// use std::str::FromStr;
-///
-/// // Using Custom variant
-/// let model = OpenAIModel::Custom("gpt-4-custom".to_string());
-///
-/// // Using FromStr (useful for config files)
-/// let model = OpenAIModel::from_str("gpt-4-custom").unwrap();
-///
-/// // Or use the convenience method
-/// let model = OpenAIModel::from_string("gpt-4-custom");
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Model {
-    /// GPT-5.5 Pro (most capable GPT-5.5 model)
-    Gpt55Pro,
-    /// GPT-5.5 (latest frontier model for complex professional work)
-    Gpt55,
-    /// GPT-5.4 Pro (most capable GPT-5.4-class model)
-    Gpt54Pro,
-    /// GPT-5.4 (more affordable frontier model for complex professional work)
-    Gpt54,
-    /// GPT-5.4 Mini (lower-latency, lower-cost GPT-5.4-class model)
-    Gpt54Mini,
-    /// GPT-5.4 Nano (cheapest GPT-5.4-class model for high-volume tasks)
-    Gpt54Nano,
-    /// GPT-5.3 Chat Latest (ChatGPT GPT-5.3 model)
-    Gpt53ChatLatest,
-    /// GPT-5.3 Codex (coding-focused GPT-5.3 model)
-    Gpt53Codex,
-    /// GPT-5.2 Pro (previous GPT-5.2 pro model)
-    Gpt52Pro,
-    /// GPT-5.2 (previous GPT-5.2 model)
-    Gpt52,
-    /// GPT-5.2 Chat Latest (ChatGPT GPT-5.2 model)
-    Gpt52ChatLatest,
-    /// GPT-5.2 Codex (coding-focused GPT-5.2 model)
-    Gpt52Codex,
-    /// GPT-5.1 (GPT-5.1 model)
-    Gpt51,
-    /// GPT-5 Chat Latest (ChatGPT GPT-5 model)
-    Gpt5ChatLatest,
-    /// GPT-5 Pro (most capable GPT-5 model)
-    Gpt5Pro,
-    /// GPT-5 (standard GPT-5 model)
-    Gpt5,
-    /// GPT-5 Nano (smallest GPT-5 model)
-    Gpt5Nano,
-    /// GPT-5 Mini (smaller, faster GPT-5 model)
-    Gpt5Mini,
-    /// GPT-4.1 (GPT-4.1 model)
-    Gpt41,
-    /// GPT-4.1 Mini (smaller GPT-4.1)
-    Gpt41Mini,
-    /// GPT-4.1 Nano (smallest GPT-4.1)
-    Gpt41Nano,
-    /// GPT-4o (previous GPT-4o model, optimized for chat)
-    Gpt4O,
-    /// GPT-4o Mini (smaller, faster, more cost-effective version)
-    Gpt4OMini,
-    /// GPT-4 Turbo (high-intelligence model)
-    Gpt4Turbo,
-    /// GPT-4 (standard GPT-4 model)
-    Gpt4,
-    /// GPT-3.5 Turbo (efficient model for simple tasks)
-    Gpt35Turbo,
-    /// O4 Mini (previous small reasoning model)
-    O4Mini,
-    /// O3 (reasoning model)
-    O3,
-    /// O3 Mini (smaller reasoning model)
-    O3Mini,
-    /// O1 (reasoning model optimized for complex problem-solving)
-    O1,
-    /// O1 Pro (most capable reasoning model)
-    O1Pro,
-    /// Custom model name (for new models, local LLMs, or OpenAI-compatible endpoints)
-    Custom(String),
-}
-
-impl Model {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Model::Gpt55Pro => "gpt-5.5-pro",
-            Model::Gpt55 => "gpt-5.5",
-            Model::Gpt54Pro => "gpt-5.4-pro",
-            Model::Gpt54 => "gpt-5.4",
-            Model::Gpt54Mini => "gpt-5.4-mini",
-            Model::Gpt54Nano => "gpt-5.4-nano",
-            Model::Gpt53ChatLatest => "gpt-5.3-chat-latest",
-            Model::Gpt53Codex => "gpt-5.3-codex",
-            Model::Gpt52Pro => "gpt-5.2-pro",
-            Model::Gpt52 => "gpt-5.2",
-            Model::Gpt52ChatLatest => "gpt-5.2-chat-latest",
-            Model::Gpt52Codex => "gpt-5.2-codex",
-            Model::Gpt51 => "gpt-5.1",
-            Model::Gpt5ChatLatest => "gpt-5-chat-latest",
-            Model::Gpt5Pro => "gpt-5-pro",
-            Model::Gpt5 => "gpt-5",
-            Model::Gpt5Nano => "gpt-5-nano",
-            Model::Gpt5Mini => "gpt-5-mini",
-            Model::Gpt41 => "gpt-4.1",
-            Model::Gpt41Mini => "gpt-4.1-mini",
-            Model::Gpt41Nano => "gpt-4.1-nano",
-            Model::Gpt4O => "gpt-4o",
-            Model::Gpt4OMini => "gpt-4o-mini",
-            Model::Gpt4Turbo => "gpt-4-turbo",
-            Model::Gpt4 => "gpt-4",
-            Model::Gpt35Turbo => "gpt-3.5-turbo",
-            Model::O4Mini => "o4-mini",
-            Model::O3 => "o3",
-            Model::O3Mini => "o3-mini",
-            Model::O1 => "o1",
-            Model::O1Pro => "o1-pro",
-            Model::Custom(name) => name,
-        }
-    }
-
-    /// Create a model from a string. This is a convenience method that always succeeds.
+define_model_enum! {
+    /// OpenAI models available for completion
     ///
-    /// If the string matches a known model variant, it returns that variant.
-    /// Otherwise, it returns `Custom(name)`.
-    pub fn from_string(name: impl Into<String>) -> Self {
-        let name = name.into();
-        match name.as_str() {
-            "gpt-5.5-pro" => Model::Gpt55Pro,
-            "gpt-5.5" => Model::Gpt55,
-            "gpt-5.4-pro" => Model::Gpt54Pro,
-            "gpt-5.4" => Model::Gpt54,
-            "gpt-5.4-mini" => Model::Gpt54Mini,
-            "gpt-5.4-nano" => Model::Gpt54Nano,
-            "gpt-5.3-chat-latest" => Model::Gpt53ChatLatest,
-            "gpt-5.3-codex" => Model::Gpt53Codex,
-            "gpt-5.2-pro" => Model::Gpt52Pro,
-            "gpt-5.2" => Model::Gpt52,
-            "gpt-5.2-chat-latest" => Model::Gpt52ChatLatest,
-            "gpt-5.2-codex" => Model::Gpt52Codex,
-            "gpt-5.1" => Model::Gpt51,
-            "gpt-5-chat-latest" => Model::Gpt5ChatLatest,
-            "gpt-5-pro" => Model::Gpt5Pro,
-            "gpt-5" => Model::Gpt5,
-            "gpt-5-nano" => Model::Gpt5Nano,
-            "gpt-5-mini" => Model::Gpt5Mini,
-            "gpt-4.1" => Model::Gpt41,
-            "gpt-4.1-mini" => Model::Gpt41Mini,
-            "gpt-4.1-nano" => Model::Gpt41Nano,
-            "gpt-4o" => Model::Gpt4O,
-            "gpt-4o-mini" => Model::Gpt4OMini,
-            "gpt-4-turbo" => Model::Gpt4Turbo,
-            "gpt-4" => Model::Gpt4,
-            "gpt-3.5-turbo" => Model::Gpt35Turbo,
-            "o4-mini" => Model::O4Mini,
-            "o3" => Model::O3,
-            "o3-mini" => Model::O3Mini,
-            "o1" => Model::O1,
-            "o1-pro" => Model::O1Pro,
-            _ => Model::Custom(name),
-        }
-    }
-}
-
-impl FromStr for Model {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(Model::from_string(s))
-    }
-}
-
-impl From<&str> for Model {
-    fn from(s: &str) -> Self {
-        Model::from_string(s)
-    }
-}
-
-impl From<String> for Model {
-    fn from(s: String) -> Self {
-        Model::from_string(s)
+    /// For the latest available models and their identifiers, check the
+    /// [OpenAI Models Documentation](https://platform.openai.com/docs/models).
+    ///
+    /// # Using Custom Models
+    ///
+    /// You can specify any model name as a string using `Custom` variant or `FromStr`:
+    ///
+    /// ```rust
+    /// use rstructor::OpenAIModel;
+    /// use std::str::FromStr;
+    ///
+    /// // Using Custom variant
+    /// let model = OpenAIModel::Custom("gpt-4-custom".to_string());
+    ///
+    /// // Using FromStr (useful for config files)
+    /// let model = OpenAIModel::from_str("gpt-4-custom").unwrap();
+    ///
+    /// // Or use the convenience method
+    /// let model = OpenAIModel::from_string("gpt-4-custom");
+    /// ```
+    pub enum Model {
+        /// GPT-5.5 Pro (most capable GPT-5.5 model)
+        Gpt55Pro => "gpt-5.5-pro",
+        /// GPT-5.5 (latest frontier model for complex professional work)
+        Gpt55 => "gpt-5.5",
+        /// GPT-5.4 Pro (most capable GPT-5.4-class model)
+        Gpt54Pro => "gpt-5.4-pro",
+        /// GPT-5.4 (more affordable frontier model for complex professional work)
+        Gpt54 => "gpt-5.4",
+        /// GPT-5.4 Mini (lower-latency, lower-cost GPT-5.4-class model)
+        Gpt54Mini => "gpt-5.4-mini",
+        /// GPT-5.4 Nano (cheapest GPT-5.4-class model for high-volume tasks)
+        Gpt54Nano => "gpt-5.4-nano",
+        /// GPT-5.3 Chat Latest (ChatGPT GPT-5.3 model)
+        Gpt53ChatLatest => "gpt-5.3-chat-latest",
+        /// GPT-5.3 Codex (coding-focused GPT-5.3 model)
+        Gpt53Codex => "gpt-5.3-codex",
+        /// GPT-5.2 Pro (previous GPT-5.2 pro model)
+        Gpt52Pro => "gpt-5.2-pro",
+        /// GPT-5.2 (previous GPT-5.2 model)
+        Gpt52 => "gpt-5.2",
+        /// GPT-5.2 Chat Latest (ChatGPT GPT-5.2 model)
+        Gpt52ChatLatest => "gpt-5.2-chat-latest",
+        /// GPT-5.2 Codex (coding-focused GPT-5.2 model)
+        Gpt52Codex => "gpt-5.2-codex",
+        /// GPT-5.1 (GPT-5.1 model)
+        Gpt51 => "gpt-5.1",
+        /// GPT-5 Chat Latest (ChatGPT GPT-5 model)
+        Gpt5ChatLatest => "gpt-5-chat-latest",
+        /// GPT-5 Pro (most capable GPT-5 model)
+        Gpt5Pro => "gpt-5-pro",
+        /// GPT-5 (standard GPT-5 model)
+        Gpt5 => "gpt-5",
+        /// GPT-5 Nano (smallest GPT-5 model)
+        Gpt5Nano => "gpt-5-nano",
+        /// GPT-5 Mini (smaller, faster GPT-5 model)
+        Gpt5Mini => "gpt-5-mini",
+        /// GPT-4.1 (GPT-4.1 model)
+        Gpt41 => "gpt-4.1",
+        /// GPT-4.1 Mini (smaller GPT-4.1)
+        Gpt41Mini => "gpt-4.1-mini",
+        /// GPT-4.1 Nano (smallest GPT-4.1)
+        Gpt41Nano => "gpt-4.1-nano",
+        /// GPT-4o (previous GPT-4o model, optimized for chat)
+        Gpt4O => "gpt-4o",
+        /// GPT-4o Mini (smaller, faster, more cost-effective version)
+        Gpt4OMini => "gpt-4o-mini",
+        /// GPT-4 Turbo (high-intelligence model)
+        Gpt4Turbo => "gpt-4-turbo",
+        /// GPT-4 (standard GPT-4 model)
+        Gpt4 => "gpt-4",
+        /// GPT-3.5 Turbo (efficient model for simple tasks)
+        Gpt35Turbo => "gpt-3.5-turbo",
+        /// O4 Mini (previous small reasoning model)
+        O4Mini => "o4-mini",
+        /// O3 (reasoning model)
+        O3 => "o3",
+        /// O3 Mini (smaller reasoning model)
+        O3Mini => "o3-mini",
+        /// O1 (reasoning model optimized for complex problem-solving)
+        O1 => "o1",
+        /// O1 Pro (most capable reasoning model)
+        O1Pro => "o1-pro",
     }
 }
 

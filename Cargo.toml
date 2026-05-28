@@ -59,18 +59,28 @@ tracing-subscriber = { version = "0.3.23", features = [
 ], optional = true }
 tracing-futures = { version = "0.2.5", optional = true }
 rstructor_derive = { version = "0.2.11", path = "./rstructor_derive", optional = true }
-chrono = "0.4.44" # For date/time validation in examples
-base64 = "0.22.1"
+base64 = { version = "0.22.1", optional = true }
 
 # Feature flags
 [features]
 default = ["openai", "anthropic", "grok", "gemini", "derive", "logging"]
-openai = ["reqwest", "tokio"]
-anthropic = ["reqwest", "tokio"]
-grok = ["reqwest", "tokio"]
-gemini = ["reqwest", "tokio"]
+# Each provider pulls in the shared networking + media stack via `_client`.
+openai = ["_client"]
+anthropic = ["_client"]
+grok = ["_client"]
+gemini = ["_client"]
 derive = ["rstructor_derive"]
 logging = ["tracing-subscriber", "tracing-futures"]
+# Internal: the HTTP client + media stack shared by every networked provider.
+# Not meant to be enabled directly — enable a provider feature instead. Disabling
+# all providers yields a dependency-light, schema-only build (derive + schema, no
+# tokio/reqwest) suitable for generating JSON Schema without making API calls.
+_client = ["reqwest", "tokio", "base64"]
+
+[dev-dependencies]
+# Used only by examples and tests (date/time fields, custom types); not part of
+# the public dependency closure.
+chrono = { version = "0.4.44", features = ["serde"] }
 
 [workspace]
 members = ["rstructor_derive"]
