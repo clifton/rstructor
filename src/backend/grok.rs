@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
-use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
+use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
@@ -15,91 +15,41 @@ use crate::backend::{
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
-/// Grok models available for completion
-///
-/// These are convenience variants for common Grok models.
-/// For the latest available models and their identifiers, check the
-/// [xAI Models Documentation](https://docs.x.ai/docs/models).
-///
-/// # Using Custom Models
-///
-/// You can specify any model name as a string using `Custom` variant or `FromStr`:
-///
-/// ```rust
-/// use rstructor::GrokModel;
-/// use std::str::FromStr;
-///
-/// // Using Custom variant
-/// let model = GrokModel::Custom("grok-custom".to_string());
-///
-/// // Using FromStr (useful for config files)
-/// let model = GrokModel::from_str("grok-custom").unwrap();
-///
-/// // Or use the convenience method
-/// let model = GrokModel::from_string("grok-custom");
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Model {
-    /// Grok 4.3 (latest recommended chat model, multimodal text + image input)
-    Grok43,
-    /// Grok 4.20 Reasoning (reasoning-optimized variant)
-    Grok420Reasoning,
-    /// Grok 4.20 Non-Reasoning (lower-latency non-reasoning variant)
-    Grok420NonReasoning,
-    /// Grok 4.20 Multi-Agent (agentic multi-agent variant)
-    Grok420MultiAgent,
-    /// Grok Build 0.1 (coding-optimized model; supersedes grok-code-fast-1)
-    GrokBuild01,
-    /// Custom model name (for new models or Grok-compatible endpoints)
-    Custom(String),
-}
-
-impl Model {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Model::Grok43 => "grok-4.3",
-            Model::Grok420Reasoning => "grok-4.20-0309-reasoning",
-            Model::Grok420NonReasoning => "grok-4.20-0309-non-reasoning",
-            Model::Grok420MultiAgent => "grok-4.20-multi-agent-0309",
-            Model::GrokBuild01 => "grok-build-0.1",
-            Model::Custom(name) => name,
-        }
-    }
-
-    /// Create a model from a string. This is a convenience method that always succeeds.
+define_model_enum! {
+    /// Grok models available for completion
     ///
-    /// If the string matches a known model variant, it returns that variant.
-    /// Otherwise, it returns `Custom(name)`.
-    pub fn from_string(name: impl Into<String>) -> Self {
-        let name = name.into();
-        match name.as_str() {
-            "grok-4.3" => Model::Grok43,
-            "grok-4.20-0309-reasoning" => Model::Grok420Reasoning,
-            "grok-4.20-0309-non-reasoning" => Model::Grok420NonReasoning,
-            "grok-4.20-multi-agent-0309" => Model::Grok420MultiAgent,
-            "grok-build-0.1" => Model::GrokBuild01,
-            _ => Model::Custom(name),
-        }
-    }
-}
-
-impl FromStr for Model {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(Model::from_string(s))
-    }
-}
-
-impl From<&str> for Model {
-    fn from(s: &str) -> Self {
-        Model::from_string(s)
-    }
-}
-
-impl From<String> for Model {
-    fn from(s: String) -> Self {
-        Model::from_string(s)
+    /// These are convenience variants for common Grok models.
+    /// For the latest available models and their identifiers, check the
+    /// [xAI Models Documentation](https://docs.x.ai/docs/models).
+    ///
+    /// # Using Custom Models
+    ///
+    /// You can specify any model name as a string using `Custom` variant or `FromStr`:
+    ///
+    /// ```rust
+    /// use rstructor::GrokModel;
+    /// use std::str::FromStr;
+    ///
+    /// // Using Custom variant
+    /// let model = GrokModel::Custom("grok-custom".to_string());
+    ///
+    /// // Using FromStr (useful for config files)
+    /// let model = GrokModel::from_str("grok-custom").unwrap();
+    ///
+    /// // Or use the convenience method
+    /// let model = GrokModel::from_string("grok-custom");
+    /// ```
+    pub enum Model {
+        /// Grok 4.3 (latest recommended chat model, multimodal text + image input)
+        Grok43 => "grok-4.3",
+        /// Grok 4.20 Reasoning (reasoning-optimized variant)
+        Grok420Reasoning => "grok-4.20-0309-reasoning",
+        /// Grok 4.20 Non-Reasoning (lower-latency non-reasoning variant)
+        Grok420NonReasoning => "grok-4.20-0309-non-reasoning",
+        /// Grok 4.20 Multi-Agent (agentic multi-agent variant)
+        Grok420MultiAgent => "grok-4.20-multi-agent-0309",
+        /// Grok Build 0.1 (coding-optimized model; supersedes grok-code-fast-1)
+        GrokBuild01 => "grok-build-0.1",
     }
 }
 

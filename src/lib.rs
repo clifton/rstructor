@@ -71,6 +71,8 @@ pub use rstructor_derive::Instructor;
 pub use backend::LLMClient;
 pub use backend::ModelInfo;
 pub use backend::ThinkingLevel;
+#[cfg(feature = "_client")]
+pub use backend::{AnyClient, Provider};
 pub use backend::{
     ChatMessage, ChatRole, GenerateResult, MaterializeResult, MediaFile, TokenUsage,
 };

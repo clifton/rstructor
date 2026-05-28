@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
+use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     AnthropicMessageContent, ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput,
     MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext,
@@ -16,110 +16,50 @@ use crate::backend::{
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
-/// Anthropic models available for completion
-///
-/// For the latest available models and their identifiers, check the
-/// [Anthropic Models Documentation](https://docs.anthropic.com/en/docs/about-claude/models/all-models).
-///
-/// # Using Custom Models
-///
-/// You can specify any model name as a string using `Custom` variant or `FromStr`:
-///
-/// ```rust
-/// use rstructor::AnthropicModel;
-/// use std::str::FromStr;
-///
-/// // Using Custom variant
-/// let model = AnthropicModel::Custom("claude-custom".to_string());
-///
-/// // Using FromStr (useful for config files)
-/// let model = AnthropicModel::from_str("claude-custom").unwrap();
-///
-/// // Or use the convenience method
-/// let model = AnthropicModel::from_string("claude-custom");
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AnthropicModel {
-    /// Claude Opus 4.8 (latest most capable generally available model)
-    ClaudeOpus48,
-    /// Claude Opus 4.7 (previous most capable model)
-    ClaudeOpus47,
-    /// Claude Sonnet 4.6 (latest balanced model)
-    ClaudeSonnet46,
-    /// Claude Opus 4.6 (previous most capable model)
-    ClaudeOpus46,
-    /// Claude Opus 4.5 (enhanced Opus 4.5)
-    ClaudeOpus45,
-    /// Claude Haiku 4.5 (latest fastest model)
-    ClaudeHaiku45,
-    /// Claude Sonnet 4.5 (previous balanced model)
-    ClaudeSonnet45,
-    /// Claude Opus 4.1 (enhanced reasoning capabilities)
-    ClaudeOpus41,
-    /// Claude Opus 4 (high-intelligence model)
-    ClaudeOpus4,
-    /// Claude Sonnet 4 (balanced performance model)
-    ClaudeSonnet4,
-    /// Custom model name (for new models or Anthropic-compatible endpoints)
-    Custom(String),
-}
-
-impl AnthropicModel {
-    pub fn as_str(&self) -> &str {
-        match self {
-            AnthropicModel::ClaudeOpus48 => "claude-opus-4-8",
-            AnthropicModel::ClaudeOpus47 => "claude-opus-4-7",
-            AnthropicModel::ClaudeSonnet46 => "claude-sonnet-4-6",
-            AnthropicModel::ClaudeOpus46 => "claude-opus-4-6",
-            AnthropicModel::ClaudeOpus45 => "claude-opus-4-5-20251101",
-            AnthropicModel::ClaudeHaiku45 => "claude-haiku-4-5-20251001",
-            AnthropicModel::ClaudeSonnet45 => "claude-sonnet-4-5-20250929",
-            AnthropicModel::ClaudeOpus41 => "claude-opus-4-1-20250805",
-            AnthropicModel::ClaudeOpus4 => "claude-opus-4-20250514",
-            AnthropicModel::ClaudeSonnet4 => "claude-sonnet-4-20250514",
-            AnthropicModel::Custom(name) => name,
-        }
-    }
-
-    /// Create a model from a string. This is a convenience method that always succeeds.
+define_model_enum! {
+    /// Anthropic models available for completion
     ///
-    /// If the string matches a known model variant, it returns that variant.
-    /// Otherwise, it returns `Custom(name)`.
-    pub fn from_string(name: impl Into<String>) -> Self {
-        let name = name.into();
-        match name.as_str() {
-            "claude-opus-4-8" => AnthropicModel::ClaudeOpus48,
-            "claude-opus-4-7" => AnthropicModel::ClaudeOpus47,
-            "claude-sonnet-4-6" => AnthropicModel::ClaudeSonnet46,
-            "claude-opus-4-6" => AnthropicModel::ClaudeOpus46,
-            "claude-opus-4-5-20251101" => AnthropicModel::ClaudeOpus45,
-            "claude-haiku-4-5-20251001" => AnthropicModel::ClaudeHaiku45,
-            "claude-sonnet-4-5-20250929" => AnthropicModel::ClaudeSonnet45,
-            "claude-opus-4-1-20250805" => AnthropicModel::ClaudeOpus41,
-            "claude-opus-4-20250514" => AnthropicModel::ClaudeOpus4,
-            "claude-sonnet-4-20250514" => AnthropicModel::ClaudeSonnet4,
-            _ => AnthropicModel::Custom(name),
-        }
-    }
-}
-
-impl FromStr for AnthropicModel {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(AnthropicModel::from_string(s))
-    }
-}
-
-impl From<&str> for AnthropicModel {
-    fn from(s: &str) -> Self {
-        AnthropicModel::from_string(s)
-    }
-}
-
-impl From<String> for AnthropicModel {
-    fn from(s: String) -> Self {
-        AnthropicModel::from_string(s)
+    /// For the latest available models and their identifiers, check the
+    /// [Anthropic Models Documentation](https://docs.anthropic.com/en/docs/about-claude/models/all-models).
+    ///
+    /// # Using Custom Models
+    ///
+    /// You can specify any model name as a string using `Custom` variant or `FromStr`:
+    ///
+    /// ```rust
+    /// use rstructor::AnthropicModel;
+    /// use std::str::FromStr;
+    ///
+    /// // Using Custom variant
+    /// let model = AnthropicModel::Custom("claude-custom".to_string());
+    ///
+    /// // Using FromStr (useful for config files)
+    /// let model = AnthropicModel::from_str("claude-custom").unwrap();
+    ///
+    /// // Or use the convenience method
+    /// let model = AnthropicModel::from_string("claude-custom");
+    /// ```
+    pub enum AnthropicModel {
+        /// Claude Opus 4.8 (latest most capable generally available model)
+        ClaudeOpus48 => "claude-opus-4-8",
+        /// Claude Opus 4.7 (previous most capable model)
+        ClaudeOpus47 => "claude-opus-4-7",
+        /// Claude Sonnet 4.6 (latest balanced model)
+        ClaudeSonnet46 => "claude-sonnet-4-6",
+        /// Claude Opus 4.6 (previous most capable model)
+        ClaudeOpus46 => "claude-opus-4-6",
+        /// Claude Opus 4.5 (enhanced Opus 4.5)
+        ClaudeOpus45 => "claude-opus-4-5-20251101",
+        /// Claude Haiku 4.5 (latest fastest model)
+        ClaudeHaiku45 => "claude-haiku-4-5-20251001",
+        /// Claude Sonnet 4.5 (previous balanced model)
+        ClaudeSonnet45 => "claude-sonnet-4-5-20250929",
+        /// Claude Opus 4.1 (enhanced reasoning capabilities)
+        ClaudeOpus41 => "claude-opus-4-1-20250805",
+        /// Claude Opus 4 (high-intelligence model)
+        ClaudeOpus4 => "claude-opus-4-20250514",
+        /// Claude Sonnet 4 (balanced performance model)
+        ClaudeSonnet4 => "claude-sonnet-4-20250514",
     }
 }
 

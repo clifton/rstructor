@@ -1,8 +1,15 @@
+#[cfg(feature = "_client")]
+mod any_client;
 pub mod client;
+#[cfg(feature = "_client")]
 mod media;
 mod messages;
+#[cfg(feature = "_client")]
+mod model_macro;
+#[cfg(feature = "_client")]
 mod openai_compatible;
 pub mod usage;
+#[cfg(feature = "_client")]
 mod utils;
 
 #[cfg(feature = "anthropic")]
@@ -14,8 +21,12 @@ pub mod grok;
 #[cfg(feature = "openai")]
 pub mod openai;
 
+#[cfg(feature = "_client")]
+pub use any_client::{AnyClient, Provider};
 pub use client::{LLMClient, MediaFile};
-pub use messages::{ChatMessage, ChatRole, MaterializeInternalOutput, ValidationFailureContext};
+pub use messages::{ChatMessage, ChatRole};
+#[cfg(feature = "_client")]
+pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
 /// Information about an available model from an LLM provider.
@@ -46,14 +57,17 @@ pub struct ModelInfo {
     /// Description of the model's capabilities
     pub description: Option<String>,
 }
+#[cfg(feature = "_client")]
 pub(crate) use media::{
     AnthropicMessageContent, OpenAICompatibleMessageContent, build_anthropic_message_content,
     build_openai_compatible_message_content,
 };
+#[cfg(feature = "_client")]
 pub(crate) use openai_compatible::{
     OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
     OpenAICompatibleChatMessage, convert_openai_compatible_chat_messages,
 };
+#[cfg(feature = "_client")]
 pub(crate) use utils::{
     ResponseFormat, check_response_status, generate_with_retry_with_history, handle_http_error,
     materialize_with_media_with_retry, parse_validate_and_create_output, prepare_strict_schema,

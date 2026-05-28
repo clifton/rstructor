@@ -79,6 +79,25 @@ let client = OpenAIClient::new("key")?
     .model("llama-3.1-70b");
 ```
 
+### Selecting a provider at runtime
+
+`LLMClient::materialize` is generic, so the trait isn't object-safe (`Box<dyn LLMClient>` is impossible). Use `AnyClient` when the provider is decided at runtime (CLI flag, config, env) and you want to store it in a single type:
+
+```rust
+use rstructor::{AnyClient, Provider, LLMClient};
+
+// Pick a provider dynamically, reading its key from the environment.
+let provider = Provider::Anthropic; // e.g. parsed from a config file
+let client = AnyClient::from_env_for(provider)?;
+let movie: Movie = client.materialize("Describe Inception").await?;
+
+// Or auto-detect from whichever API key is set:
+let client = AnyClient::from_env()?;
+
+// Or wrap a pre-configured client:
+let client: AnyClient = OpenAIClient::from_env()?.model("gpt-5.5").into();
+```
+
 ## Validation
 
 Add custom validation with automatic retry on failure:
@@ -313,9 +332,18 @@ match client.materialize::<Movie>("...").await {
 rstructor = { version = "0.2", features = ["openai", "anthropic", "grok", "gemini"] }
 ```
 
-- `openai`, `anthropic`, `grok`, `gemini` — Provider backends
+- `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
 - `derive` — Derive macro (default)
 - `logging` — Tracing integration
+
+All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:
+
+```toml
+[dependencies]
+rstructor = { version = "0.2", default-features = false, features = ["derive"] }
+```
+
+This keeps the derive macro, `SchemaType`, the `Instructor` trait, and the `LLMClient` trait (so you can implement your own backend) without the async/HTTP dependency tree.
 
 ## Examples
 
