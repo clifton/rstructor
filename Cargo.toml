@@ -1,6 +1,6 @@
 [package]
 name = "rstructor"
-version = "0.2.11"
+version = "0.3.0"
 edition = "2024"
 description = "Rust equivalent of Python's Instructor + Pydantic: Extract structured, validated data from LLMs (OpenAI, Anthropic, Grok, Gemini) using type-safe Rust structs and enums"
 license = "MIT"
@@ -58,7 +58,7 @@ tracing-subscriber = { version = "0.3.23", features = [
   "env-filter",
 ], optional = true }
 tracing-futures = { version = "0.2.5", optional = true }
-rstructor_derive = { version = "0.2.11", path = "./rstructor_derive", optional = true }
+rstructor_derive = { version = "0.3.0", path = "./rstructor_derive", optional = true }
 base64 = { version = "0.22.1", optional = true }
 futures-util = { version = "0.3.31", default-features = false, optional = true }
 async-stream = { version = "0.3.6", optional = true }
