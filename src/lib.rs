@@ -78,3 +78,5 @@ pub use backend::{
 };
 #[cfg(feature = "tools")]
 pub use backend::{DynTool, FnTool, Tool, ToolRequest, ToolRunner, Toolbox};
+#[cfg(feature = "streaming")]
+pub use backend::{ItemStream, ObjectStream, StreamedObject, TextStream};

@@ -325,6 +325,42 @@ match client.materialize::<Movie>("...").await {
 }
 ```
 
+## Streaming
+
+Enable the `streaming` feature to stream responses as they are generated.
+
+```toml
+rstructor = { version = "0.2", features = ["streaming"] }
+```
+
+`materialize_iter` streams a **list of structured objects**, yielding each item as soon as it is fully generated and validated — the common case where you want a long list without buffering the whole response:
+
+```rust
+use futures_util::StreamExt;
+use rstructor::{LLMClient, OpenAIClient, Instructor};
+
+let client = OpenAIClient::from_env()?;
+let mut stream = client.materialize_iter::<Invention>("List 10 important inventions.");
+
+while let Some(item) = stream.next().await {
+    let invention = item?;          // each item: fully parsed + validated
+    println!("{} ({})", invention.name, invention.year);
+}
+```
+
+`generate_stream` streams raw text deltas:
+
+```rust
+let mut stream = client.generate_stream("Write a haiku");
+while let Some(chunk) = stream.next().await {
+    print!("{}", chunk?);
+}
+```
+
+There is also `materialize_stream`, which streams a single object as progressive `StreamedObject::Partial(json)` snapshots followed by a validated `Complete(T)`.
+
+All are available on every provider (OpenAI, Anthropic, Grok, Gemini). See `examples/streaming_example.rs`.
+
 ## Tool Calling
 
 Enable the `tools` feature to let the model call your typed Rust functions and feed the results back, looping until it produces a final answer. Tool argument types derive `Instructor`, so their JSON Schema is generated automatically.
@@ -372,6 +408,7 @@ rstructor = { version = "0.2", features = ["openai", "anthropic", "grok", "gemin
 - `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
 - `derive` — Derive macro (default)
 - `logging` — Tracing integration
+- `streaming` — Streaming via `generate_stream` / `materialize_iter` / `materialize_stream` (opt-in)
 - `tools` — Tool/function calling via `Toolbox` + `client.with_tools(..).run(..)` (opt-in)
 
 All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:

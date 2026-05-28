@@ -451,6 +451,71 @@ impl OpenAIClient {
     }
 }
 
+#[cfg(feature = "streaming")]
+impl OpenAIClient {
+    /// Build the JSON request body for a streaming call (`stream: true`),
+    /// optionally with a structured-output `response_format`.
+    fn stream_body(
+        &self,
+        prompt: &str,
+        response_format: Option<ResponseFormat>,
+    ) -> serde_json::Value {
+        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
+        let reasoning_effort = if is_gpt5 {
+            self.config
+                .thinking_level
+                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
+        } else {
+            None
+        };
+        let effective_temp = if reasoning_effort.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+        let request = OpenAICompatibleChatCompletionRequest {
+            model: self.config.model.as_str().to_string(),
+            messages: vec![OpenAICompatibleChatMessage {
+                role: "user".to_string(),
+                content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
+            }],
+            response_format,
+            temperature: effective_temp,
+            max_tokens: self.config.max_tokens,
+            reasoning_effort,
+        };
+        let mut body = serde_json::to_value(&request).unwrap_or_else(|_| serde_json::json!({}));
+        body["stream"] = serde_json::Value::Bool(true);
+        body
+    }
+
+    /// Send a streaming request and return the raw SSE response.
+    fn send_stream(
+        &self,
+        body: serde_json::Value,
+    ) -> impl std::future::Future<Output = Result<reqwest::Response>> + Send + 'static {
+        let client = self.client.clone();
+        let api_key = self.config.api_key.clone();
+        let base_url = self
+            .config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+        async move {
+            let url = format!("{}/chat/completions", base_url);
+            let resp = client
+                .post(&url)
+                .header("Authorization", format!("Bearer {api_key}"))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| handle_http_error(e, "OpenAI"))?;
+            check_response_status(resp, "OpenAI").await
+        }
+    }
+}
+
 #[cfg(feature = "tools")]
 impl OpenAIClient {
     /// Begin a tool-calling request. The model may call the [`Toolbox`](crate::Toolbox)'s
@@ -734,6 +799,66 @@ impl LLMClient for OpenAIClient {
                 },
             ))
         }
+    }
+
+    #[cfg(feature = "streaming")]
+    fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        let body = self.stream_body(prompt, None);
+        crate::backend::streaming::sse_text_stream(
+            self.send_stream(body),
+            crate::backend::streaming::openai_delta,
+        )
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_stream<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let schema = T::schema();
+        let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
+        let schema_json = prepare_strict_schema(&schema);
+        let response_format = ResponseFormat::json_schema(
+            schema_name,
+            schema_json,
+            Some("Output in the specified format. Include ALL required fields and follow the schema exactly.".to_string()),
+        );
+        let body = self.stream_body(prompt, Some(response_format));
+        crate::backend::streaming::object_stream(
+            self.send_stream(body),
+            crate::backend::streaming::openai_delta,
+        )
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_iter<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let item_schema = prepare_strict_schema(&T::schema());
+        let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, true);
+        let response_format = ResponseFormat::json_schema(
+            "items".to_string(),
+            wrapper,
+            Some("Return a JSON object with an `items` array; each element must follow the item schema exactly.".to_string()),
+        );
+        let body = self.stream_body(prompt, Some(response_format));
+        crate::backend::streaming::iter_stream(
+            self.send_stream(body),
+            crate::backend::streaming::openai_delta,
+            crate::backend::streaming::finalize_item::<T>,
+        )
     }
 
     /// Fetch available models from OpenAI's API.

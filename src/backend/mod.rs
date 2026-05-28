@@ -8,6 +8,8 @@ mod messages;
 mod model_macro;
 #[cfg(feature = "_client")]
 mod openai_compatible;
+#[cfg(feature = "streaming")]
+pub mod streaming;
 #[cfg(feature = "tools")]
 pub mod tools;
 pub mod usage;
@@ -29,6 +31,8 @@ pub use client::{LLMClient, MediaFile};
 pub use messages::{ChatMessage, ChatRole};
 #[cfg(feature = "_client")]
 pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
+#[cfg(feature = "streaming")]
+pub use streaming::{ItemStream, ObjectStream, StreamedObject, TextStream};
 #[cfg(feature = "tools")]
 pub use tools::{DynTool, FnTool, Tool, ToolRequest, ToolRunner, Toolbox};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};

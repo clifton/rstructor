@@ -323,6 +323,58 @@ impl GrokClient {
     }
 }
 
+#[cfg(feature = "streaming")]
+impl GrokClient {
+    /// Build the JSON request body for a streaming call (`stream: true`),
+    /// optionally with a structured-output `response_format`.
+    fn stream_body(
+        &self,
+        prompt: &str,
+        response_format: Option<ResponseFormat>,
+    ) -> serde_json::Value {
+        let request = OpenAICompatibleChatCompletionRequest {
+            model: self.config.model.as_str().to_string(),
+            messages: vec![OpenAICompatibleChatMessage {
+                role: "user".to_string(),
+                content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
+            }],
+            response_format,
+            temperature: self.config.temperature,
+            max_tokens: self.config.max_tokens,
+            reasoning_effort: None,
+        };
+        let mut body = serde_json::to_value(&request).unwrap_or_else(|_| serde_json::json!({}));
+        body["stream"] = serde_json::Value::Bool(true);
+        body
+    }
+
+    /// Send a streaming request and return the raw SSE response.
+    fn send_stream(
+        &self,
+        body: serde_json::Value,
+    ) -> impl std::future::Future<Output = Result<reqwest::Response>> + Send + 'static {
+        let client = self.client.clone();
+        let api_key = self.config.api_key.clone();
+        let base_url = self
+            .config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://api.x.ai/v1".to_string());
+        async move {
+            let url = format!("{}/chat/completions", base_url);
+            let resp = client
+                .post(&url)
+                .header("Authorization", format!("Bearer {api_key}"))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| handle_http_error(e, "Grok"))?;
+            check_response_status(resp, "Grok").await
+        }
+    }
+}
+
 #[cfg(feature = "tools")]
 impl GrokClient {
     /// Begin a tool-calling request: `client.with_tools(&toolbox).run("...").await?`.
@@ -557,6 +609,58 @@ impl LLMClient for GrokClient {
                 },
             ))
         }
+    }
+
+    #[cfg(feature = "streaming")]
+    fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        let body = self.stream_body(prompt, None);
+        crate::backend::streaming::sse_text_stream(
+            self.send_stream(body),
+            crate::backend::streaming::openai_delta,
+        )
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_stream<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let schema = T::schema();
+        let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
+        let schema_json = prepare_strict_schema(&schema);
+        let response_format = ResponseFormat::json_schema(schema_name, schema_json, None);
+        let body = self.stream_body(prompt, Some(response_format));
+        crate::backend::streaming::object_stream(
+            self.send_stream(body),
+            crate::backend::streaming::openai_delta,
+        )
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_iter<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let item_schema = prepare_strict_schema(&T::schema());
+        let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, true);
+        let response_format = ResponseFormat::json_schema("items".to_string(), wrapper, None);
+        let body = self.stream_body(prompt, Some(response_format));
+        crate::backend::streaming::iter_stream(
+            self.send_stream(body),
+            crate::backend::streaming::openai_delta,
+            crate::backend::streaming::finalize_item::<T>,
+        )
     }
 
     /// Fetch available models from Grok's API.

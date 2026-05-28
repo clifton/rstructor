@@ -60,6 +60,8 @@ tracing-subscriber = { version = "0.3.23", features = [
 tracing-futures = { version = "0.2.5", optional = true }
 rstructor_derive = { version = "0.2.11", path = "./rstructor_derive", optional = true }
 base64 = { version = "0.22.1", optional = true }
+futures-util = { version = "0.3.31", default-features = false, optional = true }
+async-stream = { version = "0.3.6", optional = true }
 
 # Feature flags
 [features]
@@ -76,9 +78,17 @@ logging = ["tracing-subscriber", "tracing-futures"]
 # all providers yields a dependency-light, schema-only build (derive + schema, no
 # tokio/reqwest) suitable for generating JSON Schema without making API calls.
 _client = ["reqwest", "tokio", "base64"]
+# Opt-in streaming: text (`generate_stream`), object snapshots
+# (`materialize_stream`), and list streaming (`materialize_iter`). Enable a
+# provider feature too for the HTTP stack.
+streaming = ["_client", "reqwest/stream", "futures-util", "async-stream"]
 # Opt-in tool/function calling (`Tool`, `Toolbox`, `client.with_tools(..).run(..)`).
 # The agentic loop is implemented for all providers (OpenAI, Anthropic, Grok, Gemini).
 tools = ["_client"]
+
+[[example]]
+name = "streaming_example"
+required-features = ["streaming"]
 
 [[example]]
 name = "tool_calling_example"

@@ -561,6 +561,70 @@ impl GeminiClient {
     }
 }
 
+#[cfg(feature = "streaming")]
+impl GeminiClient {
+    /// Build the JSON request body for a streaming call, optionally with a
+    /// structured-output `response_schema`. (Gemini streams via the
+    /// `:streamGenerateContent?alt=sse` endpoint; the body itself is unchanged.)
+    fn stream_body(&self, prompt: &str, response_schema: Option<Value>) -> Value {
+        let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
+        let thinking_config = if is_gemini3 {
+            self.config.thinking_level.and_then(|level| {
+                level.gemini_level().map(|l| ThinkingConfig {
+                    thinking_level: l.to_string(),
+                })
+            })
+        } else {
+            None
+        };
+        let request = GenerateContentRequest {
+            contents: vec![Content {
+                role: Some("user".to_string()),
+                parts: vec![Part::Text {
+                    text: prompt.to_string(),
+                }],
+            }],
+            generation_config: GenerationConfig {
+                temperature: self.config.temperature,
+                max_output_tokens: self.config.max_tokens,
+                response_mime_type: response_schema
+                    .as_ref()
+                    .map(|_| "application/json".to_string()),
+                response_schema,
+                thinking_config,
+            },
+        };
+        serde_json::to_value(&request).unwrap_or_else(|_| serde_json::json!({}))
+    }
+
+    /// Send a streaming request and return the raw SSE response.
+    fn send_stream(
+        &self,
+        body: Value,
+    ) -> impl std::future::Future<Output = Result<reqwest::Response>> + Send + 'static {
+        let client = self.client.clone();
+        let api_key = self.config.api_key.clone();
+        let base_url = self
+            .config
+            .base_url
+            .clone()
+            .unwrap_or_else(|| "https://generativelanguage.googleapis.com/v1beta".to_string());
+        let model = self.config.model.as_str().to_string();
+        async move {
+            let url = format!("{}/models/{}:streamGenerateContent", base_url, model);
+            let resp = client
+                .post(&url)
+                .query(&[("alt", "sse"), ("key", api_key.as_str())])
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| handle_http_error(e, "Gemini"))?;
+            check_response_status(resp, "Gemini").await
+        }
+    }
+}
+
 #[cfg(feature = "tools")]
 impl GeminiClient {
     /// Begin a tool-calling request: `client.with_tools(&toolbox).run("...").await?`.
@@ -823,6 +887,88 @@ impl LLMClient for GeminiClient {
                 ))
             }
         }
+    }
+
+    #[cfg(feature = "streaming")]
+    fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        let body = self.stream_body(prompt, None);
+        crate::backend::streaming::sse_text_stream(
+            self.send_stream(body),
+            crate::backend::streaming::gemini_delta,
+        )
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_stream<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let schema = T::schema();
+        // Gemini may return internally-tagged enums; capture the mapping so the
+        // final buffer can be transformed back before deserializing into `T`.
+        let adjacently_tagged_info =
+            crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
+        let gemini_schema = crate::backend::utils::prepare_gemini_schema(&schema);
+        let body = self.stream_body(prompt, Some(gemini_schema));
+
+        let finalize = move |raw: &str| -> Result<T> {
+            let mut json = raw.to_string();
+            if let Some(ref info) = adjacently_tagged_info
+                && let Ok(mut value) = serde_json::from_str::<Value>(raw)
+            {
+                crate::backend::utils::transform_internally_to_adjacently_tagged(&mut value, info);
+                json = serde_json::to_string(&value).unwrap_or(json);
+            }
+            crate::backend::utils::parse_and_validate_response::<T>(&json).map_err(|(e, _)| e)
+        };
+
+        crate::backend::streaming::object_stream_with(
+            self.send_stream(body),
+            crate::backend::streaming::gemini_delta,
+            finalize,
+        )
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_iter<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let schema = T::schema();
+        let adjacently_tagged_info =
+            crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
+        let item_schema = crate::backend::utils::prepare_gemini_schema(&schema);
+        let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, false);
+        let body = self.stream_body(prompt, Some(wrapper));
+
+        // Each streamed array element is a `T`; transform internally-tagged enums
+        // back before deserializing.
+        let finalize = move |mut value: Value| -> Result<T> {
+            if let Some(ref info) = adjacently_tagged_info {
+                crate::backend::utils::transform_internally_to_adjacently_tagged(&mut value, info);
+            }
+            let item: T = serde_json::from_value(value)
+                .map_err(|e| RStructorError::SerializationError(e.to_string()))?;
+            item.validate()?;
+            Ok(item)
+        };
+
+        crate::backend::streaming::iter_stream(
+            self.send_stream(body),
+            crate::backend::streaming::gemini_delta,
+            finalize,
+        )
     }
 
     /// Fetch available models from Gemini's API.
