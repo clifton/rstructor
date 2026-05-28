@@ -1218,43 +1218,35 @@ where
             Err((err, validation_ctx)) => {
                 let is_last_attempt = attempt >= max_attempts - 1;
 
-                // Handle validation errors with conversation history
-                if let RStructorError::ValidationError(ref msg) = err {
+                // A validation failure — whether a schema/parse error or a custom
+                // validator returning ANY error variant — carries a
+                // `ValidationFailureContext` with the raw response. Reask with
+                // feedback whenever that context is present, rather than keying off
+                // a specific error variant (a validator that returns, say, a
+                // `SchemaError` should still trigger a retry).
+                if let Some(ctx) = validation_ctx {
                     if !is_last_attempt {
                         warn!(
                             attempt = attempt + 1,
-                            error = msg,
+                            error = %ctx.error_message,
                             "Validation error in generation attempt"
                         );
 
-                        // Build conversation history for retry with error feedback
-                        if let Some(ctx) = validation_ctx {
-                            // Add the failed assistant response to history
-                            messages.push(ChatMessage::assistant(&ctx.raw_response));
+                        // Build conversation history for retry with error feedback.
+                        // Add the failed assistant response to history.
+                        messages.push(ChatMessage::assistant(&ctx.raw_response));
 
-                            // Add user message with error feedback
-                            let error_feedback = format!(
-                                "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
-                                ctx.error_message
-                            );
-                            messages.push(ChatMessage::user(error_feedback));
+                        // Add user message with error feedback
+                        let error_feedback = format!(
+                            "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
+                            ctx.error_message
+                        );
+                        messages.push(ChatMessage::user(error_feedback));
 
-                            debug!(
-                                history_len = messages.len(),
-                                "Updated conversation history for retry"
-                            );
-                        } else {
-                            // Fallback: no raw response context available.
-                            // We cannot add error feedback without the raw response because:
-                            // 1. Adding only a user message would create consecutive user messages,
-                            //    violating the alternating user/assistant pattern expected by LLM APIs
-                            // 2. The error message references "your previous response" but we can't show it
-                            // Instead, we retry with the original conversation (no history modification)
-                            warn!(
-                                "Validation error occurred but no raw response context available. \
-                                 Retrying without error feedback in conversation history."
-                            );
-                        }
+                        debug!(
+                            history_len = messages.len(),
+                            "Updated conversation history for retry"
+                        );
 
                         // Wait briefly before retrying
                         sleep(Duration::from_millis(500)).await;
@@ -1262,7 +1254,7 @@ where
                     } else {
                         error!(
                             attempts = max_attempts,
-                            error = msg,
+                            error = %ctx.error_message,
                             "Failed after maximum retry attempts with validation errors"
                         );
                     }
@@ -2193,6 +2185,50 @@ mod tests {
         )
         .await
         .expect("generation should succeed after retry");
+
+        assert_eq!(attempts, 2);
+        assert_eq!(output.data, "ok");
+    }
+
+    #[tokio::test]
+    async fn test_reask_triggers_on_non_validation_error_variant() {
+        // A custom validator may return any `RStructorError` variant. As long as a
+        // `ValidationFailureContext` is present, the reask loop must retry with
+        // feedback rather than failing immediately. (Previously the loop only
+        // reasked on the `ValidationError` variant, so a validator returning, e.g.,
+        // `SchemaError` silently disabled retries.)
+        let mut attempts = 0usize;
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                attempts += 1;
+                async move {
+                    if attempts == 1 {
+                        Err((
+                            // NOT a ValidationError on purpose.
+                            RStructorError::SchemaError("custom validator rejected".to_string()),
+                            Some(ValidationFailureContext::new(
+                                "value out of range",
+                                "{\"n\":-1}",
+                            )),
+                        ))
+                    } else {
+                        // Reask appended the failed response + feedback to history.
+                        assert_eq!(messages.len(), 3);
+                        assert_eq!(messages[1].role, crate::backend::ChatRole::Assistant);
+                        assert_eq!(messages[2].role, crate::backend::ChatRole::User);
+                        Ok(MaterializeInternalOutput::new(
+                            "ok".to_string(),
+                            "{\"ok\":true}".to_string(),
+                            None,
+                        ))
+                    }
+                }
+            },
+            vec![ChatMessage::user("validate this")],
+            Some(1),
+        )
+        .await
+        .expect("non-ValidationError validator failure should still reask");
 
         assert_eq!(attempts, 2);
         assert_eq!(output.data, "ok");

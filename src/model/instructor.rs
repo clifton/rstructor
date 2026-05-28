@@ -6,9 +6,9 @@ use crate::schema::SchemaType;
 
 /// The `Instructor` trait combines JSON schema generation, serialization, and validation.
 ///
-/// This trait is automatically implemented for any type that implements the required traits
-/// (SchemaType, DeserializeOwned, and Serialize), but you can also provide a custom
-/// implementation to add your own validation logic.
+/// It is implemented for your type by `#[derive(Instructor)]`, which also generates the
+/// [`SchemaType`] implementation. Add custom validation with the `#[llm(validate = "path")]`
+/// attribute (see [`validate`](Instructor::validate)); the derive wires it into the trait.
 ///
 /// # Nested Types and Schema Embedding
 ///
@@ -96,38 +96,43 @@ use crate::schema::SchemaType;
 /// # }
 /// ```
 pub trait Instructor: SchemaType + DeserializeOwned + Serialize {
-    /// Optional validation logic beyond type checking
+    /// Optional validation logic beyond type checking.
     ///
-    /// This method is called automatically by `materialize` to validate
-    /// the data returned by the LLM. The default implementation does nothing
-    /// and returns Ok(()), but you can override it to add your own validation logic.
+    /// This method is called automatically by `materialize` to validate the data
+    /// returned by the LLM; a failure triggers an automatic re-ask with the error
+    /// fed back to the model. The default implementation returns `Ok(())`.
     ///
-    /// # Example
+    /// To add custom validation, use the `#[llm(validate = "path")]` container
+    /// attribute — the derive macro wires your function into this trait method:
     ///
     /// ```
-    /// # use rstructor::{Instructor, RStructorError};
-    /// # use serde::{Serialize, Deserialize};
-    /// #
-    /// # #[derive(Instructor, Serialize, Deserialize, Debug)]
-    /// # struct Product {
-    /// #     name: String,
-    /// #     price: f64,
-    /// # }
-    /// #
-    /// // Just implement validate directly on the struct
-    /// // No need to manually implement the Instructor trait
-    /// impl Product {
-    ///     fn validate(&self) -> rstructor::Result<()> {
-    ///         // Price must be positive
-    ///         if self.price < 0.0 {
-    ///             return Err(RStructorError::ValidationError(
-    ///                 format!("Price must be positive, got {}", self.price)
-    ///             ));
-    ///         }
-    ///         Ok(())
+    /// use rstructor::{Instructor, RStructorError};
+    /// use serde::{Serialize, Deserialize};
+    ///
+    /// #[derive(Instructor, Serialize, Deserialize, Debug)]
+    /// #[llm(validate = "validate_product")]
+    /// struct Product {
+    ///     name: String,
+    ///     price: f64,
+    /// }
+    ///
+    /// fn validate_product(product: &Product) -> rstructor::Result<()> {
+    ///     if product.price < 0.0 {
+    ///         return Err(RStructorError::ValidationError(
+    ///             format!("Price must be positive, got {}", product.price),
+    ///         ));
     ///     }
+    ///     Ok(())
     /// }
     /// ```
+    ///
+    /// # Important: inherent methods do not work
+    ///
+    /// Writing an *inherent* `impl Product { fn validate(&self) {...} }` does **not**
+    /// hook into validation. `#[derive(Instructor)]` always generates this trait
+    /// method (defaulting to `Ok(())`), and trait dispatch ignores the inherent
+    /// method — so an inherent `validate` would silently never run. Always use the
+    /// `#[llm(validate = "...")]` attribute, or hand-write `impl Instructor`.
     fn validate(&self) -> Result<()> {
         Ok(())
     }
