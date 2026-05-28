@@ -517,41 +517,6 @@ impl OpenAIClient {
 }
 
 #[cfg(feature = "tools")]
-impl OpenAIClient {
-    /// Begin a tool-calling request. The model may call the [`Toolbox`](crate::Toolbox)'s
-    /// tools (whose results are fed back) until it produces a final text answer.
-    ///
-    /// Requires the `tools` feature.
-    ///
-    /// ```no_run
-    /// # use rstructor::{OpenAIClient, Toolbox, FnTool, Instructor};
-    /// # use serde::{Serialize, Deserialize};
-    /// # use serde_json::json;
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// #[derive(Instructor, Serialize, Deserialize)]
-    /// struct WeatherArgs { city: String }
-    ///
-    /// let toolbox = Toolbox::new().with(FnTool::new(
-    ///     "get_weather",
-    ///     "Get the current weather for a city",
-    ///     |args: WeatherArgs| async move { Ok(json!({ "city": args.city, "temp_f": 72 })) },
-    /// ));
-    ///
-    /// let client = OpenAIClient::from_env()?;
-    /// let answer = client.with_tools(&toolbox).run("What's the weather in Paris?").await?;
-    /// println!("{answer}");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn with_tools<'a>(
-        &'a self,
-        toolbox: &'a crate::backend::tools::Toolbox,
-    ) -> crate::backend::tools::ToolRequest<'a, Self> {
-        crate::backend::tools::ToolRequest::new(self, toolbox)
-    }
-}
-
-#[cfg(feature = "tools")]
 #[async_trait]
 impl crate::backend::tools::ToolRunner for OpenAIClient {
     async fn run_tool_loop(

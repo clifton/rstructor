@@ -4,7 +4,7 @@
 //! live provider APIs and are gated on each provider's feature.
 #![cfg(feature = "tools")]
 
-use rstructor::{DynTool, FnTool, Instructor, Toolbox};
+use rstructor::{DynTool, FnTool, Instructor, RequestExt, Toolbox};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 

@@ -577,8 +577,9 @@ pub(crate) async fn run_gemini_tools(
 
 /// A client capable of running the tool-calling loop.
 ///
-/// Implemented for each provider client; you don't call this directly — use the
-/// client's `with_tools` to get a [`ToolRequest`].
+/// Implemented for each provider client and driven by the fluent
+/// [`Request`](crate::Request) builder (`client.with_tools(..).run(..)`); not
+/// called directly.
 #[doc(hidden)]
 #[async_trait]
 pub trait ToolRunner {
@@ -589,64 +590,4 @@ pub trait ToolRunner {
         toolbox: &Toolbox,
         max_iterations: usize,
     ) -> Result<String>;
-}
-
-/// A fluent tool-calling request, created by a client's `with_tools`.
-///
-/// ```no_run
-/// # use rstructor::{OpenAIClient, Toolbox};
-/// # async fn example(toolbox: Toolbox) -> Result<(), Box<dyn std::error::Error>> {
-/// let client = OpenAIClient::from_env()?;
-/// let answer = client
-///     .with_tools(&toolbox)
-///     .system("You are a concise assistant.")
-///     .run("What's the weather in Paris?")
-///     .await?;
-/// # Ok(())
-/// # }
-/// ```
-pub struct ToolRequest<'a, C: ToolRunner + ?Sized> {
-    client: &'a C,
-    toolbox: &'a Toolbox,
-    system: Option<String>,
-    max_iterations: usize,
-}
-
-impl<'a, C: ToolRunner + ?Sized> ToolRequest<'a, C> {
-    /// Create a tool request (used by clients' `with_tools`).
-    pub(crate) fn new(client: &'a C, toolbox: &'a Toolbox) -> Self {
-        Self {
-            client,
-            toolbox,
-            system: None,
-            max_iterations: DEFAULT_MAX_TOOL_ITERATIONS,
-        }
-    }
-
-    /// Attach a system prompt.
-    #[must_use]
-    pub fn system(mut self, system: impl Into<String>) -> Self {
-        self.system = Some(system.into());
-        self
-    }
-
-    /// Set the maximum number of model round-trips before giving up (default 10).
-    #[must_use]
-    pub fn max_iterations(mut self, max_iterations: usize) -> Self {
-        self.max_iterations = max_iterations;
-        self
-    }
-
-    /// Run the agentic loop with `prompt` as the user message, returning the
-    /// model's final text answer once it stops calling tools.
-    pub async fn run(self, prompt: &str) -> Result<String> {
-        self.client
-            .run_tool_loop(
-                self.system.as_deref(),
-                prompt,
-                self.toolbox,
-                self.max_iterations,
-            )
-            .await
-    }
 }
