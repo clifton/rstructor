@@ -41,10 +41,10 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
-    /// Gemini 3.1 Pro Preview (latest Pro model, default)
-    Gemini31ProPreview,
-    /// Gemini 3.5 Flash (latest Flash model, best price/performance)
+    /// Gemini 3.5 Flash (latest Flash model, best price/performance, default)
     Gemini35Flash,
+    /// Gemini 3.1 Pro Preview (latest Pro model)
+    Gemini31ProPreview,
     /// Gemini 3.1 Pro Preview Custom Tools (agentic custom-tool variant)
     Gemini31ProPreviewCustomTools,
     /// Gemini 3 Flash Preview (preview Flash model)
@@ -84,8 +84,8 @@ pub enum Model {
 impl Model {
     pub fn as_str(&self) -> &str {
         match self {
-            Model::Gemini31ProPreview => "gemini-3.1-pro-preview",
             Model::Gemini35Flash => "gemini-3.5-flash",
+            Model::Gemini31ProPreview => "gemini-3.1-pro-preview",
             Model::Gemini31ProPreviewCustomTools => "gemini-3.1-pro-preview-customtools",
             Model::Gemini3FlashPreview => "gemini-3-flash-preview",
             Model::Gemini31FlashLite => "gemini-3.1-flash-lite",
@@ -113,8 +113,8 @@ impl Model {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
-            "gemini-3.1-pro-preview" => Model::Gemini31ProPreview,
             "gemini-3.5-flash" => Model::Gemini35Flash,
+            "gemini-3.1-pro-preview" => Model::Gemini31ProPreview,
             "gemini-3.1-pro-preview-customtools" => Model::Gemini31ProPreviewCustomTools,
             "gemini-3-flash-preview" => Model::Gemini3FlashPreview,
             "gemini-3.1-flash-lite" => Model::Gemini31FlashLite,
@@ -293,7 +293,7 @@ impl GeminiClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini31ProPreview))]
+    #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini35Flash))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -305,7 +305,7 @@ impl GeminiClient {
 
         let config = GeminiConfig {
             api_key,
-            model: Model::Gemini31ProPreview, // Default to Gemini 3.1 Pro Preview (latest Pro)
+            model: Model::Gemini35Flash, // Default to Gemini 3.5 Flash (latest Flash, best price/performance)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
@@ -340,14 +340,14 @@ impl GeminiClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini31ProPreview))]
+    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini35Flash))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY")
             .map_err(|_| RStructorError::api_error("Gemini", ApiErrorKind::AuthenticationFailed))?;
 
         let config = GeminiConfig {
             api_key,
-            model: Model::Gemini31ProPreview, // Default to Gemini 3.1 Pro Preview (latest Pro)
+            model: Model::Gemini35Flash, // Default to Gemini 3.5 Flash (latest Flash, best price/performance)
             temperature: 0.0,
             max_tokens: None,
             timeout: None,        // Default: no timeout (uses reqwest's default)
