@@ -325,6 +325,39 @@ match client.materialize::<Movie>("...").await {
 }
 ```
 
+## Tool Calling
+
+Enable the `tools` feature to let the model call your typed Rust functions and feed the results back, looping until it produces a final answer. Tool argument types derive `Instructor`, so their JSON Schema is generated automatically.
+
+```toml
+rstructor = { version = "0.2", features = ["tools"] }
+```
+
+```rust
+use rstructor::{OpenAIClient, Toolbox, FnTool, Instructor};
+use serde::{Serialize, Deserialize};
+use serde_json::json;
+
+#[derive(Instructor, Serialize, Deserialize)]
+struct WeatherArgs {
+    #[llm(description = "City name")]
+    city: String,
+}
+
+let toolbox = Toolbox::new().with(FnTool::new(
+    "get_weather",
+    "Get the current weather for a city",
+    |args: WeatherArgs| async move {
+        Ok(json!({ "city": args.city, "temp_f": 72 }))   // call a real API here
+    },
+));
+
+let client = OpenAIClient::from_env()?;
+let answer = client.run_with_tools("What's the weather in Paris?", &toolbox).await?;
+```
+
+The agentic loop is currently implemented for the OpenAI-compatible providers (OpenAI, Grok). See `examples/tool_calling_example.rs`.
+
 ## Feature Flags
 
 ```toml
@@ -335,6 +368,7 @@ rstructor = { version = "0.2", features = ["openai", "anthropic", "grok", "gemin
 - `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
 - `derive` — Derive macro (default)
 - `logging` — Tracing integration
+- `tools` — Tool/function calling via `Toolbox` + `run_with_tools` (opt-in)
 
 All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:
 

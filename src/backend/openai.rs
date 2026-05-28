@@ -451,6 +451,77 @@ impl OpenAIClient {
     }
 }
 
+#[cfg(feature = "tools")]
+impl OpenAIClient {
+    /// Run the agentic tool-calling loop: the model may call the [`Toolbox`]'s
+    /// tools (whose results are fed back) until it produces a final text answer.
+    ///
+    /// Requires the `tools` feature.
+    ///
+    /// ```no_run
+    /// # use rstructor::{OpenAIClient, Toolbox, FnTool, Instructor};
+    /// # use serde::{Serialize, Deserialize};
+    /// # use serde_json::json;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// #[derive(Instructor, Serialize, Deserialize)]
+    /// struct WeatherArgs { city: String }
+    ///
+    /// let toolbox = Toolbox::new().with(FnTool::new(
+    ///     "get_weather",
+    ///     "Get the current weather for a city",
+    ///     |args: WeatherArgs| async move { Ok(json!({ "city": args.city, "temp_f": 72 })) },
+    /// ));
+    ///
+    /// let client = OpenAIClient::from_env()?;
+    /// let answer = client.run_with_tools("What's the weather in Paris?", &toolbox).await?;
+    /// println!("{answer}");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn run_with_tools(
+        &self,
+        prompt: &str,
+        toolbox: &crate::backend::tools::Toolbox,
+    ) -> Result<String> {
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
+        let url = format!("{}/chat/completions", base_url);
+
+        // GPT-5.x reasoning models require temperature=1.0 and accept reasoning_effort.
+        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
+        let reasoning_effort = if is_gpt5 {
+            self.config
+                .thinking_level
+                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
+        } else {
+            None
+        };
+        let effective_temp = if reasoning_effort.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+
+        crate::backend::tools::run_openai_compatible_tools(
+            &self.client,
+            &url,
+            &self.config.api_key,
+            "OpenAI",
+            self.config.model.as_str(),
+            effective_temp,
+            self.config.max_tokens,
+            reasoning_effort,
+            prompt,
+            toolbox,
+            crate::backend::tools::DEFAULT_MAX_TOOL_ITERATIONS,
+        )
+        .await
+    }
+}
+
 #[async_trait]
 impl LLMClient for OpenAIClient {
     fn from_env() -> Result<Self> {

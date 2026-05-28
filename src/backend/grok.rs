@@ -323,6 +323,41 @@ impl GrokClient {
     }
 }
 
+#[cfg(feature = "tools")]
+impl GrokClient {
+    /// Run the agentic tool-calling loop: the model may call the [`Toolbox`]'s
+    /// tools (whose results are fed back) until it produces a final text answer.
+    ///
+    /// Requires the `tools` feature.
+    pub async fn run_with_tools(
+        &self,
+        prompt: &str,
+        toolbox: &crate::backend::tools::Toolbox,
+    ) -> Result<String> {
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.x.ai/v1");
+        let url = format!("{}/chat/completions", base_url);
+
+        crate::backend::tools::run_openai_compatible_tools(
+            &self.client,
+            &url,
+            &self.config.api_key,
+            "Grok",
+            self.config.model.as_str(),
+            self.config.temperature,
+            self.config.max_tokens,
+            None,
+            prompt,
+            toolbox,
+            crate::backend::tools::DEFAULT_MAX_TOOL_ITERATIONS,
+        )
+        .await
+    }
+}
+
 #[async_trait]
 impl LLMClient for GrokClient {
     fn from_env() -> Result<Self> {

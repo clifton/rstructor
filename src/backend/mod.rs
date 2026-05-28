@@ -8,6 +8,8 @@ mod messages;
 mod model_macro;
 #[cfg(feature = "_client")]
 mod openai_compatible;
+#[cfg(feature = "tools")]
+pub mod tools;
 pub mod usage;
 #[cfg(feature = "_client")]
 mod utils;
@@ -27,6 +29,8 @@ pub use client::{LLMClient, MediaFile};
 pub use messages::{ChatMessage, ChatRole};
 #[cfg(feature = "_client")]
 pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
+#[cfg(feature = "tools")]
+pub use tools::{DynTool, FnTool, Tool, Toolbox};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
 /// Information about an available model from an LLM provider.
