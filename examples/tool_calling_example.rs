@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             |args: AddArgs| async move { Ok(json!({ "sum": args.a + args.b })) },
         ));
 
-    let client = OpenAIClient::from_env()?;
+    let client = OpenAIClient::from_env()?.model("gpt-4.1-mini");
 
     let answer = client
         .with_tools(&toolbox)

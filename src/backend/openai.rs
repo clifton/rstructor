@@ -503,16 +503,11 @@ impl crate::backend::tools::ToolRunner for OpenAIClient {
             .unwrap_or("https://api.openai.com/v1");
         let url = format!("{}/chat/completions", base_url);
 
-        // GPT-5.x reasoning models require temperature=1.0 and accept reasoning_effort.
+        // GPT-5.x models require temperature=1.0. `reasoning_effort` combined with
+        // function tools is rejected on /v1/chat/completions, so it is omitted for
+        // the tool loop.
         let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
-        let reasoning_effort = if is_gpt5 {
-            self.config
-                .thinking_level
-                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
-        } else {
-            None
-        };
-        let effective_temp = if reasoning_effort.is_some() {
+        let effective_temp = if is_gpt5 {
             1.0
         } else {
             self.config.temperature
@@ -526,7 +521,7 @@ impl crate::backend::tools::ToolRunner for OpenAIClient {
             self.config.model.as_str(),
             effective_temp,
             self.config.max_tokens,
-            reasoning_effort,
+            None,
             system,
             prompt,
             toolbox,
