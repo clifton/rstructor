@@ -2,7 +2,7 @@
 name = "rstructor_derive"
 version = "0.3.0"
 edition = "2024"
-description = "Derive macros for the rstructor library"
+description = "Derive macros for rstructor: generate JSON Schema from Rust structs and enums to extract structured, validated outputs from LLMs (the Instructor pattern for Rust)."
 license = "MIT"
 repository = "https://github.com/clifton/rstructor"
 authors = ["Clifton King <cliftonk@gmail.com>"]
@@ -12,7 +12,7 @@ exclude = [
   "*.orig",
   "*.bak",
 ]
-keywords = ["derive", "json-schema", "llm", "pydantic", "instructor"]
+keywords = ["derive", "json-schema", "llm", "instructor", "structured-output"]
 categories = [
   "development-tools::procedural-macro-helpers",
   "api-bindings",
