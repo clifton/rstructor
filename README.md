@@ -71,7 +71,7 @@ let client = AnthropicClient::from_env()?.model("claude-sonnet-4-6");
 let client = GrokClient::from_env()?.model("grok-4.3");
 
 // Gemini (reads GEMINI_API_KEY)
-let client = GeminiClient::from_env()?.model("gemini-3.1-pro-preview");
+let client = GeminiClient::from_env()?.model("gemini-3.5-flash");
 
 // Custom endpoint (local LLMs, proxies)
 let client = OpenAIClient::new("key")?

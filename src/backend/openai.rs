@@ -43,12 +43,18 @@ pub enum Model {
     Gpt55Pro,
     /// GPT-5.5 (latest frontier model for complex professional work)
     Gpt55,
+    /// GPT-5.4 Pro (most capable GPT-5.4-class model)
+    Gpt54Pro,
     /// GPT-5.4 (more affordable frontier model for complex professional work)
     Gpt54,
     /// GPT-5.4 Mini (lower-latency, lower-cost GPT-5.4-class model)
     Gpt54Mini,
     /// GPT-5.4 Nano (cheapest GPT-5.4-class model for high-volume tasks)
     Gpt54Nano,
+    /// GPT-5.3 Chat Latest (ChatGPT GPT-5.3 model)
+    Gpt53ChatLatest,
+    /// GPT-5.3 Codex (coding-focused GPT-5.3 model)
+    Gpt53Codex,
     /// GPT-5.2 Pro (previous GPT-5.2 pro model)
     Gpt52Pro,
     /// GPT-5.2 (previous GPT-5.2 model)
@@ -93,8 +99,6 @@ pub enum Model {
     O3Mini,
     /// O1 (reasoning model optimized for complex problem-solving)
     O1,
-    /// O1 Mini (smaller reasoning model)
-    O1Mini,
     /// O1 Pro (most capable reasoning model)
     O1Pro,
     /// Custom model name (for new models, local LLMs, or OpenAI-compatible endpoints)
@@ -106,9 +110,12 @@ impl Model {
         match self {
             Model::Gpt55Pro => "gpt-5.5-pro",
             Model::Gpt55 => "gpt-5.5",
+            Model::Gpt54Pro => "gpt-5.4-pro",
             Model::Gpt54 => "gpt-5.4",
             Model::Gpt54Mini => "gpt-5.4-mini",
             Model::Gpt54Nano => "gpt-5.4-nano",
+            Model::Gpt53ChatLatest => "gpt-5.3-chat-latest",
+            Model::Gpt53Codex => "gpt-5.3-codex",
             Model::Gpt52Pro => "gpt-5.2-pro",
             Model::Gpt52 => "gpt-5.2",
             Model::Gpt52ChatLatest => "gpt-5.2-chat-latest",
@@ -131,7 +138,6 @@ impl Model {
             Model::O3 => "o3",
             Model::O3Mini => "o3-mini",
             Model::O1 => "o1",
-            Model::O1Mini => "o1-mini",
             Model::O1Pro => "o1-pro",
             Model::Custom(name) => name,
         }
@@ -146,9 +152,12 @@ impl Model {
         match name.as_str() {
             "gpt-5.5-pro" => Model::Gpt55Pro,
             "gpt-5.5" => Model::Gpt55,
+            "gpt-5.4-pro" => Model::Gpt54Pro,
             "gpt-5.4" => Model::Gpt54,
             "gpt-5.4-mini" => Model::Gpt54Mini,
             "gpt-5.4-nano" => Model::Gpt54Nano,
+            "gpt-5.3-chat-latest" => Model::Gpt53ChatLatest,
+            "gpt-5.3-codex" => Model::Gpt53Codex,
             "gpt-5.2-pro" => Model::Gpt52Pro,
             "gpt-5.2" => Model::Gpt52,
             "gpt-5.2-chat-latest" => Model::Gpt52ChatLatest,
@@ -171,7 +180,6 @@ impl Model {
             "o3" => Model::O3,
             "o3-mini" => Model::O3Mini,
             "o1" => Model::O1,
-            "o1-mini" => Model::O1Mini,
             "o1-pro" => Model::O1Pro,
             _ => Model::Custom(name),
         }
