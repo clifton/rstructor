@@ -41,15 +41,19 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
-    /// Gemini 3.1 Pro Preview (latest preview Pro model)
+    /// Gemini 3.1 Pro Preview (latest Pro model, default)
     Gemini31ProPreview,
+    /// Gemini 3.5 Flash (latest Flash model, best price/performance)
+    Gemini35Flash,
     /// Gemini 3.1 Pro Preview Custom Tools (agentic custom-tool variant)
     Gemini31ProPreviewCustomTools,
-    /// Gemini 3 Flash Preview (latest preview Flash model)
+    /// Gemini 3 Flash Preview (preview Flash model)
     Gemini3FlashPreview,
-    /// Gemini 3.1 Flash-Lite Preview (latest cost-efficient multimodal model)
+    /// Gemini 3.1 Flash-Lite (cost-efficient multimodal model)
+    Gemini31FlashLite,
+    /// Gemini 3.1 Flash-Lite Preview (preview cost-efficient multimodal model)
     Gemini31FlashLitePreview,
-    /// Gemini 3 Pro Preview (shut down; use Gemini 3.1 Pro Preview instead)
+    /// Gemini 3 Pro Preview (previous preview Pro model)
     Gemini3ProPreview,
     /// Gemini 2.5 Pro (latest production Pro model)
     Gemini25Pro,
@@ -81,8 +85,10 @@ impl Model {
     pub fn as_str(&self) -> &str {
         match self {
             Model::Gemini31ProPreview => "gemini-3.1-pro-preview",
+            Model::Gemini35Flash => "gemini-3.5-flash",
             Model::Gemini31ProPreviewCustomTools => "gemini-3.1-pro-preview-customtools",
             Model::Gemini3FlashPreview => "gemini-3-flash-preview",
+            Model::Gemini31FlashLite => "gemini-3.1-flash-lite",
             Model::Gemini31FlashLitePreview => "gemini-3.1-flash-lite-preview",
             Model::Gemini3ProPreview => "gemini-3-pro-preview",
             Model::Gemini25Pro => "gemini-2.5-pro",
@@ -108,8 +114,10 @@ impl Model {
         let name = name.into();
         match name.as_str() {
             "gemini-3.1-pro-preview" => Model::Gemini31ProPreview,
+            "gemini-3.5-flash" => Model::Gemini35Flash,
             "gemini-3.1-pro-preview-customtools" => Model::Gemini31ProPreviewCustomTools,
             "gemini-3-flash-preview" => Model::Gemini3FlashPreview,
+            "gemini-3.1-flash-lite" => Model::Gemini31FlashLite,
             "gemini-3.1-flash-lite-preview" => Model::Gemini31FlashLitePreview,
             "gemini-3-pro-preview" => Model::Gemini3ProPreview,
             "gemini-2.5-pro" => Model::Gemini25Pro,

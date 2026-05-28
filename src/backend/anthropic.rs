@@ -40,7 +40,9 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnthropicModel {
-    /// Claude Opus 4.7 (latest most capable generally available model)
+    /// Claude Opus 4.8 (latest most capable generally available model)
+    ClaudeOpus48,
+    /// Claude Opus 4.7 (previous most capable model)
     ClaudeOpus47,
     /// Claude Sonnet 4.6 (latest balanced model)
     ClaudeSonnet46,
@@ -58,14 +60,6 @@ pub enum AnthropicModel {
     ClaudeOpus4,
     /// Claude Sonnet 4 (balanced performance model)
     ClaudeSonnet4,
-    /// Claude Sonnet 3.7 (enhanced reasoning)
-    Claude37Sonnet,
-    /// Claude Haiku 3.5 (fast, cost-effective model)
-    Claude35Haiku,
-    /// Claude Haiku 3 (fast, cost-effective model)
-    Claude3Haiku,
-    /// Claude Opus 3 (most capable model for complex tasks)
-    Claude3Opus,
     /// Custom model name (for new models or Anthropic-compatible endpoints)
     Custom(String),
 }
@@ -73,6 +67,7 @@ pub enum AnthropicModel {
 impl AnthropicModel {
     pub fn as_str(&self) -> &str {
         match self {
+            AnthropicModel::ClaudeOpus48 => "claude-opus-4-8",
             AnthropicModel::ClaudeOpus47 => "claude-opus-4-7",
             AnthropicModel::ClaudeSonnet46 => "claude-sonnet-4-6",
             AnthropicModel::ClaudeOpus46 => "claude-opus-4-6",
@@ -82,10 +77,6 @@ impl AnthropicModel {
             AnthropicModel::ClaudeOpus41 => "claude-opus-4-1-20250805",
             AnthropicModel::ClaudeOpus4 => "claude-opus-4-20250514",
             AnthropicModel::ClaudeSonnet4 => "claude-sonnet-4-20250514",
-            AnthropicModel::Claude37Sonnet => "claude-3-7-sonnet-20250219",
-            AnthropicModel::Claude35Haiku => "claude-3-5-haiku-20241022",
-            AnthropicModel::Claude3Haiku => "claude-3-haiku-20240307",
-            AnthropicModel::Claude3Opus => "claude-3-opus-20240229",
             AnthropicModel::Custom(name) => name,
         }
     }
@@ -97,6 +88,7 @@ impl AnthropicModel {
     pub fn from_string(name: impl Into<String>) -> Self {
         let name = name.into();
         match name.as_str() {
+            "claude-opus-4-8" => AnthropicModel::ClaudeOpus48,
             "claude-opus-4-7" => AnthropicModel::ClaudeOpus47,
             "claude-sonnet-4-6" => AnthropicModel::ClaudeSonnet46,
             "claude-opus-4-6" => AnthropicModel::ClaudeOpus46,
@@ -106,10 +98,6 @@ impl AnthropicModel {
             "claude-opus-4-1-20250805" => AnthropicModel::ClaudeOpus41,
             "claude-opus-4-20250514" => AnthropicModel::ClaudeOpus4,
             "claude-sonnet-4-20250514" => AnthropicModel::ClaudeSonnet4,
-            "claude-3-7-sonnet-20250219" => AnthropicModel::Claude37Sonnet,
-            "claude-3-5-haiku-20241022" => AnthropicModel::Claude35Haiku,
-            "claude-3-haiku-20240307" => AnthropicModel::Claude3Haiku,
-            "claude-3-opus-20240229" => AnthropicModel::Claude3Opus,
             _ => AnthropicModel::Custom(name),
         }
     }

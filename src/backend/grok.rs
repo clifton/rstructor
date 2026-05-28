@@ -40,26 +40,16 @@ use crate::model::Instructor;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Model {
-    /// Grok 4.3 (latest recommended chat model)
+    /// Grok 4.3 (latest recommended chat model, multimodal text + image input)
     Grok43,
-    /// Grok-4 (previous flagship model with 256k context window)
-    Grok4,
-    /// Grok-4 Fast Reasoning (faster variant optimized for reasoning tasks)
-    Grok4FastReasoning,
-    /// Grok-4 Fast Non-Reasoning (faster variant optimized for non-reasoning tasks)
-    Grok4FastNonReasoning,
-    /// Grok-4.1 Fast Reasoning (previous frontier model with 2M context window)
-    Grok41FastReasoning,
-    /// Grok-4.1 Fast Non-Reasoning (previous frontier model with 2M context window)
-    Grok41FastNonReasoning,
-    /// Grok-3 (previous generation model with 131k context window)
-    Grok3,
-    /// Grok-3 Mini (efficient variant with 131k context window)
-    Grok3Mini,
-    /// Grok Code Fast 1 (optimized for coding tasks)
-    GrokCodeFast1,
-    /// Grok-2 Vision (multimodal vision model)
-    Grok2Vision,
+    /// Grok 4.20 Reasoning (reasoning-optimized variant)
+    Grok420Reasoning,
+    /// Grok 4.20 Non-Reasoning (lower-latency non-reasoning variant)
+    Grok420NonReasoning,
+    /// Grok 4.20 Multi-Agent (agentic multi-agent variant)
+    Grok420MultiAgent,
+    /// Grok Build 0.1 (coding-optimized model; supersedes grok-code-fast-1)
+    GrokBuild01,
     /// Custom model name (for new models or Grok-compatible endpoints)
     Custom(String),
 }
@@ -68,15 +58,10 @@ impl Model {
     pub fn as_str(&self) -> &str {
         match self {
             Model::Grok43 => "grok-4.3",
-            Model::Grok4 => "grok-4-0709",
-            Model::Grok4FastReasoning => "grok-4-fast-reasoning",
-            Model::Grok4FastNonReasoning => "grok-4-fast-non-reasoning",
-            Model::Grok41FastReasoning => "grok-4-1-fast-reasoning",
-            Model::Grok41FastNonReasoning => "grok-4-1-fast-non-reasoning",
-            Model::Grok3 => "grok-3",
-            Model::Grok3Mini => "grok-3-mini",
-            Model::GrokCodeFast1 => "grok-code-fast-1",
-            Model::Grok2Vision => "grok-2-vision-1212",
+            Model::Grok420Reasoning => "grok-4.20-0309-reasoning",
+            Model::Grok420NonReasoning => "grok-4.20-0309-non-reasoning",
+            Model::Grok420MultiAgent => "grok-4.20-multi-agent-0309",
+            Model::GrokBuild01 => "grok-build-0.1",
             Model::Custom(name) => name,
         }
     }
@@ -89,15 +74,10 @@ impl Model {
         let name = name.into();
         match name.as_str() {
             "grok-4.3" => Model::Grok43,
-            "grok-4-0709" => Model::Grok4,
-            "grok-4-fast-reasoning" => Model::Grok4FastReasoning,
-            "grok-4-fast-non-reasoning" => Model::Grok4FastNonReasoning,
-            "grok-4-1-fast-reasoning" => Model::Grok41FastReasoning,
-            "grok-4-1-fast-non-reasoning" => Model::Grok41FastNonReasoning,
-            "grok-3" => Model::Grok3,
-            "grok-3-mini" => Model::Grok3Mini,
-            "grok-code-fast-1" => Model::GrokCodeFast1,
-            "grok-2-vision-1212" => Model::Grok2Vision,
+            "grok-4.20-0309-reasoning" => Model::Grok420Reasoning,
+            "grok-4.20-0309-non-reasoning" => Model::Grok420NonReasoning,
+            "grok-4.20-multi-agent-0309" => Model::Grok420MultiAgent,
+            "grok-build-0.1" => Model::GrokBuild01,
             _ => Model::Custom(name),
         }
     }

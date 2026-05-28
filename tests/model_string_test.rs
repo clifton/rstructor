@@ -55,15 +55,10 @@ mod tests {
     fn test_grok_model_as_str() {
         let models = vec![
             GrokModel::Grok43,
-            GrokModel::Grok4,
-            GrokModel::Grok4FastReasoning,
-            GrokModel::Grok4FastNonReasoning,
-            GrokModel::Grok41FastReasoning,
-            GrokModel::Grok41FastNonReasoning,
-            GrokModel::Grok3,
-            GrokModel::Grok3Mini,
-            GrokModel::GrokCodeFast1,
-            GrokModel::Grok2Vision,
+            GrokModel::Grok420Reasoning,
+            GrokModel::Grok420NonReasoning,
+            GrokModel::Grok420MultiAgent,
+            GrokModel::GrokBuild01,
         ];
 
         for model in models {
@@ -77,15 +72,10 @@ mod tests {
     fn test_grok_model_from_string() {
         let test_strings = vec![
             "grok-4.3",
-            "grok-4-0709",
-            "grok-4-fast-reasoning",
-            "grok-4-fast-non-reasoning",
-            "grok-4-1-fast-reasoning",
-            "grok-4-1-fast-non-reasoning",
-            "grok-3",
-            "grok-3-mini",
-            "grok-code-fast-1",
-            "grok-2-vision-1212",
+            "grok-4.20-0309-reasoning",
+            "grok-4.20-0309-non-reasoning",
+            "grok-4.20-multi-agent-0309",
+            "grok-build-0.1",
         ];
 
         for original_string in test_strings {
