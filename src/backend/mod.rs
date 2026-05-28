@@ -10,6 +10,8 @@ mod model_macro;
 mod openai_compatible;
 #[cfg(feature = "streaming")]
 pub mod streaming;
+#[cfg(feature = "tools")]
+pub mod tools;
 pub mod usage;
 #[cfg(feature = "_client")]
 mod utils;
@@ -31,6 +33,8 @@ pub use messages::{ChatMessage, ChatRole};
 pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
 #[cfg(feature = "streaming")]
 pub use streaming::{ItemStream, ObjectStream, StreamedObject, TextStream};
+#[cfg(feature = "tools")]
+pub use tools::{DynTool, FnTool, Tool, ToolRequest, ToolRunner, Toolbox};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
 /// Information about an available model from an LLM provider.

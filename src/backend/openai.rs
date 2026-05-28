@@ -516,6 +516,86 @@ impl OpenAIClient {
     }
 }
 
+#[cfg(feature = "tools")]
+impl OpenAIClient {
+    /// Begin a tool-calling request. The model may call the [`Toolbox`](crate::Toolbox)'s
+    /// tools (whose results are fed back) until it produces a final text answer.
+    ///
+    /// Requires the `tools` feature.
+    ///
+    /// ```no_run
+    /// # use rstructor::{OpenAIClient, Toolbox, FnTool, Instructor};
+    /// # use serde::{Serialize, Deserialize};
+    /// # use serde_json::json;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// #[derive(Instructor, Serialize, Deserialize)]
+    /// struct WeatherArgs { city: String }
+    ///
+    /// let toolbox = Toolbox::new().with(FnTool::new(
+    ///     "get_weather",
+    ///     "Get the current weather for a city",
+    ///     |args: WeatherArgs| async move { Ok(json!({ "city": args.city, "temp_f": 72 })) },
+    /// ));
+    ///
+    /// let client = OpenAIClient::from_env()?;
+    /// let answer = client.with_tools(&toolbox).run("What's the weather in Paris?").await?;
+    /// println!("{answer}");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_tools<'a>(
+        &'a self,
+        toolbox: &'a crate::backend::tools::Toolbox,
+    ) -> crate::backend::tools::ToolRequest<'a, Self> {
+        crate::backend::tools::ToolRequest::new(self, toolbox)
+    }
+}
+
+#[cfg(feature = "tools")]
+#[async_trait]
+impl crate::backend::tools::ToolRunner for OpenAIClient {
+    async fn run_tool_loop(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        toolbox: &crate::backend::tools::Toolbox,
+        max_iterations: usize,
+    ) -> Result<String> {
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
+        let url = format!("{}/chat/completions", base_url);
+
+        // GPT-5.x models require temperature=1.0. `reasoning_effort` combined with
+        // function tools is rejected on /v1/chat/completions, so it is omitted for
+        // the tool loop.
+        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
+        let effective_temp = if is_gpt5 {
+            1.0
+        } else {
+            self.config.temperature
+        };
+
+        crate::backend::tools::run_openai_compatible_tools(
+            &self.client,
+            &url,
+            &self.config.api_key,
+            "OpenAI",
+            self.config.model.as_str(),
+            effective_temp,
+            self.config.max_tokens,
+            None,
+            system,
+            prompt,
+            toolbox,
+            max_iterations,
+        )
+        .await
+    }
+}
+
 #[async_trait]
 impl LLMClient for OpenAIClient {
     fn from_env() -> Result<Self> {

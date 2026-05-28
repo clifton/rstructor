@@ -375,6 +375,54 @@ impl GrokClient {
     }
 }
 
+#[cfg(feature = "tools")]
+impl GrokClient {
+    /// Begin a tool-calling request: `client.with_tools(&toolbox).run("...").await?`.
+    ///
+    /// Requires the `tools` feature.
+    pub fn with_tools<'a>(
+        &'a self,
+        toolbox: &'a crate::backend::tools::Toolbox,
+    ) -> crate::backend::tools::ToolRequest<'a, Self> {
+        crate::backend::tools::ToolRequest::new(self, toolbox)
+    }
+}
+
+#[cfg(feature = "tools")]
+#[async_trait]
+impl crate::backend::tools::ToolRunner for GrokClient {
+    async fn run_tool_loop(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        toolbox: &crate::backend::tools::Toolbox,
+        max_iterations: usize,
+    ) -> Result<String> {
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.x.ai/v1");
+        let url = format!("{}/chat/completions", base_url);
+
+        crate::backend::tools::run_openai_compatible_tools(
+            &self.client,
+            &url,
+            &self.config.api_key,
+            "Grok",
+            self.config.model.as_str(),
+            self.config.temperature,
+            self.config.max_tokens,
+            None,
+            system,
+            prompt,
+            toolbox,
+            max_iterations,
+        )
+        .await
+    }
+}
+
 #[async_trait]
 impl LLMClient for GrokClient {
     fn from_env() -> Result<Self> {

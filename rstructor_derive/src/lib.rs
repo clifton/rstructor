@@ -12,7 +12,7 @@ mod type_utils;
 
 use container_attrs::ContainerAttributes;
 use proc_macro::TokenStream;
-use syn::{Data, DeriveInput, parse_macro_input};
+use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
 /// Derive macro for implementing Instructor and SchemaType
 ///
@@ -166,25 +166,28 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
         _ => panic!("Instructor can only be derived for structs and enums"),
     };
 
-    // Generate the Instructor trait implementation
-    let instructor_impl = if let Some(validate_fn) = &container_attrs.validate {
-        // Parse the validation function path
+    // Generate the Instructor trait implementation.
+    //
+    // `validate` first recurses into every field whose type implements
+    // `Instructor` (nested structs/enums, and their contents through `Option`,
+    // `Vec`, `Box`, and string-keyed maps), then runs this type's own
+    // `#[llm(validate = "...")]` function, if any.
+    let field_validation = generate_field_validation(&input.data);
+    let container_validate = if let Some(validate_fn) = &container_attrs.validate {
         let validate_path: syn::Path =
             syn::parse_str(validate_fn).expect("validate attribute must be a valid function path");
-        quote::quote! {
-            impl ::rstructor::model::Instructor for #name {
-                fn validate(&self) -> ::rstructor::error::Result<()> {
-                    #validate_path(self)
-                }
-            }
-        }
+        quote::quote! { #validate_path(self)?; }
     } else {
-        // Default implementation - validation passes
-        quote::quote! {
-            impl ::rstructor::model::Instructor for #name {
-                fn validate(&self) -> ::rstructor::error::Result<()> {
-                    ::rstructor::error::Result::Ok(())
-                }
+        quote::quote! {}
+    };
+    let instructor_impl = quote::quote! {
+        impl ::rstructor::model::Instructor for #name {
+            fn validate(&self) -> ::rstructor::error::Result<()> {
+                #[allow(unused_imports)]
+                use ::rstructor::model::__private::ProbeFallback as _;
+                #field_validation
+                #container_validate
+                ::rstructor::error::Result::Ok(())
             }
         }
     };
@@ -197,6 +200,75 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
     };
 
     combined.into()
+}
+
+/// Generate statements that recursively validate every field of a struct or the
+/// active variant of an enum.
+///
+/// Each field is wrapped in `__private::Probe`, whose `rstructor_probe` resolves
+/// (via autoref specialization) to the field's `Instructor::validate` when the
+/// field type implements `Instructor`, and to a no-op otherwise — so primitive
+/// fields cost nothing while nested `Instructor` values are validated.
+fn generate_field_validation(data: &Data) -> proc_macro2::TokenStream {
+    match data {
+        Data::Struct(data_struct) => match &data_struct.fields {
+            Fields::Named(named) => {
+                let probes = named.named.iter().map(|f| {
+                    let ident = f.ident.as_ref().unwrap();
+                    quote::quote! {
+                        ::rstructor::model::__private::Probe(&self.#ident).rstructor_probe()?;
+                    }
+                });
+                quote::quote! { #(#probes)* }
+            }
+            Fields::Unnamed(unnamed) => {
+                let probes = unnamed.unnamed.iter().enumerate().map(|(i, _)| {
+                    let index = syn::Index::from(i);
+                    quote::quote! {
+                        ::rstructor::model::__private::Probe(&self.#index).rstructor_probe()?;
+                    }
+                });
+                quote::quote! { #(#probes)* }
+            }
+            Fields::Unit => quote::quote! {},
+        },
+        Data::Enum(data_enum) => {
+            let arms = data_enum.variants.iter().map(|variant| {
+                let vname = &variant.ident;
+                match &variant.fields {
+                    Fields::Named(named) => {
+                        let binds: Vec<_> = named
+                            .named
+                            .iter()
+                            .map(|f| f.ident.clone().unwrap())
+                            .collect();
+                        quote::quote! {
+                            Self::#vname { #(#binds),* } => {
+                                #( ::rstructor::model::__private::Probe(#binds).rstructor_probe()?; )*
+                            }
+                        }
+                    }
+                    Fields::Unnamed(unnamed) => {
+                        let binds: Vec<_> = (0..unnamed.unnamed.len())
+                            .map(|i| quote::format_ident!("field{}", i))
+                            .collect();
+                        quote::quote! {
+                            Self::#vname( #(#binds),* ) => {
+                                #( ::rstructor::model::__private::Probe(#binds).rstructor_probe()?; )*
+                            }
+                        }
+                    }
+                    Fields::Unit => quote::quote! { Self::#vname => {} },
+                }
+            });
+            quote::quote! {
+                match self {
+                    #(#arms)*
+                }
+            }
+        }
+        _ => quote::quote! {},
+    }
 }
 
 use quote::ToTokens;

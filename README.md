@@ -361,6 +361,43 @@ There is also `materialize_stream`, which streams a single object as progressive
 
 All are available on every provider (OpenAI, Anthropic, Grok, Gemini). See `examples/streaming_example.rs`.
 
+## Tool Calling
+
+Enable the `tools` feature to let the model call your typed Rust functions and feed the results back, looping until it produces a final answer. Tool argument types derive `Instructor`, so their JSON Schema is generated automatically.
+
+```toml
+rstructor = { version = "0.2", features = ["tools"] }
+```
+
+```rust
+use rstructor::{OpenAIClient, Toolbox, FnTool, Instructor};
+use serde::{Serialize, Deserialize};
+use serde_json::json;
+
+#[derive(Instructor, Serialize, Deserialize)]
+struct WeatherArgs {
+    #[llm(description = "City name")]
+    city: String,
+}
+
+let toolbox = Toolbox::new().with(FnTool::new(
+    "get_weather",
+    "Get the current weather for a city",
+    |args: WeatherArgs| async move {
+        Ok(json!({ "city": args.city, "temp_f": 72 }))   // call a real API here
+    },
+));
+
+let client = OpenAIClient::from_env()?;
+let answer = client
+    .with_tools(&toolbox)
+    .system("Use tools when relevant.")   // optional
+    .run("What's the weather in Paris?")
+    .await?;
+```
+
+Works with all providers (OpenAI, Anthropic, Grok, Gemini). See `examples/tool_calling_example.rs`.
+
 ## Feature Flags
 
 ```toml
@@ -371,7 +408,8 @@ rstructor = { version = "0.2", features = ["openai", "anthropic", "grok", "gemin
 - `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
 - `derive` — Derive macro (default)
 - `logging` — Tracing integration
-- `streaming` — Streaming via `generate_stream` / `materialize_stream` (opt-in)
+- `streaming` — Streaming via `generate_stream` / `materialize_iter` / `materialize_stream` (opt-in)
+- `tools` — Tool/function calling via `Toolbox` + `client.with_tools(..).run(..)` (opt-in)
 
 All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:
 

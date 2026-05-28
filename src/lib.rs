@@ -76,5 +76,7 @@ pub use backend::{AnyClient, Provider};
 pub use backend::{
     ChatMessage, ChatRole, GenerateResult, MaterializeResult, MediaFile, TokenUsage,
 };
+#[cfg(feature = "tools")]
+pub use backend::{DynTool, FnTool, Tool, ToolRequest, ToolRunner, Toolbox};
 #[cfg(feature = "streaming")]
 pub use backend::{ItemStream, ObjectStream, StreamedObject, TextStream};
