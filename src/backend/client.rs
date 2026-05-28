@@ -351,6 +351,32 @@ pub trait LLMClient {
         })
     }
 
+    /// Stream a **list** of structured objects, yielding each `T` as soon as that
+    /// element of the response array is fully generated and validated.
+    ///
+    /// This is the primary streaming use case: extracting a long list of items
+    /// without buffering the whole response. The model is asked for a JSON object
+    /// with an `items` array of `T`; elements are parsed and validated one at a
+    /// time.
+    ///
+    /// The default implementation has no streaming fallback (it errors); the
+    /// built-in providers override it. Requires the `streaming` feature.
+    #[cfg(feature = "streaming")]
+    fn materialize_iter<'a, T>(
+        &'a self,
+        _prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        Box::pin(futures_util::stream::once(async move {
+            Err::<T, crate::error::RStructorError>(crate::error::RStructorError::Unsupported(
+                "materialize_iter is not implemented for this client".to_string(),
+            ))
+        }))
+    }
+
     /// Create a new client by reading the API key from an environment variable.
     ///
     /// This is a required associated function that all `LLMClient` implementations must provide.

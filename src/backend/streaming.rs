@@ -495,3 +495,193 @@ mod tests {
         );
     }
 }
+
+/// A boxed stream of fully-parsed items, one per element of a streamed JSON array.
+pub type ItemStream<'a, T> = Pin<Box<dyn Stream<Item = Result<T>> + Send + 'a>>;
+
+/// Incrementally extracts complete top-level elements from a streaming JSON array.
+///
+/// Used by `materialize_iter` to yield each element of a list as soon as it is
+/// fully received, rather than buffering the whole array. The model is asked for a
+/// wrapper object `{"items": [ ... ]}`; the streamer skips to the first `[` (the
+/// `items` array) and then emits each complete element (object or scalar) as a
+/// `serde_json::Value`.
+#[derive(Default)]
+pub(crate) struct JsonArrayStreamer {
+    in_array: bool,
+    depth: i32,
+    in_string: bool,
+    escaped: bool,
+    started_element: bool,
+    current: String,
+}
+
+impl JsonArrayStreamer {
+    pub(crate) fn push_str(&mut self, s: &str) -> Vec<Value> {
+        let mut out = Vec::new();
+        for c in s.chars() {
+            if !self.in_array {
+                if c == '[' {
+                    self.in_array = true;
+                }
+                continue;
+            }
+            if self.in_string {
+                self.current.push(c);
+                if self.escaped {
+                    self.escaped = false;
+                } else if c == '\\' {
+                    self.escaped = true;
+                } else if c == '"' {
+                    self.in_string = false;
+                }
+                continue;
+            }
+            match c {
+                '"' => {
+                    self.started_element = true;
+                    self.in_string = true;
+                    self.current.push(c);
+                }
+                '{' | '[' => {
+                    self.started_element = true;
+                    self.depth += 1;
+                    self.current.push(c);
+                }
+                '}' | ']' if self.depth > 0 => {
+                    self.depth -= 1;
+                    self.current.push(c);
+                }
+                ']' => {
+                    // End of the items array.
+                    if let Some(v) = self.finish_element() {
+                        out.push(v);
+                    }
+                    self.in_array = false;
+                }
+                ',' if self.depth == 0 => {
+                    if let Some(v) = self.finish_element() {
+                        out.push(v);
+                    }
+                }
+                c if c.is_whitespace() && !self.started_element => {}
+                _ => {
+                    self.started_element = true;
+                    self.current.push(c);
+                }
+            }
+        }
+        out
+    }
+
+    fn finish_element(&mut self) -> Option<Value> {
+        let text = std::mem::take(&mut self.current);
+        self.started_element = false;
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        serde_json::from_str(trimmed).ok()
+    }
+}
+
+/// Build a streaming-array request: yields each element of the response's `items`
+/// array as a validated `T`, as soon as it is fully received.
+///
+/// `finalize_item` turns each element's `serde_json::Value` into a validated `T`
+/// (deserialize + validate, plus any provider-specific transform).
+pub(crate) fn iter_stream<'a, T, Fut, F, Fin>(
+    send: Fut,
+    extract: F,
+    finalize_item: Fin,
+) -> ItemStream<'a, T>
+where
+    T: Send + 'a,
+    Fut: Future<Output = Result<reqwest::Response>> + Send + 'a,
+    F: Fn(&Value) -> Option<String> + Send + 'a,
+    Fin: Fn(Value) -> Result<T> + Send + 'a,
+{
+    Box::pin(try_stream! {
+        let response = send.await?;
+        let mut bytes = response.bytes_stream();
+        let mut decoder = SseDecoder::default();
+        let mut array = JsonArrayStreamer::default();
+
+        'outer: while let Some(chunk) = bytes.next().await {
+            let chunk = chunk.map_err(RStructorError::from)?;
+            for event in decoder.push(chunk.as_ref()) {
+                match event {
+                    SseEvent::Done => break 'outer,
+                    SseEvent::Data(data) => {
+                        if let Ok(json) = serde_json::from_str::<Value>(&data)
+                            && let Some(text) = extract(&json)
+                        {
+                            for element in array.push_str(&text) {
+                                yield finalize_item(element)?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// Default per-element finalizer for [`iter_stream`]: deserialize a streamed array
+/// element into `T` and run its validation.
+pub(crate) fn finalize_item<T: Instructor + DeserializeOwned>(value: Value) -> Result<T> {
+    let item: T = serde_json::from_value(value)
+        .map_err(|e| RStructorError::SerializationError(e.to_string()))?;
+    item.validate()?;
+    Ok(item)
+}
+
+/// Wrap a (prepared) item schema into the `{ "items": [ <item> ] }` object schema
+/// used for streaming arrays. `strict` adds `additionalProperties: false`
+/// (OpenAI/Anthropic); Gemini passes `false`.
+pub(crate) fn array_wrapper_schema(item_schema: Value, strict: bool) -> Value {
+    let mut wrapper = serde_json::json!({
+        "type": "object",
+        "properties": { "items": { "type": "array", "items": item_schema } },
+        "required": ["items"],
+    });
+    if strict {
+        wrapper["additionalProperties"] = Value::Bool(false);
+    }
+    wrapper
+}
+
+#[cfg(test)]
+mod array_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn streams_object_elements_as_they_complete() {
+        let mut s = JsonArrayStreamer::default();
+        // Wrapper prefix + first complete element, split across pushes.
+        assert_eq!(s.push_str(r#"{"items":["#), Vec::<Value>::new());
+        assert_eq!(s.push_str(r#"{"n":1},{"n":2}"#), vec![json!({"n":1})]);
+        assert_eq!(
+            s.push_str(r#",{"n":3}]}"#),
+            vec![json!({"n":2}), json!({"n":3})]
+        );
+    }
+
+    #[test]
+    fn handles_scalars_strings_and_nesting() {
+        let mut s = JsonArrayStreamer::default();
+        let got = s.push_str(r#"{"items":[1, "a,b", {"x":[1,2]}, true]}"#);
+        assert_eq!(
+            got,
+            vec![json!(1), json!("a,b"), json!({"x":[1,2]}), json!(true)]
+        );
+    }
+
+    #[test]
+    fn ignores_strings_containing_brackets_before_array() {
+        let mut s = JsonArrayStreamer::default();
+        // The first '[' is the items array; nothing emitted until an element completes.
+        assert_eq!(s.push_str(r#"{"items":[{"v":"#), Vec::<Value>::new());
+    }
+}

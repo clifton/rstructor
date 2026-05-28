@@ -90,3 +90,65 @@ async fn grok_object_stream() {
     assert!(!movie.title.trim().is_empty());
     assert!(movie.year > 1900, "unexpected year: {}", movie.year);
 }
+
+// ---- materialize_iter: stream a list, one validated item at a time ----
+
+const LIST_PROMPT: &str = "List 3 acclaimed movies, each with title, year, and director.";
+
+async fn collect_iter<C: LLMClient + Sync>(client: &C) -> Vec<Movie> {
+    let mut stream = client.materialize_iter::<Movie>(LIST_PROMPT);
+    let mut movies = Vec::new();
+    while let Some(item) = stream.next().await {
+        movies.push(item.expect("iter item should not error"));
+    }
+    movies
+}
+
+fn assert_movie_list(movies: &[Movie]) {
+    assert!(
+        movies.len() >= 2,
+        "expected several streamed movies, got {}",
+        movies.len()
+    );
+    assert!(
+        movies
+            .iter()
+            .all(|m| !m.title.trim().is_empty() && m.year > 1900),
+        "every streamed movie should be valid: {movies:?}"
+    );
+}
+
+#[cfg(feature = "openai")]
+#[tokio::test]
+async fn openai_materialize_iter() {
+    use rstructor::OpenAIClient;
+    let client = OpenAIClient::from_env().unwrap().model("gpt-4.1-mini");
+    assert_movie_list(&collect_iter(&client).await);
+}
+
+#[cfg(feature = "grok")]
+#[tokio::test]
+async fn grok_materialize_iter() {
+    use rstructor::GrokClient;
+    let client = GrokClient::from_env().unwrap();
+    assert_movie_list(&collect_iter(&client).await);
+}
+
+#[cfg(feature = "anthropic")]
+#[tokio::test]
+async fn anthropic_materialize_iter() {
+    use rstructor::AnthropicClient;
+    let client = AnthropicClient::from_env()
+        .unwrap()
+        .model("claude-haiku-4-5-20251001")
+        .max_tokens(2048);
+    assert_movie_list(&collect_iter(&client).await);
+}
+
+#[cfg(feature = "gemini")]
+#[tokio::test]
+async fn gemini_materialize_iter() {
+    use rstructor::GeminiClient;
+    let client = GeminiClient::from_env().unwrap().model("gemini-2.5-flash");
+    assert_movie_list(&collect_iter(&client).await);
+}

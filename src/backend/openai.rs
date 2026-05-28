@@ -757,6 +757,30 @@ impl LLMClient for OpenAIClient {
         )
     }
 
+    #[cfg(feature = "streaming")]
+    fn materialize_iter<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let item_schema = prepare_strict_schema(&T::schema());
+        let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, true);
+        let response_format = ResponseFormat::json_schema(
+            "items".to_string(),
+            wrapper,
+            Some("Return a JSON object with an `items` array; each element must follow the item schema exactly.".to_string()),
+        );
+        let body = self.stream_body(prompt, Some(response_format));
+        crate::backend::streaming::iter_stream(
+            self.send_stream(body),
+            crate::backend::streaming::openai_delta,
+            crate::backend::streaming::finalize_item::<T>,
+        )
+    }
+
     /// Fetch available models from OpenAI's API.
     ///
     /// Returns a list of GPT models available for chat completions.

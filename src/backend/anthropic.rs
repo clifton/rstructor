@@ -802,6 +802,26 @@ impl LLMClient for AnthropicClient {
         )
     }
 
+    #[cfg(feature = "streaming")]
+    fn materialize_iter<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let item_schema = prepare_strict_schema(&T::schema());
+        let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, true);
+        let output_format = serde_json::json!({ "type": "json_schema", "schema": wrapper });
+        let body = self.stream_body(prompt, Some(output_format));
+        crate::backend::streaming::iter_stream(
+            self.send_stream(body),
+            crate::backend::streaming::anthropic_delta,
+            crate::backend::streaming::finalize_item::<T>,
+        )
+    }
+
     /// Fetch available models from Anthropic's API.
     ///
     /// Returns a list of Claude models available for chat completions.

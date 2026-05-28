@@ -333,20 +333,18 @@ Enable the `streaming` feature to stream responses as they are generated.
 rstructor = { version = "0.2", features = ["streaming"] }
 ```
 
-`materialize_stream` streams a **structured object**: progressive JSON snapshots of the object filling in, followed by a final, validated, typed value.
+`materialize_iter` streams a **list of structured objects**, yielding each item as soon as it is fully generated and validated — the common case where you want a long list without buffering the whole response:
 
 ```rust
 use futures_util::StreamExt;
-use rstructor::{LLMClient, OpenAIClient, Instructor, StreamedObject};
+use rstructor::{LLMClient, OpenAIClient, Instructor};
 
 let client = OpenAIClient::from_env()?;
-let mut stream = client.materialize_stream::<Recipe>("A simple pancake recipe");
+let mut stream = client.materialize_iter::<Invention>("List 10 important inventions.");
 
 while let Some(item) = stream.next().await {
-    match item? {
-        StreamedObject::Partial(json) => update_ui(&json), // object filling in
-        StreamedObject::Complete(recipe) => done(recipe),  // typed + validated
-    }
+    let invention = item?;          // each item: fully parsed + validated
+    println!("{} ({})", invention.name, invention.year);
 }
 ```
 
@@ -359,7 +357,9 @@ while let Some(chunk) = stream.next().await {
 }
 ```
 
-Both are available on all providers (OpenAI, Anthropic, Grok, Gemini). See `examples/streaming_example.rs`.
+There is also `materialize_stream`, which streams a single object as progressive `StreamedObject::Partial(json)` snapshots followed by a validated `Complete(T)`.
+
+All are available on every provider (OpenAI, Anthropic, Grok, Gemini). See `examples/streaming_example.rs`.
 
 ## Feature Flags
 

@@ -77,4 +77,4 @@ pub use backend::{
     ChatMessage, ChatRole, GenerateResult, MaterializeResult, MediaFile, TokenUsage,
 };
 #[cfg(feature = "streaming")]
-pub use backend::{ObjectStream, StreamedObject, TextStream};
+pub use backend::{ItemStream, ObjectStream, StreamedObject, TextStream};

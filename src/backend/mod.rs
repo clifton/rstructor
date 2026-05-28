@@ -30,7 +30,7 @@ pub use messages::{ChatMessage, ChatRole};
 #[cfg(feature = "_client")]
 pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
 #[cfg(feature = "streaming")]
-pub use streaming::{ObjectStream, StreamedObject, TextStream};
+pub use streaming::{ItemStream, ObjectStream, StreamedObject, TextStream};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
 /// Information about an available model from an LLM provider.

@@ -892,6 +892,41 @@ impl LLMClient for GeminiClient {
         )
     }
 
+    #[cfg(feature = "streaming")]
+    fn materialize_iter<'a, T>(
+        &'a self,
+        prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        let schema = T::schema();
+        let adjacently_tagged_info =
+            crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
+        let item_schema = crate::backend::utils::prepare_gemini_schema(&schema);
+        let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, false);
+        let body = self.stream_body(prompt, Some(wrapper));
+
+        // Each streamed array element is a `T`; transform internally-tagged enums
+        // back before deserializing.
+        let finalize = move |mut value: Value| -> Result<T> {
+            if let Some(ref info) = adjacently_tagged_info {
+                crate::backend::utils::transform_internally_to_adjacently_tagged(&mut value, info);
+            }
+            let item: T = serde_json::from_value(value)
+                .map_err(|e| RStructorError::SerializationError(e.to_string()))?;
+            item.validate()?;
+            Ok(item)
+        };
+
+        crate::backend::streaming::iter_stream(
+            self.send_stream(body),
+            crate::backend::streaming::gemini_delta,
+            finalize,
+        )
+    }
+
     /// Fetch available models from Gemini's API.
     ///
     /// Returns a list of Gemini models that support content generation.
