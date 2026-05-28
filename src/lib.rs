@@ -72,11 +72,11 @@ pub use backend::LLMClient;
 pub use backend::ModelInfo;
 pub use backend::ThinkingLevel;
 #[cfg(feature = "_client")]
-pub use backend::{AnyClient, Provider};
+pub use backend::{AnyClient, Provider, Request, RequestExt};
 pub use backend::{
     ChatMessage, ChatRole, GenerateResult, MaterializeResult, MediaFile, TokenUsage,
 };
 #[cfg(feature = "tools")]
-pub use backend::{DynTool, FnTool, Tool, ToolRequest, ToolRunner, Toolbox};
+pub use backend::{DynTool, FnTool, Tool, ToolRunner, Toolbox};
 #[cfg(feature = "streaming")]
 pub use backend::{ItemStream, ObjectStream, StreamedObject, TextStream};

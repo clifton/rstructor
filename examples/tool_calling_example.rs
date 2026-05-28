@@ -7,7 +7,7 @@
 //! schema-validated arguments); rstructor runs them and feeds the results back
 //! until the model produces a final answer.
 
-use rstructor::{FnTool, Instructor, OpenAIClient, Toolbox};
+use rstructor::{FnTool, Instructor, OpenAIClient, RequestExt, Toolbox};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 

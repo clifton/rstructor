@@ -376,19 +376,6 @@ impl GrokClient {
 }
 
 #[cfg(feature = "tools")]
-impl GrokClient {
-    /// Begin a tool-calling request: `client.with_tools(&toolbox).run("...").await?`.
-    ///
-    /// Requires the `tools` feature.
-    pub fn with_tools<'a>(
-        &'a self,
-        toolbox: &'a crate::backend::tools::Toolbox,
-    ) -> crate::backend::tools::ToolRequest<'a, Self> {
-        crate::backend::tools::ToolRequest::new(self, toolbox)
-    }
-}
-
-#[cfg(feature = "tools")]
 #[async_trait]
 impl crate::backend::tools::ToolRunner for GrokClient {
     async fn run_tool_loop(

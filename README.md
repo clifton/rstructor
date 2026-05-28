@@ -56,6 +56,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Request Builder
+
+`materialize`, `generate`, and (with the `tools` feature) tool `run` are also
+available through a fluent builder that attaches context, images, and tools to a
+single request. Bring `RequestExt` into scope and chain the pieces you need:
+
+```rust
+use rstructor::{Instructor, OpenAIClient, RequestExt};
+
+let client = OpenAIClient::from_env()?;
+
+// Add context that is prepended to the prompt, then materialize a struct.
+let movie: Movie = client
+    .with_system("Assume USD; format dates as ISO-8601.")
+    .materialize("Describe Inception")
+    .await?;
+
+// Or start from `.request()` and combine builders before a terminal.
+let summary = client
+    .request()
+    .system("Be concise.")
+    .generate("Summarize the plot of Inception")
+    .await?;
+```
+
+The terminals are `materialize::<T>(prompt)` (structured), `generate(prompt)`
+(text), and — with the `tools` feature — `run(prompt)` (text, calling any
+attached tools in a loop). Builders compose: `with_system`, `with_media`, and
+`with_tools` can be chained in any order before the terminal.
+
 ## Providers
 
 ```rust
@@ -241,10 +271,11 @@ impl SchemaType for SecurityId {
 
 ## Multimodal (Image Input)
 
-Analyze images with structured extraction across all major providers using `materialize_with_media`:
+Analyze images with structured extraction across all major providers by
+attaching media to a request with `with_media`:
 
 ```rust
-use rstructor::{Instructor, LLMClient, OpenAIClient, MediaFile};
+use rstructor::{Instructor, OpenAIClient, MediaFile, RequestExt};
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 struct ImageAnalysis {
@@ -259,12 +290,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?.bytes().await?;
 
     // Inline media is base64-encoded automatically
-    let media = MediaFile::from_bytes(&image_bytes, "image/png");
+    let media = [MediaFile::from_bytes(&image_bytes, "image/png")];
 
     // Works with OpenAI, Anthropic, Grok, and Gemini clients
     let client = OpenAIClient::from_env()?;
     let analysis: ImageAnalysis = client
-        .materialize_with_media("Describe this image", &[media])
+        .with_media(&media)
+        .materialize("Describe this image")
         .await?;
     println!("{:?}", analysis);
     Ok(())
@@ -272,6 +304,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 `MediaFile::new(uri, mime_type)` is also available for URL/URI-based media input.
+The lower-level `LLMClient::materialize_with_media(prompt, &media)` method does
+the same thing in one call when you do not need the builder.
 
 Provider examples:
 - `cargo run --example openai_multimodal_example --features openai`
