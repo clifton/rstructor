@@ -1,6 +1,6 @@
 [package]
 name = "rstructor_derive"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 description = "Derive macros for rstructor: generate JSON Schema from Rust structs and enums to extract structured, validated outputs from LLMs (the Instructor pattern for Rust)."
 license = "MIT"
