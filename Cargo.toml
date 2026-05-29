@@ -2,7 +2,7 @@
 name = "rstructor"
 version = "0.3.0"
 edition = "2024"
-description = "Rust equivalent of Python's Instructor + Pydantic: Extract structured, validated data from LLMs (OpenAI, Anthropic, Grok, Gemini) using type-safe Rust structs and enums"
+description = "The Rust equivalent of Python's Instructor + Pydantic. Extract structured, validated data from LLMs (OpenAI, Anthropic Claude, Grok, Gemini) into type-safe structs and enums, with automatic JSON Schema generation, parsing, and validation-with-retry."
 license = "MIT"
 repository = "https://github.com/clifton/rstructor"
 authors = ["Clifton King <cliftonk@gmail.com>"]
@@ -28,13 +28,13 @@ exclude = [
   "*.orig",
   "*.bak",
 ]
-keywords = ["pydantic", "instructor", "structured-output", "llm", "openai"]
+keywords = ["llm", "openai", "anthropic", "structured-output", "instructor"]
 categories = [
   "api-bindings",
   "web-programming",
   "parsing",
-  "data-structures",
   "text-processing",
+  "asynchronous",
 ]
 
 [dependencies]

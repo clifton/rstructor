@@ -8,53 +8,77 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"/>
 </p>
 
-Extract structured, validated data from LLMs using native Rust types. Define your schema as structs/enums, and rstructor handles JSON Schema generation, API communication, parsing, and validation.
-
-The Rust equivalent of [Instructor](https://github.com/jxnl/instructor) for Python.
+Turn unstructured prose into strongly-typed, validated Rust data — define your schema as plain structs and enums, and rstructor handles JSON Schema generation, prompting, parsing, and validation with automatic retries.
 
 ## Features
 
-- **Type-safe schemas** — Define models as Rust structs/enums with derive macros
-- **Multi-provider** — OpenAI, Anthropic, Grok (xAI), and Gemini with unified API
-- **Auto-validation** — Type checking plus custom business rules with automatic retry
-- **Complex types** — Nested objects, arrays, optionals, enums with associated data
-- **Extended thinking** — Native support for reasoning models (GPT-5.5, Claude 4.6, Gemini 3.1)
+- **Type-safe schemas from Rust types** — Derive `Instructor` on structs and enums; rstructor generates the JSON Schema and validated parser for you, no hand-written prompts or DTOs
+- **Multi-provider, one API** — OpenAI, Anthropic, Grok (xAI), and Gemini behind a single `materialize()` call with swappable clients
+- **Validation with automatic re-ask** — Built-in type checking plus custom business rules; validation failures are fed back to the model and retried until the data is correct
+- **Rich, nested data** — Nested objects, arrays, optionals, maps, and enums with associated data, with validation that recurses through the whole tree
+- **The Instructor / Pydantic experience for Rust** — The familiar structured-output workflow of [Instructor](https://github.com/jxnl/instructor) + [Pydantic](https://github.com/pydantic/pydantic), now with compile-time guarantees and reasoning-model support (GPT-5.5, Claude 4.6, Gemini 3.1)
 
 ## Installation
 
 ```toml
 [dependencies]
-rstructor = "0.2"
+rstructor = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 ```
 
 ## Quick Start
 
+Describe the shape you want as plain Rust types, then turn a sentence of prose into a fully-typed, validated value:
+
 ```rust
 use rstructor::{Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
-struct Movie {
-    #[llm(description = "Title of the movie")]
+enum Priority {
+    Low,
+    Medium,
+    High,
+    Urgent,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+#[llm(description = "A support ticket triaged from a free-form message")]
+struct Ticket {
+    #[llm(description = "Short, imperative summary of what needs to be done")]
     title: String,
-    #[llm(description = "Director of the movie")]
-    director: String,
-    #[llm(description = "Year released", example = 2010)]
-    year: u16,
+    #[llm(description = "How urgent this is, inferred from tone and deadlines")]
+    priority: Priority,
+    #[llm(description = "Email of the person on it, or null if unassigned")]
+    assignee: Option<String>,
+    #[llm(description = "Relevant topic tags", examples = ["billing", "auth", "outage"])]
+    tags: Vec<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = OpenAIClient::from_env()?
-        .temperature(0.0);
+    let client = OpenAIClient::from_env()?.temperature(0.0);
 
-    let movie: Movie = client.materialize("Tell me about Inception").await?;
-    println!("{}: {} ({})", movie.title, movie.director, movie.year);
+    let ticket: Ticket = client
+        .materialize(
+            "Hey, the login page is throwing 500s for half our users since the deploy. \
+             Sarah (sarah@acme.io) is on it but we need this fixed before the demo at 3pm!",
+        )
+        .await?;
+
+    println!("{ticket:#?}");
+    // Ticket {
+    //     title: "Login page returning 500 errors after deploy",
+    //     priority: Urgent,
+    //     assignee: Some("sarah@acme.io"),
+    //     tags: ["auth", "outage"],
+    // }
     Ok(())
 }
 ```
+
+Every field is *inferred*, not transcribed: the urgency is read from the tone and deadline, the email is plucked out of mid-sentence prose, and the tags are synthesized — all parsed into the exact types you declared.
 
 ## Request Builder
 
@@ -364,7 +388,7 @@ match client.materialize::<Movie>("...").await {
 Enable the `streaming` feature to stream responses as they are generated.
 
 ```toml
-rstructor = { version = "0.2", features = ["streaming"] }
+rstructor = { version = "0.3", features = ["streaming"] }
 ```
 
 `materialize_iter` streams a **list of structured objects**, yielding each item as soon as it is fully generated and validated — the common case where you want a long list without buffering the whole response:
@@ -400,7 +424,7 @@ All are available on every provider (OpenAI, Anthropic, Grok, Gemini). See `exam
 Enable the `tools` feature to let the model call your typed Rust functions and feed the results back, looping until it produces a final answer. Tool argument types derive `Instructor`, so their JSON Schema is generated automatically.
 
 ```toml
-rstructor = { version = "0.2", features = ["tools"] }
+rstructor = { version = "0.3", features = ["tools"] }
 ```
 
 ```rust
@@ -436,7 +460,7 @@ Works with all providers (OpenAI, Anthropic, Grok, Gemini). See `examples/tool_c
 
 ```toml
 [dependencies]
-rstructor = { version = "0.2", features = ["openai", "anthropic", "grok", "gemini"] }
+rstructor = { version = "0.3", features = ["openai", "anthropic", "grok", "gemini"] }
 ```
 
 - `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
@@ -449,7 +473,7 @@ All features are on by default. For a **schema-only build** — generate JSON Sc
 
 ```toml
 [dependencies]
-rstructor = { version = "0.2", default-features = false, features = ["derive"] }
+rstructor = { version = "0.3", default-features = false, features = ["derive"] }
 ```
 
 This keeps the derive macro, `SchemaType`, the `Instructor` trait, and the `LLMClient` trait (so you can implement your own backend) without the async/HTTP dependency tree.
