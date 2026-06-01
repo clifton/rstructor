@@ -373,6 +373,17 @@ impl MockClient {
 
     /// Map a request to a response. Returning `None` falls through to the queue,
     /// then to the default response.
+    ///
+    /// ```
+    /// # use rstructor::{MockClient, LLMClient, MockResponse};
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let client = MockClient::new().with_responder(|req| {
+    ///     req.prompt.contains("haiku").then(|| MockResponse::text("a haiku"))
+    /// });
+    /// assert_eq!(client.generate("write a haiku").await.unwrap(), "a haiku");
+    /// # }
+    /// ```
     #[must_use]
     pub fn with_responder<F>(self, f: F) -> Self
     where
@@ -410,6 +421,32 @@ impl MockClient {
     /// re-ask loop: queue a bad payload followed by a good one and set
     /// `with_retries(1)` to test recovery. (Has no effect with a responder closure,
     /// which is a pure function of the request.)
+    ///
+    /// ```
+    /// # use rstructor::{MockClient, LLMClient, Instructor, RStructorError};
+    /// # use serde::{Serialize, Deserialize};
+    /// #[derive(Instructor, Serialize, Deserialize)]
+    /// #[llm(validate = "non_negative")]
+    /// struct Count { n: i32 }
+    ///
+    /// fn non_negative(c: &Count) -> rstructor::Result<()> {
+    ///     if c.n < 0 {
+    ///         return Err(RStructorError::ValidationError("must be >= 0".into()));
+    ///     }
+    ///     Ok(())
+    /// }
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = MockClient::new()
+    ///     .with_response(r#"{"n": -1}"#) // first attempt fails validation
+    ///     .with_response(r#"{"n": 7}"#)  // re-ask succeeds
+    ///     .with_retries(1);
+    /// let count: Count = client.materialize("p").await?;
+    /// assert_eq!(count.n, 7);
+    /// # Ok(())
+    /// # }
+    /// ```
     #[must_use]
     pub fn with_retries(self, n: usize) -> Self {
         *self.inner.retries.lock().unwrap() = n;
@@ -435,7 +472,20 @@ impl MockClient {
 
     // ---- assertions / recording ----
 
-    /// All requests received, in order.
+    /// All requests received, in order — for asserting *what the client was asked*.
+    ///
+    /// ```
+    /// # use rstructor::{MockClient, LLMClient, RequestKind};
+    /// # #[tokio::main]
+    /// # async fn main() {
+    /// let client = MockClient::new().with_response("ok");
+    /// let _ = client.generate("hello").await.unwrap();
+    /// assert_eq!(client.request_count(), 1);
+    /// let req = client.last_request().unwrap();
+    /// assert_eq!(req.kind, RequestKind::Generate);
+    /// assert_eq!(req.prompt, "hello");
+    /// # }
+    /// ```
     #[must_use]
     pub fn requests(&self) -> Vec<RecordedRequest> {
         self.inner.log.lock().unwrap().clone()
