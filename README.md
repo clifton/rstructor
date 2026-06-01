@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"/>
 </p>
 
-Turn unstructured prose into strongly-typed, validated Rust data — define your schema as plain structs and enums, and rstructor handles JSON Schema generation, prompting, parsing, and validation with automatic retries.
+Get structured, validated data out of any LLM as native Rust structs and enums. Define the shape you want as plain Rust types — rstructor generates the JSON Schema, prompts the model, parses the response, and retries on validation errors until the data fits.
 
 ## Features
 
@@ -16,7 +16,7 @@ Turn unstructured prose into strongly-typed, validated Rust data — define your
 - **Multi-provider, one API** — OpenAI, Anthropic, Grok (xAI), and Gemini behind a single `materialize()` call with swappable clients
 - **Validation with automatic re-ask** — Built-in type checking plus custom business rules; validation failures are fed back to the model and retried until the data is correct
 - **Rich, nested data** — Nested objects, arrays, optionals, maps, and enums with associated data, with validation that recurses through the whole tree
-- **The Instructor / Pydantic experience for Rust** — The familiar structured-output workflow of [Instructor](https://github.com/jxnl/instructor) + [Pydantic](https://github.com/pydantic/pydantic), now with compile-time guarantees and reasoning-model support (GPT-5.5, Claude 4.6, Gemini 3.1)
+- **Familiar if you know Pydantic + Instructor** — The same structured-output workflow as Python's [Instructor](https://github.com/jxnl/instructor) + [Pydantic](https://github.com/pydantic/pydantic), with Rust's compile-time type safety
 
 ## Installation
 
@@ -29,7 +29,7 @@ tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 
 ## Quick Start
 
-Describe the shape you want as plain Rust types, then turn a sentence of prose into a fully-typed, validated value:
+Describe the shape you want as plain Rust types, then turn a line of free-form text into a fully-typed, validated value:
 
 ```rust
 use rstructor::{Instructor, LLMClient, OpenAIClient};
@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Every field is *inferred*, not transcribed: the urgency is read from the tone and deadline, the email is plucked out of mid-sentence prose, and the tags are synthesized — all parsed into the exact types you declared.
+Every field is *inferred*, not transcribed: the urgency is read from the tone and deadline, the email is plucked out of mid-sentence text, and the tags are synthesized — all parsed into the exact types you declared.
 
 ## Request Builder
 

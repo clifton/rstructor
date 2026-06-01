@@ -1,46 +1,46 @@
-/// rstructor: A Rust library for structured outputs from LLMs
-///
-/// # Overview
-///
-/// rstructor simplifies getting validated, strongly-typed outputs from Large Language Models
-/// (LLMs) like GPT-5.5 and Claude. It automatically generates JSON Schema from your Rust types,
-/// sends the schema to LLMs, parses responses, and validates against the schema.
-///
-/// Key features:
-/// - Derive macro for automatic JSON Schema generation
-/// - Built-in OpenAI and Anthropic API clients
-/// - Validation of responses against schemas
-/// - Type-safe conversion from LLM outputs to Rust structs and enums
-/// - Customizable client configurations
-///
-/// # Quick Start
-///
-/// ```no_run
-/// use rstructor::{LLMClient, OpenAIClient, Instructor};
-/// use serde::{Serialize, Deserialize};
-///
-/// #[derive(Instructor, Serialize, Deserialize, Debug)]
-/// struct Person {
-///     name: String,
-///     age: u8,
-///     bio: String,
-/// }
-///
-/// #[tokio::main]
-/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     // Create a client
-///     let client = OpenAIClient::new("your-openai-api-key")?;
-///
-///     // Generate a structured response
-///     let person: Person = client.materialize("Describe a fictional person").await?;
-///
-///     println!("Name: {}", person.name);
-///     println!("Age: {}", person.age);
-///     println!("Bio: {}", person.bio);
-///
-///     Ok(())
-/// }
-/// ```
+//! rstructor: get structured, validated data out of LLMs as native Rust structs and enums
+//!
+//! # Overview
+//!
+//! rstructor gets structured, validated data out of large language models (LLMs) as native
+//! Rust structs and enums. It generates JSON Schema from your types, prompts the model, parses
+//! the response, and validates the result — retrying automatically when validation fails.
+//!
+//! Key features:
+//! - Derive macro for automatic JSON Schema generation
+//! - Built-in clients for OpenAI, Anthropic, Google Gemini, and xAI Grok
+//! - Validation of responses against schemas
+//! - Type-safe conversion from LLM outputs to Rust structs and enums
+//! - Customizable client configurations
+//!
+//! # Quick Start
+//!
+//! ```no_run
+//! use rstructor::{LLMClient, OpenAIClient, Instructor};
+//! use serde::{Serialize, Deserialize};
+//!
+//! #[derive(Instructor, Serialize, Deserialize, Debug)]
+//! struct Person {
+//!     name: String,
+//!     age: u8,
+//!     bio: String,
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create a client
+//!     let client = OpenAIClient::new("your-openai-api-key")?;
+//!
+//!     // Generate a structured response
+//!     let person: Person = client.materialize("Describe a fictional person").await?;
+//!
+//!     println!("Name: {}", person.name);
+//!     println!("Age: {}", person.age);
+//!     println!("Bio: {}", person.bio);
+//!
+//!     Ok(())
+//! }
+//! ```
 mod backend;
 pub mod error;
 #[cfg(feature = "logging")]
