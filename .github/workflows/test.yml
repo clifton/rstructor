@@ -31,3 +31,33 @@ jobs:
 
       - name: Run tests
         run: cargo test --no-fail-fast
+
+  offline:
+    name: Offline tests (mock — no API keys)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci-offline"
+          cache-on-failure: true
+
+      # Dependency-light build with the mock client and no networked providers.
+      - name: Schema-only build (derive + mock)
+        run: cargo build --no-default-features --features "derive,mock"
+
+      - name: Mock unit tests (schema-only)
+        run: cargo test --no-default-features --features "derive,mock" --lib
+
+      - name: Mock integration tests (schema-only core)
+        run: cargo test --no-default-features --features "derive,mock" --test mock_client_tests
+
+      # Exercises the streaming + tool-loop mock paths (offline; no keys needed).
+      - name: Mock integration tests (streaming + tools)
+        run: cargo test --features "mock,streaming,tools" --test mock_client_tests
