@@ -494,6 +494,136 @@ mod tests {
             json!({"name":"Alice","age":30,"tags":["x","y"]})
         );
     }
+
+    // --- SSE decoder edge cases ---
+
+    #[test]
+    fn decoder_splits_crlf_across_chunks() {
+        // A `\r` arrives at the end of one chunk and the `\n` (plus the blank
+        // separator) only in the next: the data line must not be emitted until
+        // its terminating newline is seen.
+        let mut d = SseDecoder::default();
+        assert_eq!(d.push(b"data:{a}\r"), vec![]);
+        assert_eq!(d.push(b"\n\r\n"), vec![SseEvent::Data("{a}".to_string())]);
+    }
+
+    #[test]
+    fn decoder_emits_multiple_data_lines_in_one_chunk_in_order() {
+        let mut d = SseDecoder::default();
+        assert_eq!(
+            d.push(b"data:{a}\ndata:{b}\n"),
+            vec![
+                SseEvent::Data("{a}".to_string()),
+                SseEvent::Data("{b}".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn decoder_reassembles_utf8_multibyte_split_across_chunks() {
+        // The euro sign U+20AC is the three bytes E2 82 AC; split it across two
+        // chunks and confirm the decoder reassembles a single intact code point.
+        let mut d = SseDecoder::default();
+        assert_eq!(d.push(b"data:\xe2\x82"), vec![]);
+        let events = d.push(b"\xac\n");
+        assert_eq!(events, vec![SseEvent::Data("\u{20AC}".to_string())]);
+        if let SseEvent::Data(s) = &events[0] {
+            assert_eq!(s.chars().next(), Some('\u{20AC}'));
+        }
+    }
+
+    #[test]
+    fn decoder_handles_done_and_data_in_same_push() {
+        let mut d = SseDecoder::default();
+        assert_eq!(
+            d.push(b"data:[DONE]\ndata:{a}\n"),
+            vec![SseEvent::Done, SseEvent::Data("{a}".to_string())]
+        );
+    }
+
+    #[test]
+    fn decoder_ignores_empty_and_whitespace_data_lines() {
+        let mut d = SseDecoder::default();
+        assert_eq!(d.push(b"data:\n"), vec![]);
+        let mut d = SseDecoder::default();
+        assert_eq!(d.push(b"data:   \n"), vec![]);
+    }
+
+    #[test]
+    fn decoder_done_sentinel_is_case_sensitive() {
+        // Only the exact `[DONE]` sentinel ends the stream; lowercase is data.
+        let mut d = SseDecoder::default();
+        assert_eq!(
+            d.push(b"data:[done]\n"),
+            vec![SseEvent::Data("[done]".to_string())]
+        );
+    }
+
+    // --- complete_json edge cases ---
+
+    #[test]
+    fn complete_json_rejects_truncated_unicode_escape() {
+        // The braces/quotes are balanced so repair produces a string, but the
+        // truncated `\u00` escape makes it invalid JSON → None.
+        assert!(complete_json(r#"{"s":"\u00"#).is_none());
+    }
+
+    #[test]
+    fn complete_json_rejects_unbalanced_or_extra_closers() {
+        // Extra `}` and a mismatched `]` can't be repaired.
+        assert!(complete_json(r#"{"a":1}}"#).is_none());
+        assert!(complete_json(r#"{"a":1]"#).is_none());
+    }
+
+    #[test]
+    fn complete_json_handles_odd_and_even_trailing_backslashes() {
+        // Even backslashes: `a\\` is a complete escaped backslash; the value is a
+        // single backslash. (`json!({"s": "a\\"})` is the string `a\`.)
+        assert_eq!(complete_json(r#"{"s":"a\\"#).unwrap(), json!({"s": "a\\"}));
+        // Odd backslashes: the dangling final `\` is an incomplete escape and is
+        // dropped, leaving the same completed value.
+        assert_eq!(complete_json(r#"{"s":"a\\\"#).unwrap(), json!({"s": "a\\"}));
+    }
+
+    #[test]
+    fn complete_json_rejects_dangling_minus_but_allows_negative_exponent() {
+        assert!(complete_json(r#"{"a":-"#).is_none());
+        assert_eq!(
+            complete_json(r#"{"a":-1.2e10"#).unwrap(),
+            json!({"a": -1.2e10})
+        );
+    }
+
+    #[test]
+    fn complete_json_rejects_dangling_colon_without_container() {
+        // A dangling key/colon with no surrounding `{`/`,` to cut back to → None.
+        assert!(complete_json(r#""key":"#).is_none());
+        assert!(complete_json("x:").is_none());
+    }
+
+    #[test]
+    fn complete_json_passes_top_level_scalars_through() {
+        assert_eq!(complete_json("42").unwrap(), json!(42));
+        assert_eq!(complete_json("true").unwrap(), json!(true));
+        assert_eq!(complete_json(r#""hello"#).unwrap(), json!("hello"));
+        assert_eq!(complete_json("[1,2,3]").unwrap(), json!([1, 2, 3]));
+    }
+
+    #[test]
+    fn complete_json_trims_trailing_whitespace_and_comma() {
+        assert_eq!(complete_json("{\"a\":1,  \n  ").unwrap(), json!({"a": 1}));
+    }
+
+    // --- StreamedObject helper ---
+
+    #[test]
+    fn streamed_object_complete_accessor() {
+        assert_eq!(StreamedObject::Complete(42).complete(), Some(42));
+        assert_eq!(
+            StreamedObject::<i32>::Partial(json!({"a": 1})).complete(),
+            None
+        );
+    }
 }
 
 /// A boxed stream of fully-parsed items, one per element of a streamed JSON array.
@@ -683,5 +813,172 @@ mod array_tests {
         let mut s = JsonArrayStreamer::default();
         // The first '[' is the items array; nothing emitted until an element completes.
         assert_eq!(s.push_str(r#"{"items":[{"v":"#), Vec::<Value>::new());
+    }
+
+    // --- JsonArrayStreamer edge cases ---
+
+    #[test]
+    fn handles_escaped_quotes_in_string_element() {
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(
+            s.push_str(r#"{"items":["he said \"hi\"","x"]}"#),
+            vec![json!("he said \"hi\""), json!("x")]
+        );
+    }
+
+    #[test]
+    fn handles_string_containing_closing_bracket() {
+        let mut s = JsonArrayStreamer::default();
+        // The `]` inside the string must not be treated as the array terminator.
+        assert_eq!(
+            s.push_str(r#"{"items":["a]b","c"]}"#),
+            vec![json!("a]b"), json!("c")]
+        );
+    }
+
+    #[test]
+    fn handles_array_of_arrays_elements() {
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(
+            s.push_str(r#"{"items":[[1,2],[3,4]]}"#),
+            vec![json!([1, 2]), json!([3, 4])]
+        );
+    }
+
+    #[test]
+    fn handles_null_and_bare_top_level_array() {
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(
+            s.push_str(r#"{"items":[null,1]}"#),
+            vec![json!(null), json!(1)]
+        );
+        // A bare top-level array (no `{"items": ...}` wrapper): the first `[` is
+        // still taken as the array start.
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(s.push_str(r#"[1,2,3]"#), vec![json!(1), json!(2), json!(3)]);
+    }
+
+    #[test]
+    fn drops_invalid_element_and_recovers() {
+        // An element that is not valid JSON is silently dropped; subsequent valid
+        // elements still come through.
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(s.push_str(r#"{"items":[1abc,2]}"#), vec![json!(2)]);
+        // A leading empty element (`[,1]`) finishes an empty segment (dropped) and
+        // then yields the real element.
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(s.push_str(r#"{"items":[,1]}"#), vec![json!(1)]);
+        // A trailing comma (`[1,]`) yields the element then an empty segment that
+        // is dropped at the closing `]`.
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(s.push_str(r#"{"items":[1,]}"#), vec![json!(1)]);
+    }
+
+    #[test]
+    fn empty_items_array_yields_nothing() {
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(s.push_str(r#"{"items":[]}"#), Vec::<Value>::new());
+    }
+
+    #[test]
+    fn element_split_across_push_str_calls() {
+        // Scalar split mid-number: the two halves concatenate into one element.
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(s.push_str(r#"{"items":[12"#), Vec::<Value>::new());
+        assert_eq!(s.push_str(r#"34,5]}"#), vec![json!(1234), json!(5)]);
+    }
+
+    #[test]
+    fn escape_flag_persists_across_push_str_calls() {
+        // The escaping backslash ends chunk 1 (inside a string); the escaped flag
+        // must persist so the following `\b` decodes to a single literal backslash
+        // + `b`, not a control escape, and the element parses correctly.
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(s.push_str(r#"{"items":["a\"#), Vec::<Value>::new());
+        assert_eq!(s.push_str(r#"\b","c"]}"#), vec![json!("a\\b"), json!("c")]);
+    }
+
+    #[test]
+    fn re_entry_after_array_close() {
+        // After the items array closes, feeding a second array re-enters and
+        // streams its elements too (documents the re-entry behavior).
+        let mut s = JsonArrayStreamer::default();
+        assert_eq!(s.push_str(r#"{"items":[1]}"#), vec![json!(1)]);
+        assert_eq!(s.push_str(r#"[9,9]"#), vec![json!(9), json!(9)]);
+    }
+
+    // --- array_wrapper_schema ---
+
+    #[test]
+    fn array_wrapper_schema_strict_adds_additional_properties_and_required() {
+        let item = json!({"type": "object"});
+        let wrapper = array_wrapper_schema(item.clone(), true);
+        assert_eq!(wrapper["additionalProperties"], json!(false));
+        assert_eq!(wrapper["required"], json!(["items"]));
+        assert_eq!(wrapper["type"], json!("object"));
+        assert_eq!(wrapper["properties"]["items"]["type"], json!("array"));
+        assert_eq!(wrapper["properties"]["items"]["items"], item);
+    }
+
+    #[test]
+    fn array_wrapper_schema_non_strict_omits_additional_properties() {
+        let item = json!({"type": "string"});
+        let wrapper = array_wrapper_schema(item.clone(), false);
+        assert!(wrapper.get("additionalProperties").is_none());
+        // `required` and the array shape are still present in non-strict mode.
+        assert_eq!(wrapper["required"], json!(["items"]));
+        assert_eq!(wrapper["properties"]["items"]["items"], item);
+    }
+
+    // --- finalize_item failure branches ---
+
+    #[cfg(feature = "derive")]
+    #[test]
+    fn finalize_item_validation_and_deserialize_failures() {
+        use crate::Instructor;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+        #[llm(validate = "validate_ticket")]
+        struct Ticket {
+            title: String,
+            priority: u8,
+        }
+
+        fn validate_ticket(t: &Ticket) -> crate::Result<()> {
+            if !(1..=5).contains(&t.priority) {
+                return Err(RStructorError::ValidationError(format!(
+                    "priority must be 1-5, got {}",
+                    t.priority
+                )));
+            }
+            Ok(())
+        }
+
+        // Deserializes fine but fails validation → ValidationError from validate().
+        let err = finalize_item::<Ticket>(json!({"title": "x", "priority": 99}))
+            .expect_err("priority 99 should fail validation");
+        assert!(
+            matches!(err, RStructorError::ValidationError(_)),
+            "expected ValidationError, got {err:?}"
+        );
+
+        // Wrong type for `title` fails deserialization → SerializationError.
+        let err = finalize_item::<Ticket>(json!({"title": 123, "priority": 1}))
+            .expect_err("non-string title should fail deserialization");
+        assert!(
+            matches!(err, RStructorError::SerializationError(_)),
+            "expected SerializationError, got {err:?}"
+        );
+
+        // Sanity: a valid element succeeds.
+        let ok = finalize_item::<Ticket>(json!({"title": "x", "priority": 3})).unwrap();
+        assert_eq!(
+            ok,
+            Ticket {
+                title: "x".into(),
+                priority: 3
+            }
+        );
     }
 }

@@ -2233,4 +2233,1136 @@ mod tests {
         assert_eq!(attempts, 2);
         assert_eq!(output.data, "ok");
     }
+
+    // ===================================================================
+    // error/retry: classify_api_error status matrix
+    // ===================================================================
+
+    fn status(code: u16) -> reqwest::StatusCode {
+        reqwest::StatusCode::from_u16(code).expect("valid status code")
+    }
+
+    #[test]
+    fn classify_api_error_400_bad_request() {
+        let kind = classify_api_error(status(400), "malformed body", None, None);
+        match kind {
+            ApiErrorKind::BadRequest { details } => assert_eq!(details, "malformed body"),
+            other => panic!("expected BadRequest, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_api_error_401_authentication_failed() {
+        assert_eq!(
+            classify_api_error(status(401), "bad key", None, None),
+            ApiErrorKind::AuthenticationFailed
+        );
+    }
+
+    #[test]
+    fn classify_api_error_403_permission_denied() {
+        assert_eq!(
+            classify_api_error(status(403), "no access", None, None),
+            ApiErrorKind::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn classify_api_error_413_request_too_large() {
+        assert_eq!(
+            classify_api_error(status(413), "too big", None, None),
+            ApiErrorKind::RequestTooLarge
+        );
+    }
+
+    #[test]
+    fn classify_api_error_429_rate_limited_carries_retry_after() {
+        let kind = classify_api_error(status(429), "slow down", Some(Duration::from_secs(7)), None);
+        assert_eq!(
+            kind,
+            ApiErrorKind::RateLimited {
+                retry_after: Some(Duration::from_secs(7))
+            }
+        );
+    }
+
+    #[test]
+    fn classify_api_error_500_and_502_server_error_with_code() {
+        assert_eq!(
+            classify_api_error(status(500), "boom", None, None),
+            ApiErrorKind::ServerError { code: 500 }
+        );
+        assert_eq!(
+            classify_api_error(status(502), "bad gateway", None, None),
+            ApiErrorKind::ServerError { code: 502 }
+        );
+    }
+
+    #[test]
+    fn classify_api_error_503_service_unavailable() {
+        assert_eq!(
+            classify_api_error(status(503), "down", None, None),
+            ApiErrorKind::ServiceUnavailable
+        );
+    }
+
+    #[test]
+    fn classify_api_error_520_to_524_gateway_error_with_code() {
+        for code in [520u16, 521, 522, 523, 524] {
+            assert_eq!(
+                classify_api_error(status(code), "cf error", None, None),
+                ApiErrorKind::GatewayError { code },
+                "code {} should map to GatewayError",
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn classify_api_error_out_of_range_codes_fall_into_other() {
+        // 519 and 525 are just outside the 520..=524 gateway band; 418 is a teapot.
+        for code in [418u16, 519, 525] {
+            match classify_api_error(status(code), "weird", None, None) {
+                ApiErrorKind::Other { code: c, message } => {
+                    assert_eq!(c, code);
+                    assert_eq!(message, "weird");
+                }
+                other => panic!("code {} expected Other, got {:?}", code, other),
+            }
+        }
+    }
+
+    #[test]
+    fn classify_api_error_404_without_model_is_other() {
+        match classify_api_error(status(404), "endpoint not found", None, None) {
+            ApiErrorKind::Other { code, message } => {
+                assert_eq!(code, 404);
+                assert_eq!(message, "endpoint not found");
+            }
+            other => panic!("expected Other, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_api_error_400_details_truncated_to_203_chars() {
+        // truncate_message keeps `max_len` bytes (200) then appends "..." -> 203 chars.
+        let body = "x".repeat(300);
+        match classify_api_error(status(400), &body, None, None) {
+            ApiErrorKind::BadRequest { details } => {
+                assert_eq!(details.len(), 203);
+                assert!(details.ends_with("..."));
+            }
+            other => panic!("expected BadRequest, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_api_error_other_message_truncated_to_503_chars() {
+        // The catch-all `Other` arm truncates to 500 bytes + "..." -> 503 chars.
+        let body = "y".repeat(800);
+        match classify_api_error(status(418), &body, None, None) {
+            ApiErrorKind::Other { message, .. } => {
+                assert_eq!(message.len(), 503);
+                assert!(message.ends_with("..."));
+            }
+            other => panic!("expected Other, got {:?}", other),
+        }
+    }
+
+    // ===================================================================
+    // error/retry: 404 InvalidModel hint precedence + extract/suggest
+    // ===================================================================
+
+    #[test]
+    fn classify_api_error_404_model_hint_takes_precedence_over_text() {
+        // Both a hint and an extractable name are present; the hint wins.
+        let kind = classify_api_error(
+            status(404),
+            "unknown model 'gpt-4o-mini'",
+            None,
+            Some("override-model"),
+        );
+        match kind {
+            ApiErrorKind::InvalidModel { model, suggestion } => {
+                assert_eq!(model, "override-model");
+                // "gpt" appears in the (lowercased) error text -> gpt suggestion.
+                assert_eq!(suggestion, Some("gpt-5.5".to_string()));
+            }
+            other => panic!("expected InvalidModel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_api_error_404_extracts_model_from_text_when_no_hint() {
+        let kind = classify_api_error(
+            status(404),
+            "the model \"gemini-2.0-flash\" does not exist",
+            None,
+            None,
+        );
+        match kind {
+            ApiErrorKind::InvalidModel { model, suggestion } => {
+                assert_eq!(model, "gemini-2.0-flash");
+                assert_eq!(suggestion, Some("gemini-3.1-pro-preview".to_string()));
+            }
+            other => panic!("expected InvalidModel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_api_error_404_unknown_model_falls_back_to_unknown() {
+        // Mentions "model" so it's InvalidModel, but no hint and no extractable
+        // quoted token -> "unknown".
+        let kind = classify_api_error(status(404), "no such model available", None, None);
+        match kind {
+            ApiErrorKind::InvalidModel { model, suggestion } => {
+                assert_eq!(model, "unknown");
+                assert_eq!(suggestion, None);
+            }
+            other => panic!("expected InvalidModel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn extract_model_from_error_rejects_short_tokens() {
+        // A quoted token of length <= 2 is rejected (e.g. an empty pair or "ab").
+        assert_eq!(extract_model_from_error("no model named ''"), None);
+        assert_eq!(extract_model_from_error("model 'ab' missing"), None);
+        // Length 3 with valid chars passes.
+        assert_eq!(
+            extract_model_from_error("model 'abc' missing"),
+            Some("abc".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_model_from_error_single_quotes_and_invalid_chars() {
+        assert_eq!(
+            extract_model_from_error("missing model 'gpt-4o'"),
+            Some("gpt-4o".to_string())
+        );
+        // A quoted token containing spaces is not a valid model name.
+        assert_eq!(extract_model_from_error("the 'big model' is gone"), None);
+        // No quotes at all -> None.
+        assert_eq!(extract_model_from_error("model gpt-4o missing"), None);
+    }
+
+    #[test]
+    fn suggest_model_matches_provider_keywords() {
+        assert_eq!(
+            suggest_model("sonnet is down"),
+            Some("claude-sonnet-4-6".to_string())
+        );
+        assert_eq!(
+            suggest_model("claude unavailable"),
+            Some("claude-sonnet-4-6".to_string())
+        );
+        assert_eq!(suggest_model("gpt is gone"), Some("gpt-5.5".to_string()));
+        assert_eq!(
+            suggest_model("gemini missing"),
+            Some("gemini-3.1-pro-preview".to_string())
+        );
+        assert_eq!(suggest_model("totally unknown provider"), None);
+    }
+
+    // ===================================================================
+    // error/retry: parse_retry_after
+    // ===================================================================
+
+    #[test]
+    fn parse_retry_after_integer_seconds() {
+        assert_eq!(parse_retry_after("5"), Some(Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn parse_retry_after_zero() {
+        assert_eq!(parse_retry_after("0"), Some(Duration::from_secs(0)));
+    }
+
+    #[test]
+    fn parse_retry_after_http_date_returns_none() {
+        // HTTP-date format is not parsed (only integer seconds are supported).
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT"), None);
+    }
+
+    #[test]
+    fn parse_retry_after_empty_returns_none() {
+        assert_eq!(parse_retry_after(""), None);
+    }
+
+    #[test]
+    fn parse_retry_after_negative_returns_none() {
+        // u64 parse fails for negatives.
+        assert_eq!(parse_retry_after("-1"), None);
+    }
+
+    #[test]
+    fn parse_retry_after_float_returns_none() {
+        // u64 parse fails for floats.
+        assert_eq!(parse_retry_after("1.5"), None);
+    }
+
+    // ===================================================================
+    // error/retry: retry_delay / is_retryable matrix
+    // ===================================================================
+
+    #[test]
+    fn is_retryable_matrix() {
+        assert!(ApiErrorKind::RateLimited { retry_after: None }.is_retryable());
+        assert!(ApiErrorKind::ServiceUnavailable.is_retryable());
+        assert!(ApiErrorKind::GatewayError { code: 521 }.is_retryable());
+        assert!(ApiErrorKind::ServerError { code: 500 }.is_retryable());
+
+        assert!(!ApiErrorKind::AuthenticationFailed.is_retryable());
+        assert!(!ApiErrorKind::PermissionDenied.is_retryable());
+        assert!(!ApiErrorKind::RequestTooLarge.is_retryable());
+        assert!(
+            !ApiErrorKind::BadRequest {
+                details: "x".into()
+            }
+            .is_retryable()
+        );
+        assert!(
+            !ApiErrorKind::InvalidModel {
+                model: "m".into(),
+                suggestion: None
+            }
+            .is_retryable()
+        );
+        assert!(
+            !ApiErrorKind::Other {
+                code: 418,
+                message: "teapot".into()
+            }
+            .is_retryable()
+        );
+        assert!(
+            !ApiErrorKind::UnexpectedResponse {
+                details: "x".into()
+            }
+            .is_retryable()
+        );
+    }
+
+    #[test]
+    fn retry_delay_exact_default_durations() {
+        assert_eq!(
+            ApiErrorKind::RateLimited { retry_after: None }.retry_delay(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(
+            ApiErrorKind::RateLimited {
+                retry_after: Some(Duration::from_secs(30))
+            }
+            .retry_delay(),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(
+            ApiErrorKind::ServiceUnavailable.retry_delay(),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            ApiErrorKind::GatewayError { code: 521 }.retry_delay(),
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(
+            ApiErrorKind::ServerError { code: 500 }.retry_delay(),
+            Some(Duration::from_secs(2))
+        );
+    }
+
+    #[test]
+    fn retry_delay_none_for_non_retryable() {
+        assert_eq!(ApiErrorKind::AuthenticationFailed.retry_delay(), None);
+        assert_eq!(
+            ApiErrorKind::Other {
+                code: 418,
+                message: "teapot".into()
+            }
+            .retry_delay(),
+            None
+        );
+        // RStructor-level: ValidationError and Unsupported are never retryable.
+        assert_eq!(
+            RStructorError::ValidationError("bad".into()).retry_delay(),
+            None
+        );
+        assert!(!RStructorError::Unsupported("nope".into()).is_retryable());
+        assert_eq!(
+            RStructorError::Unsupported("nope".into()).retry_delay(),
+            None
+        );
+    }
+
+    // ===================================================================
+    // error/retry: generate_with_retry_with_initial_messages loop behavior
+    // ===================================================================
+
+    #[tokio::test]
+    async fn retry_loop_exhaustion_returns_last_error() {
+        // Two failing attempts (Some(1) -> max_attempts == 2). Each returns a
+        // distinct ValidationError WITH a ValidationFailureContext, so the loop
+        // reasks and runs again. On the final attempt it still fails, and the
+        // result must equal the LAST error; the closure is invoked exactly twice.
+        let mut attempts = 0usize;
+        let result = generate_with_retry_with_initial_messages::<_, _, String>(
+            |_messages: Vec<ChatMessage>| {
+                attempts += 1;
+                async move {
+                    Err((
+                        RStructorError::ValidationError(format!("error #{}", attempts)),
+                        Some(ValidationFailureContext::new(
+                            format!("context #{}", attempts),
+                            "{\"partial\":true}",
+                        )),
+                    ))
+                }
+            },
+            vec![ChatMessage::user("hi")],
+            Some(1),
+        )
+        .await;
+
+        assert_eq!(attempts, 2);
+        match result {
+            Err(RStructorError::ValidationError(msg)) => assert_eq!(msg, "error #2"),
+            other => panic!("expected last ValidationError, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_loop_retryable_then_exhaustion_returns_last_retryable() {
+        // Both attempts return a retryable RateLimited error with retry_after=0
+        // (so the sleep is a no-op). Some(1) -> exactly 2 attempts, final result
+        // is the retryable error from the last attempt.
+        let mut attempts = 0usize;
+        let result = generate_with_retry_with_initial_messages::<_, _, String>(
+            |_messages: Vec<ChatMessage>| {
+                attempts += 1;
+                async move {
+                    Err((
+                        RStructorError::api_error(
+                            "TestProvider",
+                            ApiErrorKind::RateLimited {
+                                retry_after: Some(Duration::from_secs(0)),
+                            },
+                        ),
+                        None,
+                    ))
+                }
+            },
+            vec![ChatMessage::user("hi")],
+            Some(1),
+        )
+        .await;
+
+        assert_eq!(attempts, 2);
+        match result {
+            Err(RStructorError::ApiError { kind, .. }) => assert_eq!(
+                kind,
+                ApiErrorKind::RateLimited {
+                    retry_after: Some(Duration::from_secs(0))
+                }
+            ),
+            other => panic!("expected RateLimited error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_loop_mixed_retryable_validation_then_success() {
+        // Some(2) -> max_attempts == 3.
+        //   attempt 0: retryable RateLimited{0}  -> NO history change, continue
+        //   attempt 1: ValidationError + context -> appends assistant + user, continue
+        //   attempt 2: Ok                        -> success
+        // Asserts attempt count == 3 and that on the final attempt the message
+        // history is [user, assistant, user] (the 429 added nothing; validation
+        // appended exactly two messages).
+        let mut attempts = 0usize;
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                attempts += 1;
+                async move {
+                    match attempts {
+                        1 => Err((
+                            RStructorError::api_error(
+                                "TestProvider",
+                                ApiErrorKind::RateLimited {
+                                    retry_after: Some(Duration::from_secs(0)),
+                                },
+                            ),
+                            None,
+                        )),
+                        2 => {
+                            // 429 must not have grown the history.
+                            assert_eq!(
+                                messages.len(),
+                                1,
+                                "retryable error should not modify conversation history"
+                            );
+                            assert_eq!(messages[0].role, crate::backend::ChatRole::User);
+                            Err((
+                                RStructorError::ValidationError("missing field".to_string()),
+                                Some(ValidationFailureContext::new(
+                                    "missing required field: name",
+                                    "{\"partial\":true}",
+                                )),
+                            ))
+                        }
+                        _ => {
+                            // Validation reask appended exactly two messages.
+                            assert_eq!(messages.len(), 3);
+                            assert_eq!(messages[0].role, crate::backend::ChatRole::User);
+                            assert_eq!(messages[1].role, crate::backend::ChatRole::Assistant);
+                            assert_eq!(messages[1].content, "{\"partial\":true}");
+                            assert_eq!(messages[2].role, crate::backend::ChatRole::User);
+                            Ok(MaterializeInternalOutput::new(
+                                "done".to_string(),
+                                "{\"ok\":true}".to_string(),
+                                None,
+                            ))
+                        }
+                    }
+                }
+            },
+            vec![ChatMessage::user("hi")],
+            Some(2),
+        )
+        .await
+        .expect("third attempt should succeed");
+
+        assert_eq!(attempts, 3);
+        assert_eq!(output.data, "done");
+    }
+
+    // ===================================================================
+    // strict/gemini: $ref inlining + depth limit + tuple/strict combos
+    // ===================================================================
+
+    #[test]
+    fn gemini_ref_inlining_resolves_defs() {
+        let mut schema = serde_json::json!({
+            "$ref": "#/$defs/Item",
+            "$defs": {
+                "Item": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"]
+                }
+            }
+        });
+        strip_gemini_unsupported_keywords(&mut schema);
+
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["name"]["type"], "string");
+        assert!(schema.get("$ref").is_none(), "$ref should be inlined");
+        assert!(schema.get("$defs").is_none(), "$defs should be removed");
+    }
+
+    #[test]
+    fn gemini_ref_inlining_resolves_definitions_variant() {
+        // The legacy `#/definitions/` prefix is also supported.
+        let mut schema = serde_json::json!({
+            "$ref": "#/definitions/Item",
+            "definitions": {
+                "Item": {
+                    "type": "object",
+                    "properties": { "id": { "type": "integer" } },
+                    "required": ["id"]
+                }
+            }
+        });
+        strip_gemini_unsupported_keywords(&mut schema);
+
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["id"]["type"], "integer");
+        assert!(schema.get("$ref").is_none());
+        assert!(schema.get("definitions").is_none());
+    }
+
+    #[test]
+    fn gemini_recursive_ref_inlining_is_depth_limited() {
+        // A self-referential Node schema. Inlining is depth-limited (depth 3 from
+        // the root), and no `$ref` survives anywhere after stripping. The full
+        // public pipeline does NOT emit the "depth limit reached" placeholder for
+        // an object whose self-reference lives in a `child` *property* (the
+        // placeholder branch only fires for a bare `{$ref}` schema at depth 0 —
+        // see `inline_refs_recursive_depth_zero_emits_placeholder`). Here the
+        // innermost `child` is left as an empty object once the dangling $ref is
+        // stripped. This pins the observable behavior of the public path.
+        let mut schema = serde_json::json!({
+            "$ref": "#/$defs/Node",
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": { "type": "integer" },
+                        "child": { "$ref": "#/$defs/Node" }
+                    },
+                    "required": ["value"]
+                }
+            }
+        });
+        strip_gemini_unsupported_keywords(&mut schema);
+
+        // No $ref or $defs should survive anywhere in the serialized schema.
+        let serialized = serde_json::to_string(&schema).unwrap();
+        assert!(
+            !serialized.contains("$ref"),
+            "no $ref should remain after depth-limited inlining: {}",
+            serialized
+        );
+        assert!(!serialized.contains("$defs"));
+
+        // Root is the inlined Node.
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["value"]["type"], "integer");
+
+        // Walk the child chain (each level is `properties.child`): it terminates
+        // after a finite number of levels in an empty object (the stripped
+        // innermost self-reference).
+        let mut node = &schema;
+        let mut depth = 0;
+        while let Some(child) = node.get("properties").and_then(|p| p.get("child")) {
+            depth += 1;
+            if child.as_object().map(|o| o.is_empty()).unwrap_or(false) {
+                // Reached the stripped innermost self-reference.
+                break;
+            }
+            node = child;
+            assert!(depth < 10, "child chain should be depth-limited");
+        }
+        assert!(depth >= 1, "expected at least one inlined child level");
+    }
+
+    #[test]
+    fn inline_refs_recursive_depth_zero_emits_placeholder() {
+        // Directly exercise the depth-limit placeholder branch: a bare `{$ref}`
+        // schema processed at depth 0 is replaced with a placeholder object
+        // carrying the "depth limit reached" description.
+        let defs = serde_json::json!({
+            "Node": {
+                "type": "object",
+                "properties": { "value": { "type": "integer" } }
+            }
+        });
+        let mut schema = serde_json::json!({ "$ref": "#/$defs/Node" });
+        inline_refs_recursive(&mut schema, &defs, 0);
+
+        assert_eq!(schema["type"], "object");
+        assert_eq!(
+            schema["description"],
+            "Recursive reference (depth limit reached)"
+        );
+        assert!(schema.get("$ref").is_none());
+    }
+
+    #[test]
+    fn gemini_tuple_same_type_collapses_to_single_items() {
+        // prefixItems with two identical integer schemas -> dedup'd to a single
+        // `items` schema; prefixItems / minItems / maxItems are removed.
+        let mut schema = serde_json::json!({
+            "type": "array",
+            "prefixItems": [
+                { "type": "integer" },
+                { "type": "integer" }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+
+        assert_eq!(schema["items"]["type"], "integer");
+        assert!(schema.get("prefixItems").is_none());
+        assert!(schema.get("minItems").is_none());
+        assert!(schema.get("maxItems").is_none());
+        assert!(
+            schema["description"]
+                .as_str()
+                .unwrap()
+                .contains("2 elements")
+        );
+    }
+
+    #[test]
+    fn gemini_tuple_mixed_types_uses_anyof() {
+        // prefixItems with three distinct types -> items.anyOf of length 3.
+        let mut schema = serde_json::json!({
+            "type": "array",
+            "prefixItems": [
+                { "type": "integer" },
+                { "type": "string" },
+                { "type": "boolean" }
+            ],
+            "minItems": 3,
+            "maxItems": 3
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+
+        let any_of = schema["items"]["anyOf"]
+            .as_array()
+            .expect("items.anyOf should be an array");
+        assert_eq!(any_of.len(), 3);
+        assert_eq!(any_of[0]["type"], "integer");
+        assert_eq!(any_of[1]["type"], "string");
+        assert_eq!(any_of[2]["type"], "boolean");
+        assert!(schema.get("prefixItems").is_none());
+    }
+
+    #[test]
+    fn gemini_tuple_dedup_only_adjacent_duplicates() {
+        // dedup() only removes ADJACENT duplicates, so [int, string, int] keeps
+        // all three (the two ints are not adjacent).
+        let mut schema = serde_json::json!({
+            "type": "array",
+            "prefixItems": [
+                { "type": "integer" },
+                { "type": "string" },
+                { "type": "integer" }
+            ]
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+
+        let any_of = schema["items"]["anyOf"]
+            .as_array()
+            .expect("items.anyOf should be an array");
+        assert_eq!(any_of.len(), 3);
+    }
+
+    #[test]
+    fn strict_then_gemini_combination_strips_added_props_keeps_required() {
+        // First run strict mode (adds additionalProperties:false + required at
+        // every object level), then run gemini stripping (removes the boolean
+        // additionalProperties but leaves `required` intact at both levels).
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "outer": { "type": "string" },
+                "nested": {
+                    "type": "object",
+                    "properties": {
+                        "inner": { "type": "string" }
+                    }
+                }
+            }
+        });
+
+        add_additional_properties_false(&mut schema);
+        // Strict added additionalProperties:false at both levels.
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert_eq!(
+            schema["properties"]["nested"]["additionalProperties"],
+            serde_json::json!(false)
+        );
+
+        strip_gemini_unsupported_keywords(&mut schema);
+
+        // Boolean additionalProperties stripped at both levels.
+        assert!(schema.get("additionalProperties").is_none());
+        assert!(
+            schema["properties"]["nested"]
+                .get("additionalProperties")
+                .is_none()
+        );
+
+        // required survives at both levels (strict populated it from properties).
+        let top_required = schema["required"].as_array().expect("top required");
+        assert!(top_required.contains(&serde_json::json!("outer")));
+        assert!(top_required.contains(&serde_json::json!("nested")));
+        let nested_required = schema["properties"]["nested"]["required"]
+            .as_array()
+            .expect("nested required");
+        assert!(nested_required.contains(&serde_json::json!("inner")));
+    }
+
+    #[test]
+    fn gemini_map_value_with_nested_keywords_is_recleaned() {
+        // A map (additionalProperties object) whose value schema itself carries
+        // unsupported keywords (title/examples). After the map placeholder keys
+        // are synthesized, the value schemas must be re-cleaned.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "title": "Inner",
+                "examples": [{ "a": 1 }],
+                "properties": {
+                    "a": { "type": "integer" }
+                }
+            },
+            "x-enum-keys": ["alpha"]
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+
+        let placeholder = &schema["properties"]["alpha"];
+        assert_eq!(placeholder["type"], "object");
+        assert!(
+            placeholder.get("title").is_none(),
+            "nested title should be re-cleaned"
+        );
+        assert!(
+            placeholder.get("examples").is_none(),
+            "nested examples should be re-cleaned"
+        );
+        assert_eq!(placeholder["properties"]["a"]["type"], "integer");
+        assert!(schema.get("x-enum-keys").is_none());
+    }
+
+    #[test]
+    fn gemini_strict_empty_properties_no_required_added() {
+        // Strict mode on an object with empty `properties` adds
+        // additionalProperties:false but NOT a `required` key (no keys to list).
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {}
+        });
+        add_additional_properties_false(&mut schema);
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert!(
+            schema.get("required").is_none(),
+            "empty properties must not produce a required array"
+        );
+    }
+
+    #[test]
+    fn gemini_strips_allof_member_keywords() {
+        // title/examples inside allOf members are recursively stripped.
+        let mut schema = serde_json::json!({
+            "allOf": [
+                {
+                    "type": "object",
+                    "title": "Part",
+                    "examples": [{ "x": 1 }],
+                    "properties": { "x": { "type": "integer" } }
+                }
+            ]
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+        let member = &schema["allOf"][0];
+        assert!(member.get("title").is_none());
+        assert!(member.get("examples").is_none());
+        assert_eq!(member["properties"]["x"]["type"], "integer");
+    }
+
+    #[test]
+    fn gemini_orphan_ref_without_defs_is_stripped() {
+        // A $ref with no matching $defs cannot be resolved, but the dangling
+        // $ref keyword is removed during stripping.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "x": { "$ref": "#/$defs/Missing" }
+            }
+        });
+        strip_gemini_unsupported_keywords(&mut schema);
+        assert!(
+            schema["properties"]["x"].get("$ref").is_none(),
+            "orphan $ref should be stripped"
+        );
+    }
+
+    #[test]
+    fn gemini_strips_default_and_id() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "$id": "https://example.com/schema",
+            "default": { "name": "x" },
+            "properties": {
+                "name": { "type": "string", "default": "anon" }
+            }
+        });
+        strip_gemini_unsupported_keywords(&mut schema);
+        assert!(schema.get("$id").is_none(), "$id should be stripped");
+        assert!(
+            schema.get("default").is_none(),
+            "default should be stripped"
+        );
+        assert!(
+            schema["properties"]["name"].get("default").is_none(),
+            "nested default should be stripped"
+        );
+    }
+
+    #[test]
+    fn gemini_map_additional_properties_true_no_placeholders() {
+        // additionalProperties: true (boolean) is simply removed; no placeholder
+        // properties are synthesized.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "additionalProperties": true
+        });
+        strip_gemini_unsupported_keywords_recursive(&mut schema);
+        assert!(schema.get("additionalProperties").is_none());
+        assert!(
+            schema.get("properties").is_none(),
+            "boolean additionalProperties should not synthesize placeholder properties"
+        );
+    }
+
+    // ===================================================================
+    // enums-tagged: transform_internally_to_adjacently_tagged and friends
+    // ===================================================================
+
+    fn success_failure_info() -> AdjacentlyTaggedEnumInfo {
+        AdjacentlyTaggedEnumInfo {
+            tag_key: "status".to_string(),
+            content_key: "data".to_string(),
+            tag_values: vec!["Success".to_string(), "Failure".to_string()],
+        }
+    }
+
+    #[test]
+    fn transform_internal_to_adjacent_wraps_data_fields() {
+        // A matching tag value -> non-tag fields are moved under the content key.
+        let info = success_failure_info();
+        let mut json = serde_json::json!({
+            "status": "Success",
+            "output": "x",
+            "tokens_used": 3
+        });
+        transform_internally_to_adjacently_tagged(&mut json, &info);
+
+        assert_eq!(json["status"], "Success");
+        assert_eq!(json["data"]["output"], "x");
+        assert_eq!(json["data"]["tokens_used"], 3);
+        // The original top-level fields were moved, not left behind.
+        assert!(json.get("output").is_none());
+        assert!(json.get("tokens_used").is_none());
+    }
+
+    #[test]
+    fn transform_internal_to_adjacent_unit_variant_unchanged() {
+        // A tag-only object (matching tag value) gets no `data` key because there
+        // are no non-tag fields to move.
+        let info = AdjacentlyTaggedEnumInfo {
+            tag_key: "status".to_string(),
+            content_key: "data".to_string(),
+            tag_values: vec!["Pending".to_string(), "Success".to_string()],
+        };
+        let mut json = serde_json::json!({ "status": "Pending" });
+        transform_internally_to_adjacently_tagged(&mut json, &info);
+
+        assert_eq!(json, serde_json::json!({ "status": "Pending" }));
+        assert!(json.get("data").is_none());
+    }
+
+    #[test]
+    fn transform_internal_to_adjacent_non_matching_tag_descends() {
+        // A "status" whose value isn't in tag_values is NOT treated as an enum
+        // instance; the transform descends into nested values instead.
+        let info = success_failure_info();
+        let mut json = serde_json::json!({
+            "status": "Other",
+            "inner": { "status": "Success", "output": "y" }
+        });
+        transform_internally_to_adjacently_tagged(&mut json, &info);
+
+        // Outer untouched (no data key, fields intact).
+        assert_eq!(json["status"], "Other");
+        assert!(json.get("data").is_none());
+        // Inner matching object wrapped.
+        assert_eq!(json["inner"]["status"], "Success");
+        assert_eq!(json["inner"]["data"]["output"], "y");
+    }
+
+    #[test]
+    fn transform_internal_to_adjacent_recurses_into_arrays() {
+        // Each element of an array of enum instances is wrapped independently.
+        let info = success_failure_info();
+        let mut json = serde_json::json!({
+            "steps": [
+                { "status": "Success", "output": "a" },
+                { "status": "Failure", "reason": "b" }
+            ]
+        });
+        transform_internally_to_adjacently_tagged(&mut json, &info);
+
+        assert_eq!(json["steps"][0]["status"], "Success");
+        assert_eq!(json["steps"][0]["data"]["output"], "a");
+        assert_eq!(json["steps"][1]["status"], "Failure");
+        assert_eq!(json["steps"][1]["data"]["reason"], "b");
+    }
+
+    #[test]
+    fn transform_internal_to_adjacent_leaves_outer_wrapper_untouched() {
+        // The outer wrapper object is not an enum instance, but its nested enum
+        // instance is wrapped.
+        let info = success_failure_info();
+        let mut json = serde_json::json!({
+            "wrapper": { "status": "Success", "output": "a" }
+        });
+        transform_internally_to_adjacently_tagged(&mut json, &info);
+
+        // Outer wrapper key still present, not converted to a `data` block.
+        assert!(json["wrapper"].is_object());
+        assert!(json.get("data").is_none());
+        assert_eq!(json["wrapper"]["status"], "Success");
+        assert_eq!(json["wrapper"]["data"]["output"], "a");
+    }
+
+    #[test]
+    fn extract_adjacently_tagged_info_excludes_primitive_content_variants() {
+        // detect_adjacently_tagged_variant only recognises content fields that are
+        // OBJECT types with `properties`. A variant whose content is a primitive
+        // (integer) is therefore NOT detected, so its tag value is excluded.
+        let schema = serde_json::json!({
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": { "type": "string", "enum": ["WithObject"] },
+                        "data": {
+                            "type": "object",
+                            "properties": { "n": { "type": "integer" } },
+                            "required": ["n"]
+                        }
+                    },
+                    "required": ["kind", "data"]
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "kind": { "type": "string", "enum": ["WithPrimitive"] },
+                        "data": { "type": "integer" }
+                    },
+                    "required": ["kind", "data"]
+                }
+            ]
+        });
+
+        let info =
+            extract_adjacently_tagged_info(&schema).expect("object variant should be detected");
+        assert_eq!(info.tag_key, "kind");
+        assert_eq!(info.content_key, "data");
+        // Only the object-content variant is captured; the primitive one is dropped.
+        assert!(info.tag_values.contains(&"WithObject".to_string()));
+        assert!(
+            !info.tag_values.contains(&"WithPrimitive".to_string()),
+            "primitive-content variant's tag value must be excluded"
+        );
+    }
+
+    #[test]
+    fn normalize_adjacently_tagged_flattens_struct_and_leaves_unit_unchanged() {
+        // A mix of an adjacently tagged struct variant and a unit variant
+        // (single property + single required). The struct variant is flattened
+        // (content fields hoisted, content key removed); the unit variant is
+        // left as-is.
+        let mut variants = vec![
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "enum": ["Full"] },
+                    "data": {
+                        "type": "object",
+                        "properties": { "a": { "type": "integer" } },
+                        "required": ["a"]
+                    }
+                },
+                "required": ["kind", "data"]
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "enum": ["Empty"] }
+                },
+                "required": ["kind"]
+            }),
+        ];
+
+        normalize_adjacently_tagged_variants(&mut variants);
+
+        // Struct variant: `data` removed, `a` flattened beside the tag.
+        let full = &variants[0];
+        assert!(full["properties"].get("data").is_none());
+        assert_eq!(full["properties"]["a"]["type"], "integer");
+        assert!(
+            full["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("a"))
+        );
+        assert!(
+            !full["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("data"))
+        );
+
+        // Unit variant untouched.
+        let empty = &variants[1];
+        assert_eq!(empty["properties"]["kind"]["enum"][0], "Empty");
+        assert!(empty["properties"].get("data").is_none());
+    }
+
+    #[test]
+    fn normalize_adjacently_tagged_bails_out_on_non_tagged_variants() {
+        // If the variants don't all match the adjacently tagged pattern (and the
+        // odd one out isn't a valid unit variant), nothing is transformed.
+        let original = vec![
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "enum": ["Full"] },
+                    "data": {
+                        "type": "object",
+                        "properties": { "a": { "type": "integer" } },
+                        "required": ["a"]
+                    }
+                },
+                "required": ["kind", "data"]
+            }),
+            // Not adjacently tagged: two arbitrary required fields, no enum tag.
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "x": { "type": "string" },
+                    "y": { "type": "integer" }
+                },
+                "required": ["x", "y"]
+            }),
+        ];
+
+        let mut variants = original.clone();
+        normalize_adjacently_tagged_variants(&mut variants);
+
+        // No transformation: the first variant still has its `data` content key.
+        assert_eq!(variants, original);
+        assert!(variants[0]["properties"].get("data").is_some());
+    }
+
+    // ===================================================================
+    // provider: ResponseFormat::json_schema serialization
+    // ===================================================================
+
+    #[test]
+    fn response_format_json_schema_serialization_omits_none_description() {
+        let rf = ResponseFormat::json_schema(
+            "Movie".to_string(),
+            serde_json::json!({ "type": "object" }),
+            None,
+        );
+        let value = serde_json::to_value(&rf).expect("serialize ResponseFormat");
+
+        assert_eq!(value["type"], "json_schema");
+        assert_eq!(value["json_schema"]["name"], "Movie");
+        assert_eq!(value["json_schema"]["strict"], serde_json::json!(true));
+        assert_eq!(value["json_schema"]["schema"]["type"], "object");
+        // description is None -> key omitted entirely.
+        assert!(
+            value["json_schema"].get("description").is_none(),
+            "description should be omitted when None"
+        );
+    }
+
+    #[test]
+    fn response_format_json_schema_serialization_includes_some_description() {
+        let rf = ResponseFormat::json_schema(
+            "Movie".to_string(),
+            serde_json::json!({ "type": "object" }),
+            Some("A movie".to_string()),
+        );
+        let value = serde_json::to_value(&rf).expect("serialize ResponseFormat");
+        assert_eq!(value["json_schema"]["description"], "A movie");
+        assert_eq!(value["json_schema"]["strict"], serde_json::json!(true));
+    }
 }
