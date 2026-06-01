@@ -109,6 +109,9 @@ chrono = { version = "0.4.44", features = ["serde"] }
 # Drives async tests/examples (e.g. for the `mock` feature, which does not itself
 # pull in tokio). Dev-only — excluded from the public dependency closure.
 tokio = { version = "1.52.1", features = ["rt", "macros", "rt-multi-thread"] }
+# Local HTTP mock server for testing the real provider clients (request building,
+# response parsing, retry/re-ask loop) offline, with no API key. Dev-only.
+mockito = "1.7.0"
 
 [workspace]
 members = ["rstructor_derive"]
