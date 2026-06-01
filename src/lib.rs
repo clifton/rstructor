@@ -41,6 +41,10 @@
 //!     Ok(())
 //! }
 //! ```
+// Let the crate refer to itself as `rstructor` so `#[derive(Instructor)]` — which
+// emits absolute `::rstructor::…` paths — works in the crate's own unit tests.
+extern crate self as rstructor;
+
 mod backend;
 pub mod error;
 #[cfg(feature = "logging")]
@@ -80,3 +84,5 @@ pub use backend::{
 pub use backend::{DynTool, FnTool, Tool, ToolRunner, Toolbox};
 #[cfg(feature = "streaming")]
 pub use backend::{ItemStream, ObjectStream, StreamedObject, TextStream};
+#[cfg(feature = "mock")]
+pub use backend::{MockClient, MockRequestView, MockResponse, RecordedRequest, RequestKind};

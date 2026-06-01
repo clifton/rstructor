@@ -178,8 +178,14 @@ impl Toolbox {
         self.tools.len()
     }
 
+    /// The names of the tools in this toolbox, in insertion order.
+    #[must_use]
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.iter().map(|t| t.name()).collect()
+    }
+
     /// Find a tool by name.
-    fn get(&self, name: &str) -> Option<&dyn DynTool> {
+    pub(crate) fn get(&self, name: &str) -> Option<&dyn DynTool> {
         self.tools
             .iter()
             .find(|t| t.name() == name)
