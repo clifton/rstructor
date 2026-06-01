@@ -27,11 +27,5 @@ jobs:
           shared-key: "ci-clippy"
           cache-on-failure: true
 
-      - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Run clippy (mock + streaming + tools)
-        run: cargo clippy --all-targets --features "mock,streaming,tools" -- -D warnings
-
-      - name: Run clippy (schema-only + mock)
-        run: cargo clippy --no-default-features --features "derive,mock" --lib --test mock_client_tests -- -D warnings
+      - name: Run clippy (all features)
+        run: cargo clippy --all-targets --all-features -- -D warnings
