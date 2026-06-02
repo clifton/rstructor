@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 use rstructor::{
     GenerateResult, Instructor, LLMClient, MaterializeResult, MediaFile, ModelInfo, RStructorError,
-    RequestExt, Result,
+    Result,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,9 @@ struct Dummy {
 
 /// A custom client with no media support: it relies entirely on the default
 /// `materialize_with_media` implementation provided by the `LLMClient` trait.
+///
+/// This must be a hand-rolled client, not `MockClient`: we're testing the trait
+/// *default*, which `MockClient` deliberately overrides (so media flows offline).
 struct NoMediaClient;
 
 #[async_trait]
@@ -82,119 +85,74 @@ async fn media_default_errors_instead_of_silently_dropping() {
     );
 }
 
-/// A client that echoes the prompt back, so tests can observe exactly what the
-/// `Request` builder sends to the underlying client (e.g. system prepending).
-struct EchoClient;
+/// Fluent `Request` builder routing, exercised with the first-party `MockClient`.
+///
+/// These assert *how the builder composes and dispatches* by reading back the
+/// recorded request (method kind, combined prompt, attached media), rather than
+/// hand-rolling an echo client. Requires the `mock` feature (CI runs all features).
+#[cfg(feature = "mock")]
+mod builder {
+    use super::{Dummy, MediaFile};
+    use rstructor::{MockClient, RequestExt, RequestKind};
 
-#[async_trait]
-impl LLMClient for EchoClient {
-    async fn materialize<T>(&self, prompt: &str) -> Result<T>
-    where
-        T: Instructor + DeserializeOwned + Send + 'static,
-    {
-        // Surface the received prompt through the error so the test can inspect it.
-        Err(RStructorError::ValidationError(prompt.to_string()))
+    #[tokio::test]
+    async fn generate_has_no_system_by_default() {
+        let client = MockClient::new().with_response("ok");
+        let out = client.request().generate("hello").await.unwrap();
+        assert_eq!(out, "ok");
+        // The underlying client received the prompt unchanged.
+        assert_eq!(client.last_request().unwrap().prompt, "hello");
     }
 
-    async fn materialize_with_metadata<T>(&self, prompt: &str) -> Result<MaterializeResult<T>>
-    where
-        T: Instructor + DeserializeOwned + Send + 'static,
-    {
-        Err(RStructorError::ValidationError(prompt.to_string()))
+    #[tokio::test]
+    async fn prepends_system_context() {
+        let client = MockClient::new().with_response("ok");
+        client.with_system("CTX").generate("hello").await.unwrap();
+        assert_eq!(client.last_request().unwrap().prompt, "CTX\n\nhello");
     }
 
-    async fn generate(&self, prompt: &str) -> Result<String> {
-        Ok(prompt.to_string())
+    #[tokio::test]
+    async fn materialize_routes_through_materialize_with_combined_prompt() {
+        let client = MockClient::new().with_response(r#"{"value":"x"}"#);
+        let _: Dummy = client
+            .with_system("CTX")
+            .materialize("hello")
+            .await
+            .unwrap();
+        let req = client.last_request().unwrap();
+        assert_eq!(req.kind, RequestKind::Materialize);
+        assert_eq!(req.prompt, "CTX\n\nhello");
     }
 
-    async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
-        Ok(GenerateResult {
-            text: prompt.to_string(),
-            usage: None,
-        })
+    #[tokio::test]
+    async fn media_routes_through_materialize_with_media() {
+        let client = MockClient::new().with_response(r#"{"value":"x"}"#);
+        let media = [MediaFile::new("https://example.com/cat.png", "image/png")];
+        let _: Dummy = client
+            .with_media(&media)
+            .materialize("describe")
+            .await
+            .unwrap();
+        let req = client.last_request().unwrap();
+        assert_eq!(req.kind, RequestKind::MaterializeWithMedia);
+        assert_eq!(req.prompt, "describe");
+        assert_eq!(req.media.len(), 1);
     }
 
-    fn from_env() -> Result<Self>
-    where
-        Self: Sized,
-    {
-        Ok(EchoClient)
+    #[cfg(feature = "streaming")]
+    #[tokio::test]
+    async fn generate_stream_prepends_system() {
+        use futures_util::StreamExt;
+        let client = MockClient::new().with_response("anything");
+        let _: Vec<String> = client
+            .with_system("CTX")
+            .generate_stream("hi")
+            .map(|c| c.unwrap())
+            .collect()
+            .await;
+        // The streaming terminal also prepends the system context before dispatch.
+        assert_eq!(client.last_request().unwrap().prompt, "CTX\n\nhi");
     }
-
-    async fn list_models(&self) -> Result<Vec<ModelInfo>> {
-        Ok(vec![])
-    }
-}
-
-#[tokio::test]
-async fn builder_generate_has_no_system_by_default() {
-    let client = EchoClient;
-    let out = client.request().generate("hello").await.unwrap();
-    assert_eq!(
-        out, "hello",
-        "no system context should pass the prompt as-is"
-    );
-}
-
-#[tokio::test]
-async fn builder_prepends_system_context() {
-    let client = EchoClient;
-    let out = client.with_system("CTX").generate("hello").await.unwrap();
-    assert_eq!(
-        out, "CTX\n\nhello",
-        "system context should be prepended to the prompt"
-    );
-}
-
-#[tokio::test]
-async fn builder_materialize_routes_through_materialize() {
-    let client = EchoClient;
-    // With no media, `materialize` is used and receives the combined prompt.
-    let result = client
-        .with_system("CTX")
-        .materialize::<Dummy>("hello")
-        .await;
-    assert!(
-        matches!(&result, Err(RStructorError::ValidationError(m)) if m == "CTX\n\nhello"),
-        "builder materialize should route through materialize with the combined prompt, got {result:?}"
-    );
-}
-
-#[tokio::test]
-async fn builder_with_media_routes_through_materialize_with_media() {
-    // `EchoClient` has no media support, so non-empty media must error loudly
-    // rather than silently dropping the attachment.
-    let client = EchoClient;
-    let media = [MediaFile::new("https://example.com/cat.png", "image/png")];
-    let result = client
-        .with_media(&media)
-        .materialize::<Dummy>("describe")
-        .await;
-    assert!(
-        matches!(result, Err(RStructorError::Unsupported(_))),
-        "builder media should route through materialize_with_media, got {result:?}"
-    );
-}
-
-#[cfg(feature = "streaming")]
-#[tokio::test]
-async fn builder_generate_stream_prepends_system() {
-    use futures_util::StreamExt;
-    // `EchoClient` uses the default `generate_stream`, which falls back to a single
-    // chunk from `generate` — enough to confirm the builder's stream terminal works
-    // and prepends the system context.
-    let client = EchoClient;
-    let chunks: Vec<String> = client
-        .with_system("CTX")
-        .generate_stream("hi")
-        .map(|c| c.unwrap())
-        .collect()
-        .await;
-    assert_eq!(
-        chunks.concat(),
-        "CTX\n\nhi",
-        "streaming terminal should prepend system context"
-    );
 }
 
 #[cfg(feature = "openai")]

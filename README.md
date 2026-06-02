@@ -456,6 +456,47 @@ let answer = client
 
 Works with all providers (OpenAI, Anthropic, Grok, Gemini). See `examples/tool_calling_example.rs`.
 
+## Testing (offline)
+
+Enable the `mock` feature to unit-test code that extracts structured data without any
+network or API key. `MockClient` implements `LLMClient`, so it drops into any
+`C: LLMClient` slot; scripted responses flow through the **real** deserialize +
+`validate()` path, so you can test schema/validation failures, not just happy paths.
+
+```toml
+[dev-dependencies]
+rstructor = { version = "0.3", features = ["mock"] }
+```
+
+```rust
+use rstructor::{Instructor, LLMClient, MockClient};
+use serde::{Deserialize, Serialize};
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Movie { title: String, year: u16 }
+
+// Your code under test is generic over the client:
+async fn extract<C: LLMClient + Sync>(client: &C) -> rstructor::Result<Movie> {
+    client.materialize("Describe Inception").await
+}
+
+#[tokio::test]
+async fn extracts_a_movie() {
+    let client = MockClient::new().with_response(r#"{"title": "Inception", "year": 2010}"#);
+    let movie = extract(&client).await.unwrap();
+    assert_eq!(movie.title, "Inception");
+    // Every call is recorded for assertions:
+    assert_eq!(client.last_request().unwrap().schema_name.as_deref(), Some("Movie"));
+}
+```
+
+Script multiple responses with `with_response`/`with_responses` (a FIFO queue), branch
+on the request with `with_responder`, simulate the validation re-ask loop with
+`with_retries`, attach token usage with `with_usage`, and assert on captured requests via
+`requests()` / `last_request()`. The `mock` feature pulls in no extra dependencies and
+works even in a schema-only build; streaming and tool-loop mocking light up when the
+`streaming` / `tools` features are also enabled. See `examples/mock_testing_example.rs`.
+
 ## Feature Flags
 
 ```toml
@@ -468,6 +509,7 @@ rstructor = { version = "0.3", features = ["openai", "anthropic", "grok", "gemin
 - `logging` — Tracing integration
 - `streaming` — Streaming via `generate_stream` / `materialize_iter` / `materialize_stream` (opt-in)
 - `tools` — Tool/function calling via `Toolbox` + `client.with_tools(..).run(..)` (opt-in)
+- `mock` — `MockClient` for offline unit testing (opt-in; see [Testing](#testing-offline))
 
 All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:
 

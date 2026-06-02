@@ -104,4 +104,148 @@ mod tests {
         assert_eq!(json["content"][0]["type"], "text");
         assert_eq!(json["content"][1]["type"], "image_url");
     }
+
+    /// Build a minimal request with all `Option` fields set to `None`.
+    fn request_with_none_options() -> OpenAICompatibleChatCompletionRequest {
+        OpenAICompatibleChatCompletionRequest {
+            model: "test-model".to_string(),
+            messages: vec![OpenAICompatibleChatMessage {
+                role: "user".to_string(),
+                content: OpenAICompatibleMessageContent::Text("hi".to_string()),
+            }],
+            response_format: None,
+            temperature: 0.0,
+            max_tokens: None,
+            reasoning_effort: None,
+        }
+    }
+
+    /// When `max_tokens` is `None`, the `max_tokens` key must be absent from the
+    /// serialized request body (`skip_serializing_if = "Option::is_none"`).
+    #[test]
+    fn test_request_omits_max_tokens_when_none() {
+        let req = request_with_none_options();
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        let obj = json.as_object().expect("request serializes to an object");
+        assert!(
+            !obj.contains_key("max_tokens"),
+            "max_tokens key must be omitted when None, got: {json}"
+        );
+    }
+
+    /// When `max_tokens` is `Some(1)`, the serialized request body must carry the
+    /// numeric value `1` under the `max_tokens` key.
+    #[test]
+    fn test_request_includes_max_tokens_when_some() {
+        let mut req = request_with_none_options();
+        req.max_tokens = Some(1);
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        assert_eq!(json["max_tokens"], serde_json::json!(1));
+    }
+
+    /// When `reasoning_effort` is `None`, the key must be absent from the
+    /// serialized request body.
+    #[test]
+    fn test_request_omits_reasoning_effort_when_none() {
+        let req = request_with_none_options();
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        let obj = json.as_object().expect("request serializes to an object");
+        assert!(
+            !obj.contains_key("reasoning_effort"),
+            "reasoning_effort key must be omitted when None, got: {json}"
+        );
+    }
+
+    /// When `reasoning_effort` is `Some(..)`, the serialized request body must
+    /// carry the string value under the `reasoning_effort` key.
+    #[test]
+    fn test_request_includes_reasoning_effort_when_some() {
+        let mut req = request_with_none_options();
+        req.reasoning_effort = Some("high".to_string());
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        assert_eq!(json["reasoning_effort"], serde_json::json!("high"));
+    }
+
+    /// When `response_format` is `None`, the key must be absent from the
+    /// serialized request body.
+    #[test]
+    fn test_request_omits_response_format_when_none() {
+        let req = request_with_none_options();
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        let obj = json.as_object().expect("request serializes to an object");
+        assert!(
+            !obj.contains_key("response_format"),
+            "response_format key must be omitted when None, got: {json}"
+        );
+    }
+
+    /// When `response_format` is `Some(..)`, the serialized request body must
+    /// carry the `response_format` object with its `type` discriminant.
+    #[test]
+    fn test_request_includes_response_format_when_some() {
+        let mut req = request_with_none_options();
+        req.response_format = Some(ResponseFormat::json_schema(
+            "Movie".to_string(),
+            serde_json::json!({"type": "object"}),
+            None,
+        ));
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        assert_eq!(json["response_format"]["type"], "json_schema");
+    }
+
+    /// Sanity check: the always-serialized fields (`model`, `messages`,
+    /// `temperature`) remain present even when every `Option` field is `None`.
+    #[test]
+    fn test_request_required_fields_present_with_all_none() {
+        let req = request_with_none_options();
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+        let obj = json.as_object().expect("request serializes to an object");
+
+        assert!(obj.contains_key("model"), "model must always be present");
+        assert!(
+            obj.contains_key("messages"),
+            "messages must always be present"
+        );
+        assert!(
+            obj.contains_key("temperature"),
+            "temperature must always be present"
+        );
+    }
+
+    /// `OpenAICompatibleUsageInfo::total_tokens` is `#[serde(default)]`, so a
+    /// response body that omits `total_tokens` must deserialize it to `0`.
+    #[test]
+    fn test_usage_info_total_tokens_defaults_to_zero_when_missing() {
+        let json = serde_json::json!({
+            "prompt_tokens": 3,
+            "completion_tokens": 5,
+        });
+        let usage: OpenAICompatibleUsageInfo =
+            serde_json::from_value(json).expect("deserialization should succeed");
+
+        assert_eq!(usage.prompt_tokens, 3);
+        assert_eq!(usage.completion_tokens, 5);
+        assert_eq!(usage.total_tokens, 0);
+    }
+
+    /// When `total_tokens` is present in the response body it must be preserved
+    /// (the `#[serde(default)]` only kicks in for the missing case).
+    #[test]
+    fn test_usage_info_total_tokens_preserved_when_present() {
+        let json = serde_json::json!({
+            "prompt_tokens": 3,
+            "completion_tokens": 5,
+            "total_tokens": 8,
+        });
+        let usage: OpenAICompatibleUsageInfo =
+            serde_json::from_value(json).expect("deserialization should succeed");
+
+        assert_eq!(usage.total_tokens, 8);
+    }
 }

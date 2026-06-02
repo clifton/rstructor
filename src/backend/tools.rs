@@ -178,8 +178,14 @@ impl Toolbox {
         self.tools.len()
     }
 
+    /// The names of the tools in this toolbox, in insertion order.
+    #[must_use]
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.iter().map(|t| t.name()).collect()
+    }
+
     /// Find a tool by name.
-    fn get(&self, name: &str) -> Option<&dyn DynTool> {
+    pub(crate) fn get(&self, name: &str) -> Option<&dyn DynTool> {
         self.tools
             .iter()
             .find(|t| t.name() == name)
@@ -590,4 +596,207 @@ pub trait ToolRunner {
         toolbox: &Toolbox,
         max_iterations: usize,
     ) -> Result<String>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+
+    /// Argument type for the test tool; its schema is derived via `Instructor`.
+    #[derive(crate::Instructor, Serialize, Deserialize)]
+    struct AddArgs {
+        #[llm(description = "First addend")]
+        a: i64,
+        #[llm(description = "Second addend")]
+        b: i64,
+    }
+
+    /// Build a simple `add` tool whose arguments derive `Instructor`.
+    fn add_tool() -> FnTool<AddArgs, impl Fn(AddArgs) -> std::future::Ready<Result<Value>>> {
+        FnTool::new("add", "Add two integers", |args: AddArgs| {
+            std::future::ready(Ok(json!({ "sum": args.a + args.b })))
+        })
+    }
+
+    /// A second, distinct tool so multi-tool ordering/lookup can be exercised.
+    fn echo_tool() -> FnTool<AddArgs, impl Fn(AddArgs) -> std::future::Ready<Result<Value>>> {
+        FnTool::new("echo", "Echo the first addend", |args: AddArgs| {
+            std::future::ready(Ok(json!({ "value": args.a })))
+        })
+    }
+
+    // ---- Toolbox add()/len()/is_empty() ----
+
+    #[test]
+    fn empty_toolbox_is_empty_and_len_zero() {
+        let toolbox = Toolbox::new();
+        assert!(toolbox.is_empty());
+        assert_eq!(toolbox.len(), 0);
+        assert!(toolbox.tool_names().is_empty());
+    }
+
+    #[test]
+    fn add_makes_toolbox_non_empty_and_increments_len() {
+        let mut toolbox = Toolbox::new();
+        toolbox.add(add_tool());
+        assert!(!toolbox.is_empty());
+        assert_eq!(toolbox.len(), 1);
+
+        toolbox.add(echo_tool());
+        assert_eq!(toolbox.len(), 2);
+    }
+
+    // ---- Toolbox::get() hit / miss / duplicate-first-wins ----
+
+    #[tokio::test]
+    async fn get_returns_matching_tool() {
+        let toolbox = Toolbox::new().with(add_tool());
+        let tool = toolbox.get("add").expect("add tool should be found");
+        assert_eq!(tool.name(), "add");
+        let result = tool.invoke_json(json!({ "a": 2, "b": 3 })).await.unwrap();
+        assert_eq!(result, json!({ "sum": 5 }));
+    }
+
+    #[test]
+    fn get_returns_none_for_missing_tool() {
+        let toolbox = Toolbox::new().with(add_tool());
+        assert!(toolbox.get("nonexistent").is_none());
+    }
+
+    #[tokio::test]
+    async fn get_with_duplicate_names_dispatches_to_first() {
+        // Two tools share the name "add"; the first inserted must win.
+        let first = FnTool::new("add", "first add", |args: AddArgs| {
+            std::future::ready(Ok(json!({ "which": 1, "sum": args.a + args.b })))
+        });
+        let second = FnTool::new("add", "second add", |args: AddArgs| {
+            std::future::ready(Ok(json!({ "which": 2, "sum": args.a + args.b })))
+        });
+        let toolbox = Toolbox::new().with(first).with(second);
+
+        assert_eq!(toolbox.len(), 2);
+        assert_eq!(toolbox.tool_names(), vec!["add", "add"]);
+
+        let tool = toolbox.get("add").expect("a tool named add should exist");
+        let result = tool.invoke_json(json!({ "a": 1, "b": 1 })).await.unwrap();
+        assert_eq!(result["which"], json!(1), "first-inserted tool must win");
+    }
+
+    // ---- tool_names() insertion order + mixed with()/add() ----
+
+    #[test]
+    fn tool_names_preserve_insertion_order_mixed_with_and_add() {
+        let mut toolbox = Toolbox::new()
+            .with(FnTool::new("first", "f", |args: AddArgs| {
+                std::future::ready(Ok(json!(args.a)))
+            }))
+            .with(FnTool::new("second", "s", |args: AddArgs| {
+                std::future::ready(Ok(json!(args.a)))
+            }));
+        toolbox.add(FnTool::new("third", "t", |args: AddArgs| {
+            std::future::ready(Ok(json!(args.a)))
+        }));
+
+        assert_eq!(toolbox.tool_names(), vec!["first", "second", "third"]);
+    }
+
+    // ---- openai_tools_json render shape ----
+
+    #[cfg(any(feature = "openai", feature = "grok"))]
+    #[test]
+    fn openai_tools_json_render_shape() {
+        let toolbox = Toolbox::new().with(add_tool());
+        let rendered = toolbox.openai_tools_json();
+        assert_eq!(rendered.len(), 1);
+
+        let entry = &rendered[0];
+        assert_eq!(entry["type"], "function");
+
+        let function = &entry["function"];
+        assert_eq!(function["name"], "add");
+        assert_eq!(function["description"], "Add two integers");
+
+        let params = &function["parameters"];
+        assert_eq!(params["type"], "object");
+        // Strict schema flips additionalProperties to false.
+        assert_eq!(params["additionalProperties"], json!(false));
+
+        let required = params["required"]
+            .as_array()
+            .expect("required should be an array");
+        assert!(required.contains(&json!("a")));
+        assert!(required.contains(&json!("b")));
+
+        // The argument properties are present under parameters.
+        assert!(params["properties"].get("a").is_some());
+        assert!(params["properties"].get("b").is_some());
+    }
+
+    // ---- anthropic_tools_json uses input_schema not parameters ----
+
+    #[cfg(feature = "anthropic")]
+    #[test]
+    fn anthropic_tools_json_uses_input_schema() {
+        let toolbox = Toolbox::new().with(add_tool());
+        let rendered = toolbox.anthropic_tools_json();
+        assert_eq!(rendered.len(), 1);
+
+        let entry = &rendered[0];
+        assert_eq!(entry["name"], "add");
+        assert_eq!(entry["description"], "Add two integers");
+
+        // Anthropic uses `input_schema`, never `parameters`.
+        assert!(
+            entry.get("input_schema").is_some(),
+            "input_schema must be present"
+        );
+        assert!(
+            entry.get("parameters").is_none(),
+            "parameters must be absent for Anthropic"
+        );
+
+        let input_schema = &entry["input_schema"];
+        assert_eq!(input_schema["type"], "object");
+        assert_eq!(input_schema["additionalProperties"], json!(false));
+    }
+
+    // ---- gemini_tools_json functionDeclarations wrapper + empty early-return ----
+
+    #[cfg(feature = "gemini")]
+    #[test]
+    fn gemini_tools_json_empty_returns_empty_vec() {
+        let toolbox = Toolbox::new();
+        assert!(toolbox.gemini_tools_json().is_empty());
+    }
+
+    #[cfg(feature = "gemini")]
+    #[test]
+    fn gemini_tools_json_wraps_declarations() {
+        let toolbox = Toolbox::new().with(add_tool());
+        let rendered = toolbox.gemini_tools_json();
+        // Populated toolbox yields a single wrapper object.
+        assert_eq!(rendered.len(), 1);
+
+        let declarations = rendered[0]["functionDeclarations"]
+            .as_array()
+            .expect("functionDeclarations should be an array");
+        assert_eq!(declarations.len(), 1);
+
+        let decl = &declarations[0];
+        assert_eq!(decl["name"], "add");
+        assert_eq!(decl["description"], "Add two integers");
+        assert_eq!(decl["parameters"]["type"], "object");
+
+        // Gemini schema strips examples/title.
+        assert!(
+            decl["parameters"].get("examples").is_none(),
+            "examples should be stripped from Gemini schema"
+        );
+        assert!(
+            decl["parameters"].get("title").is_none(),
+            "title should be stripped from Gemini schema"
+        );
+    }
 }

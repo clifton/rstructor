@@ -311,4 +311,407 @@ mod tests {
         assert_eq!(json["additionalProperties"]["type"], "array");
         assert_eq!(json["additionalProperties"]["items"]["type"], "string");
     }
+
+    // ========================================================================
+    // HashSet / BTreeSet schema (uniqueItems)
+    // ========================================================================
+
+    #[test]
+    fn test_hashset_schema() {
+        use std::collections::HashSet;
+        let json = <HashSet<String>>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["items"]["type"], "string");
+        assert_eq!(json["uniqueItems"], true);
+    }
+
+    #[test]
+    fn test_btreeset_schema() {
+        use std::collections::BTreeSet;
+        let json = <BTreeSet<i64>>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["items"]["type"], "integer");
+        assert_eq!(json["uniqueItems"], true);
+    }
+
+    // ========================================================================
+    // BTreeMap<String, V> schema
+    // ========================================================================
+
+    #[test]
+    fn test_btreemap_schema() {
+        use std::collections::BTreeMap;
+        let json = <BTreeMap<String, bool>>::schema().to_json();
+        assert_eq!(json["type"], "object");
+        assert_eq!(json["additionalProperties"]["type"], "boolean");
+    }
+
+    // ========================================================================
+    // Deeply-nested generic combinations
+    // ========================================================================
+
+    #[test]
+    fn test_nested_vec_option_schema() {
+        // Vec<Option<i32>>: Option is transparent, so items.type == integer
+        let json = <Vec<Option<i32>>>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["items"]["type"], "integer");
+    }
+
+    #[test]
+    fn test_nested_option_vec_box_schema() {
+        // Option<Vec<Box<i32>>>: Option transparent -> array; Box transparent -> integer items
+        let json = <Option<Vec<Box<i32>>>>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["items"]["type"], "integer");
+    }
+
+    #[test]
+    fn test_nested_hashset_vec_schema() {
+        use std::collections::HashSet;
+        // HashSet<Vec<i32>>: set -> uniqueItems array of arrays of integers
+        let json = <HashSet<Vec<i32>>>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["uniqueItems"], true);
+        assert_eq!(json["items"]["type"], "array");
+        assert_eq!(json["items"]["items"]["type"], "integer");
+    }
+
+    // ========================================================================
+    // Tuple arities 1 and 3..=12 (prefixItems / minItems / maxItems)
+    // ========================================================================
+
+    #[test]
+    fn test_tuple_arity_one_schema() {
+        let json = <(bool,)>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["minItems"], 1);
+        assert_eq!(json["maxItems"], 1);
+        assert_eq!(json["prefixItems"][0]["type"], "boolean");
+        assert_eq!(json["prefixItems"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_tuple_arity_three_schema() {
+        let json = <(i32, String, f64)>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["minItems"], 3);
+        assert_eq!(json["maxItems"], 3);
+        assert_eq!(json["prefixItems"][0]["type"], "integer");
+        assert_eq!(json["prefixItems"][1]["type"], "string");
+        assert_eq!(json["prefixItems"][2]["type"], "number");
+        assert_eq!(json["prefixItems"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_tuple_arity_twelve_schema() {
+        // Largest supported tuple arity.
+        type T12 = (i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, String, bool);
+        let json = <T12>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["minItems"], 12);
+        assert_eq!(json["maxItems"], 12);
+        let prefix = json["prefixItems"].as_array().unwrap();
+        assert_eq!(prefix.len(), 12);
+        assert_eq!(prefix[0]["type"], "integer");
+        assert_eq!(prefix[8]["type"], "number"); // f32
+        assert_eq!(prefix[10]["type"], "string"); // String
+        assert_eq!(prefix[11]["type"], "boolean"); // bool
+    }
+
+    // ========================================================================
+    // schema_name() for all collection impls + "Unknown" fallback
+    // ========================================================================
+
+    #[test]
+    fn test_schema_name_collections() {
+        use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+        assert_eq!(
+            <Vec<String>>::schema_name(),
+            Some("Vec<String>".to_string())
+        );
+        assert_eq!(
+            <HashMap<String, bool>>::schema_name(),
+            Some("HashMap<String, bool>".to_string())
+        );
+        assert_eq!(
+            <BTreeMap<String, i64>>::schema_name(),
+            Some("BTreeMap<String, i64>".to_string())
+        );
+        assert_eq!(
+            <HashSet<String>>::schema_name(),
+            Some("HashSet<String>".to_string())
+        );
+        assert_eq!(
+            <BTreeSet<i32>>::schema_name(),
+            Some("BTreeSet<i32>".to_string())
+        );
+        assert_eq!(
+            <(i32, String)>::schema_name(),
+            Some("(i32, String)".to_string())
+        );
+        assert_eq!(
+            <Option<String>>::schema_name(),
+            Some("Option<String>".to_string())
+        );
+    }
+
+    // A type whose `schema_name()` falls back to the default `None`, exercising
+    // the "Unknown" interpolation branch in the collection name formatters.
+    struct Anon;
+
+    impl SchemaType for Anon {
+        fn schema() -> Schema {
+            Schema::new(json!({"type": "object"}))
+        }
+        // schema_name() intentionally left as the trait default (None).
+    }
+
+    #[test]
+    fn test_schema_name_unknown_fallback() {
+        use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+        // Inner name is None -> formatted as "Unknown".
+        assert_eq!(<Vec<Anon>>::schema_name(), Some("Vec<Unknown>".to_string()));
+        assert_eq!(
+            <Option<Anon>>::schema_name(),
+            Some("Option<Unknown>".to_string())
+        );
+        assert_eq!(
+            <HashSet<Anon>>::schema_name(),
+            Some("HashSet<Unknown>".to_string())
+        );
+        assert_eq!(
+            <BTreeSet<Anon>>::schema_name(),
+            Some("BTreeSet<Unknown>".to_string())
+        );
+        assert_eq!(
+            <HashMap<String, Anon>>::schema_name(),
+            Some("HashMap<String, Unknown>".to_string())
+        );
+        assert_eq!(
+            <BTreeMap<String, Anon>>::schema_name(),
+            Some("BTreeMap<String, Unknown>".to_string())
+        );
+        // Tuple element name None -> "Unknown" inside the joined list.
+        assert_eq!(
+            <(i32, Anon)>::schema_name(),
+            Some("(i32, Unknown)".to_string())
+        );
+    }
+
+    // ========================================================================
+    // Option<T> transparency
+    // ========================================================================
+
+    #[test]
+    fn test_option_schema_transparency() {
+        // Option<T>::schema() must be exactly the inner type's schema:
+        // no anyOf, no "null" type wrapping.
+        let opt = <Option<String>>::schema().to_json();
+        let inner = String::schema().to_json();
+        assert_eq!(opt, inner);
+        assert_eq!(opt["type"], "string");
+        assert!(opt.get("anyOf").is_none());
+        // The "null" string must not appear anywhere in the schema.
+        assert!(!opt.to_string().contains("null"));
+    }
+
+    // ========================================================================
+    // Box<T> non-String inner + name passthrough
+    // ========================================================================
+
+    #[test]
+    fn test_box_non_string_inner_schema() {
+        // Box<Vec<i32>>::schema() == Vec<i32>::schema() (array of integers).
+        let json = <Box<Vec<i32>>>::schema().to_json();
+        assert_eq!(json["type"], "array");
+        assert_eq!(json["items"]["type"], "integer");
+        // Box<i32> -> plain integer.
+        let int_json = <Box<i32>>::schema().to_json();
+        assert_eq!(int_json["type"], "integer");
+    }
+
+    #[test]
+    fn test_box_name_passthrough() {
+        // Box is invisible in schema_name: it forwards the inner name verbatim.
+        assert_eq!(<Box<Vec<i32>>>::schema_name(), Some("Vec<i32>".to_string()));
+        assert_eq!(<Box<String>>::schema_name(), Some("String".to_string()));
+        assert_eq!(<Box<i32>>::schema_name(), Some("i32".to_string()));
+    }
+
+    // ========================================================================
+    // CustomTypeSchema default-None branches
+    // ========================================================================
+
+    // Minimal impl: only schema_type overridden, every other method left as the
+    // trait default (None). json_schema() must emit only {"type": ...}.
+    struct MinimalCustom;
+
+    impl crate::schema::CustomTypeSchema for MinimalCustom {
+        fn schema_type() -> &'static str {
+            "string"
+        }
+    }
+
+    #[test]
+    fn test_custom_type_schema_minimal_defaults() {
+        use crate::schema::CustomTypeSchema;
+        let json = MinimalCustom::json_schema();
+        let obj = json.as_object().unwrap();
+        assert_eq!(obj.len(), 1);
+        assert_eq!(json["type"], "string");
+        assert!(json.get("format").is_none());
+        assert!(json.get("description").is_none());
+        // Default accessor methods all return None.
+        assert_eq!(MinimalCustom::schema_format(), None);
+        assert_eq!(MinimalCustom::schema_description(), None);
+        assert!(MinimalCustom::schema_additional_properties().is_none());
+    }
+
+    // Fully-populated impl: every optional method overridden so json_schema()
+    // takes each "Some" branch, including additional-properties merging.
+    struct FullCustom;
+
+    impl crate::schema::CustomTypeSchema for FullCustom {
+        fn schema_type() -> &'static str {
+            "string"
+        }
+        fn schema_format() -> Option<&'static str> {
+            Some("date-time")
+        }
+        fn schema_description() -> Option<String> {
+            Some("a timestamp".to_string())
+        }
+        fn schema_additional_properties() -> Option<Value> {
+            Some(json!({"x-custom": 1}))
+        }
+    }
+
+    #[test]
+    fn test_custom_type_schema_full_branches() {
+        use crate::schema::CustomTypeSchema;
+        let json = FullCustom::json_schema();
+        assert_eq!(json["type"], "string");
+        assert_eq!(json["format"], "date-time");
+        assert_eq!(json["description"], "a timestamp");
+        assert_eq!(json["x-custom"], 1);
+    }
+
+    #[test]
+    fn test_custom_type_schema_non_object_additional_ignored() {
+        // additional_properties that is not a JSON object is silently ignored
+        // (the `if let Some(obj) = additional.as_object()` guard fails) and
+        // must not panic.
+        struct NonObjectAdditional;
+        impl crate::schema::CustomTypeSchema for NonObjectAdditional {
+            fn schema_type() -> &'static str {
+                "string"
+            }
+            fn schema_additional_properties() -> Option<Value> {
+                Some(json!([1, 2, 3]))
+            }
+        }
+        use crate::schema::CustomTypeSchema;
+        let json = NonObjectAdditional::json_schema();
+        let obj = json.as_object().unwrap();
+        // Only "type" survives; the array additional is dropped.
+        assert_eq!(obj.len(), 1);
+        assert_eq!(json["type"], "string");
+    }
+
+    // ========================================================================
+    // SchemaBuilder example single-vs-multi
+    // ========================================================================
+
+    #[test]
+    fn test_schema_builder_single_example() {
+        let json = crate::schema::SchemaBuilder::object()
+            .example(json!({"a": 1}))
+            .build()
+            .to_json();
+        // Single example -> "example" key (scalar), no "examples" array.
+        assert_eq!(json["example"], json!({"a": 1}));
+        assert!(json.get("examples").is_none());
+    }
+
+    #[test]
+    fn test_schema_builder_multi_examples() {
+        let json = crate::schema::SchemaBuilder::object()
+            .example(json!({"a": 1}))
+            .example(json!({"a": 2}))
+            .build()
+            .to_json();
+        // Multiple examples -> "examples" array, no "example" key.
+        assert!(json.get("example").is_none());
+        let examples = json["examples"].as_array().unwrap();
+        assert_eq!(examples.len(), 2);
+        assert_eq!(examples[0], json!({"a": 1}));
+        assert_eq!(examples[1], json!({"a": 2}));
+    }
+
+    // ========================================================================
+    // Primitive schema_name() coverage: integer widths, &str, bool, String,
+    // floats, serde_json::Value (LOW rows)
+    // ========================================================================
+
+    #[test]
+    fn test_integer_width_schema_and_names() {
+        // All integer widths emit {"type":"integer"} and name == stringified type.
+        macro_rules! check_int {
+            ($($t:ty => $name:literal),+ $(,)?) => {
+                $(
+                    assert_eq!(<$t>::schema().to_json()["type"], "integer", "{} type", $name);
+                    assert_eq!(<$t>::schema_name(), Some($name.to_string()), "{} name", $name);
+                )+
+            };
+        }
+        check_int!(
+            i8 => "i8",
+            i16 => "i16",
+            i32 => "i32",
+            i64 => "i64",
+            i128 => "i128",
+            isize => "isize",
+            u8 => "u8",
+            u16 => "u16",
+            u32 => "u32",
+            u64 => "u64",
+            u128 => "u128",
+            usize => "usize",
+        );
+    }
+
+    #[test]
+    fn test_float_schema_and_names() {
+        assert_eq!(f32::schema().to_json()["type"], "number");
+        assert_eq!(f32::schema_name(), Some("f32".to_string()));
+        assert_eq!(f64::schema().to_json()["type"], "number");
+        assert_eq!(f64::schema_name(), Some("f64".to_string()));
+    }
+
+    #[test]
+    fn test_str_bool_string_names_and_schema() {
+        assert_eq!(<&str>::schema().to_json()["type"], "string");
+        assert_eq!(<&str>::schema_name(), Some("str".to_string()));
+        assert_eq!(bool::schema().to_json()["type"], "boolean");
+        assert_eq!(bool::schema_name(), Some("bool".to_string()));
+        assert_eq!(String::schema().to_json()["type"], "string");
+        assert_eq!(String::schema_name(), Some("String".to_string()));
+    }
+
+    #[test]
+    fn test_json_value_schema_name() {
+        assert_eq!(
+            <serde_json::Value>::schema_name(),
+            Some("JsonValue".to_string())
+        );
+        // schema() is an empty object (any JSON allowed).
+        assert!(
+            <serde_json::Value>::schema()
+                .to_json()
+                .as_object()
+                .unwrap()
+                .is_empty()
+        );
+    }
 }

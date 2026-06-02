@@ -29,5 +29,29 @@ jobs:
           shared-key: "ci-test"
           cache-on-failure: true
 
-      - name: Run tests
-        run: cargo test --no-fail-fast
+      - name: Run tests (all features)
+        run: cargo test --all-features --no-fail-fast
+
+  schema-only:
+    name: Schema-only build (dependency-light, no API keys)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ci-schema-only"
+          cache-on-failure: true
+
+      # `--all-features` (the test job above) can't catch breakage in the
+      # advertised dependency-light build (no tokio/reqwest/network), so guard it.
+      - name: Build (derive only)
+        run: cargo build --no-default-features --features derive
+
+      - name: Build (derive + mock)
+        run: cargo build --no-default-features --features "derive,mock"

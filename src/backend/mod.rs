@@ -4,6 +4,8 @@ pub mod client;
 #[cfg(feature = "_client")]
 mod media;
 mod messages;
+#[cfg(feature = "mock")]
+pub mod mock;
 #[cfg(feature = "_client")]
 mod model_macro;
 #[cfg(feature = "_client")]
@@ -33,6 +35,8 @@ pub use client::{LLMClient, MediaFile};
 pub use messages::{ChatMessage, ChatRole};
 #[cfg(feature = "_client")]
 pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
+#[cfg(feature = "mock")]
+pub use mock::{MockClient, MockRequestView, MockResponse, RecordedRequest, RequestKind};
 #[cfg(feature = "_client")]
 pub use request::{Request, RequestExt};
 #[cfg(feature = "streaming")]

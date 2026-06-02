@@ -85,6 +85,10 @@ streaming = ["_client", "reqwest/stream", "futures-util", "async-stream"]
 # Opt-in tool/function calling (`Tool`, `Toolbox`, `client.with_tools(..).run(..)`).
 # The agentic loop is implemented for all providers (OpenAI, Anthropic, Grok, Gemini).
 tools = ["_client"]
+# Opt-in in-memory mock client (`MockClient`) for offline unit testing. Pulls in no
+# extra dependencies and works in schema-only builds (no `_client`); the streaming
+# and tool overrides additionally require the `streaming` / `tools` features.
+mock = []
 
 [[example]]
 name = "streaming_example"
@@ -94,10 +98,20 @@ required-features = ["streaming"]
 name = "tool_calling_example"
 required-features = ["tools", "openai"]
 
+[[example]]
+name = "mock_testing_example"
+required-features = ["mock"]
+
 [dev-dependencies]
 # Used only by examples and tests (date/time fields, custom types); not part of
 # the public dependency closure.
 chrono = { version = "0.4.44", features = ["serde"] }
+# Drives async tests/examples (e.g. for the `mock` feature, which does not itself
+# pull in tokio). Dev-only — excluded from the public dependency closure.
+tokio = { version = "1.52.1", features = ["rt", "macros", "rt-multi-thread"] }
+# Local HTTP mock server for testing the real provider clients (request building,
+# response parsing, retry/re-ask loop) offline, with no API key. Dev-only.
+mockito = "1.7.0"
 
 [workspace]
 members = ["rstructor_derive"]
