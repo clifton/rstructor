@@ -876,3 +876,135 @@ fn nested_vec_of_structs_embeds_inner_schema() {
         "string"
     );
 }
+
+// ============================================================================
+// Well-known type-name sniffing vs user-defined types named Date/DateTime
+// ============================================================================
+
+/// A user-defined struct that happens to share its name with chrono's `Date`.
+/// It derives Instructor, so its real object schema must win over the
+/// name-sniffed `{type: "string", format: "date"}`.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Date {
+    #[llm(description = "Day of month")]
+    day: u8,
+    #[llm(description = "Month number")]
+    month: u8,
+    #[llm(description = "Full year")]
+    year: i32,
+}
+
+/// Same collision for `DateTime` (no generic parameters, unlike chrono's).
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct DateTime {
+    #[llm(description = "Unix timestamp")]
+    epoch_seconds: i64,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Appointment {
+    title: String,
+    date: Date,
+    starts_at: DateTime,
+    ends_at: Option<Date>,
+    reschedule_options: Vec<Date>,
+}
+
+#[test]
+fn user_defined_date_struct_keeps_its_object_schema() {
+    let schema = Appointment::schema().to_json();
+    let date = &schema["properties"]["date"];
+    assert_eq!(
+        date["type"], "object",
+        "user struct named Date must keep its derived object schema, got: {date:?}"
+    );
+    assert_eq!(date["properties"]["day"]["type"], "integer");
+    assert_eq!(date["properties"]["month"]["type"], "integer");
+    assert_eq!(date["properties"]["year"]["type"], "integer");
+    assert!(
+        date.get("format").is_none(),
+        "user struct named Date must not be sniffed into format: date"
+    );
+}
+
+#[test]
+fn user_defined_datetime_struct_keeps_its_object_schema() {
+    let schema = Appointment::schema().to_json();
+    let starts_at = &schema["properties"]["starts_at"];
+    assert_eq!(starts_at["type"], "object");
+    assert_eq!(starts_at["properties"]["epoch_seconds"]["type"], "integer");
+    assert!(starts_at.get("format").is_none());
+}
+
+#[test]
+fn optional_user_defined_date_struct_keeps_its_object_schema() {
+    let schema = Appointment::schema().to_json();
+    let ends_at = &schema["properties"]["ends_at"];
+    assert_eq!(ends_at["type"], "object");
+    assert_eq!(ends_at["properties"]["day"]["type"], "integer");
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(!required.contains(&"ends_at"));
+}
+
+#[test]
+fn vec_of_user_defined_date_struct_embeds_object_items() {
+    let schema = Appointment::schema().to_json();
+    let opts = &schema["properties"]["reschedule_options"];
+    assert_eq!(opts["type"], "array");
+    assert_eq!(opts["items"]["type"], "object");
+    assert_eq!(opts["items"]["properties"]["year"]["type"], "integer");
+}
+
+/// chrono's real date/time types must still be sniffed into string/format
+/// schemas (chrono types do not implement SchemaType, so the probe falls back).
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct ChronoEvent {
+    name: String,
+    on_date: chrono::NaiveDate,
+    at: chrono::DateTime<chrono::Utc>,
+    local_ts: chrono::NaiveDateTime,
+    maybe_date: Option<chrono::NaiveDate>,
+    past_dates: Vec<chrono::NaiveDate>,
+    past_times: Vec<chrono::DateTime<chrono::Utc>>,
+}
+
+#[test]
+fn chrono_date_fields_still_sniffed_to_string_format() {
+    let schema = ChronoEvent::schema().to_json();
+
+    let on_date = &schema["properties"]["on_date"];
+    assert_eq!(on_date["type"], "string");
+    assert_eq!(on_date["format"], "date");
+
+    let at = &schema["properties"]["at"];
+    assert_eq!(at["type"], "string");
+    assert_eq!(at["format"], "date-time");
+
+    let local_ts = &schema["properties"]["local_ts"];
+    assert_eq!(local_ts["type"], "string");
+    assert_eq!(local_ts["format"], "date-time");
+
+    let maybe_date = &schema["properties"]["maybe_date"];
+    assert_eq!(maybe_date["type"], "string");
+    assert_eq!(maybe_date["format"], "date");
+}
+
+#[test]
+fn chrono_date_array_items_still_sniffed_to_string_format() {
+    let schema = ChronoEvent::schema().to_json();
+
+    let past_dates = &schema["properties"]["past_dates"];
+    assert_eq!(past_dates["type"], "array");
+    assert_eq!(past_dates["items"]["type"], "string");
+    assert_eq!(past_dates["items"]["format"], "date");
+
+    let past_times = &schema["properties"]["past_times"];
+    assert_eq!(past_times["type"], "array");
+    assert_eq!(past_times["items"]["type"], "string");
+    assert_eq!(past_times["items"]["format"], "date-time");
+}

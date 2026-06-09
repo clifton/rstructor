@@ -78,35 +78,35 @@ pub fn generate_struct_schema(
                 // Create field property
                 // IMPORTANT: Default to treating unknown types as structs (objects)
                 // Structs are far more common than enums, and this is the safest default
-                let field_prop = if is_datetime_type {
-                    // For date-time types (DateTime, NaiveDateTime)
+                let field_prop = if is_datetime_type || is_date_only_type || is_uuid_type {
+                    // Well-known library type *names* (chrono's DateTime/NaiveDate/...,
+                    // uuid's Uuid). These names are only a heuristic: a user-defined
+                    // `struct Date` deriving Instructor must keep its real schema. So
+                    // probe at compile time (via autoref specialization): if the field
+                    // type implements SchemaType, its own schema wins; otherwise fall
+                    // back to the sniffed string/format schema.
+                    let actual_type = if is_optional {
+                        get_option_inner_type(&field.ty)
+                    } else {
+                        &field.ty
+                    };
+                    let fallback = sniffed_fallback_schema(is_datetime_type, is_date_only_type);
                     quote! {
-                        // Create property for this date-time field
-                        let mut props = ::serde_json::Map::new();
-                        props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
-                        props.insert("format".to_string(), ::serde_json::Value::String("date-time".to_string()));
-                        props.insert("description".to_string(),
-                                    ::serde_json::Value::String("ISO-8601 formatted date and time".to_string()));
-                    }
-                } else if is_date_only_type {
-                    // For date-only types (NaiveDate, Date)
-                    quote! {
-                        // Create property for this date field
-                        let mut props = ::serde_json::Map::new();
-                        props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
-                        props.insert("format".to_string(), ::serde_json::Value::String("date".to_string()));
-                        props.insert("description".to_string(),
-                                    ::serde_json::Value::String("ISO-8601 formatted date (YYYY-MM-DD)".to_string()));
-                    }
-                } else if is_uuid_type {
-                    // For UUID types
-                    quote! {
-                        // Create property for this UUID field
-                        let mut props = ::serde_json::Map::new();
-                        props.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
-                        props.insert("format".to_string(), ::serde_json::Value::String("uuid".to_string()));
-                        props.insert("description".to_string(),
-                                    ::serde_json::Value::String("UUID identifier string".to_string()));
+                        // Create property for this well-known (date/uuid) field,
+                        // preferring the type's own SchemaType impl when present
+                        let probed = {
+                            #[allow(unused_imports)]
+                            use ::rstructor::schema::__private::SchemaProbeFallback as _;
+                            ::rstructor::schema::__private::SchemaProbe::<#actual_type>::new()
+                                .rstructor_schema_or(#fallback)
+                        };
+                        let mut props = if let ::serde_json::Value::Object(m) = probed {
+                            m
+                        } else {
+                            let mut m = ::serde_json::Map::new();
+                            m.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+                            m
+                        };
                     }
                 } else if is_array_type(&field.ty)
                     || (is_optional && is_array_type(get_option_inner_type(&field.ty)))
@@ -484,6 +484,37 @@ pub fn generate_struct_schema(
     }
 }
 
+/// Generate an expression evaluating to the sniffed fallback schema for a
+/// well-known library type name: date-time (`DateTime`/`NaiveDateTime`), date
+/// (`NaiveDate`/`Date`), or uuid (`Uuid`).
+fn sniffed_fallback_schema(is_datetime: bool, is_date_only: bool) -> TokenStream {
+    if is_datetime {
+        quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO-8601 formatted date and time"
+            })
+        }
+    } else if is_date_only {
+        quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "date",
+                "description": "ISO-8601 formatted date (YYYY-MM-DD)"
+            })
+        }
+    } else {
+        quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "uuid",
+                "description": "UUID identifier string"
+            })
+        }
+    }
+}
+
 /// Generate an expression evaluating to the JSON Schema `items` value for an
 /// array whose element type is `inner_type`.
 ///
@@ -500,31 +531,18 @@ fn generate_array_items_schema(inner_type: &Type, struct_name_str: &str) -> Toke
     let is_date_only = matches!(inner_type_name.as_deref(), Some("NaiveDate") | Some("Date"));
     let is_uuid = matches!(inner_type_name.as_deref(), Some("Uuid"));
 
-    if is_datetime {
+    if is_datetime || is_date_only || is_uuid {
+        // Name match is only a heuristic: prefer the element type's own
+        // SchemaType impl (user-defined `struct Date`), falling back to the
+        // sniffed string/format schema (chrono/uuid types).
+        let fallback = sniffed_fallback_schema(is_datetime, is_date_only);
         return quote! {
-            ::serde_json::json!({
-                "type": "string",
-                "format": "date-time",
-                "description": "ISO-8601 formatted date and time"
-            })
-        };
-    }
-    if is_date_only {
-        return quote! {
-            ::serde_json::json!({
-                "type": "string",
-                "format": "date",
-                "description": "ISO-8601 formatted date (YYYY-MM-DD)"
-            })
-        };
-    }
-    if is_uuid {
-        return quote! {
-            ::serde_json::json!({
-                "type": "string",
-                "format": "uuid",
-                "description": "UUID identifier string"
-            })
+            {
+                #[allow(unused_imports)]
+                use ::rstructor::schema::__private::SchemaProbeFallback as _;
+                ::rstructor::schema::__private::SchemaProbe::<#inner_type>::new()
+                    .rstructor_schema_or(#fallback)
+            }
         };
     }
 
