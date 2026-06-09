@@ -211,8 +211,10 @@ impl GrokClient {
             model: self.config.model.as_str().to_string(),
             messages: api_messages,
             response_format: Some(response_format),
-            temperature: self.config.temperature,
+            // Grok has no o-series models: always send temperature/max_tokens.
+            temperature: Some(self.config.temperature),
             max_tokens: self.config.max_tokens,
+            max_completion_tokens: None,
             reasoning_effort: None,
         };
 
@@ -339,8 +341,10 @@ impl GrokClient {
                 content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
             }],
             response_format,
-            temperature: self.config.temperature,
+            // Grok has no o-series models: always send temperature/max_tokens.
+            temperature: Some(self.config.temperature),
             max_tokens: self.config.max_tokens,
+            max_completion_tokens: None,
             reasoning_effort: None,
         };
         let mut body = serde_json::to_value(&request).unwrap_or_else(|_| serde_json::json!({}));
@@ -525,8 +529,10 @@ impl LLMClient for GrokClient {
                 content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
             }],
             response_format: None,
-            temperature: self.config.temperature,
+            // Grok has no o-series models: always send temperature/max_tokens.
+            temperature: Some(self.config.temperature),
             max_tokens: self.config.max_tokens,
+            max_completion_tokens: None,
             reasoning_effort: None,
         };
 

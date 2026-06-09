@@ -33,11 +33,19 @@ pub(crate) struct OpenAICompatibleChatCompletionRequest {
     pub messages: Vec<OpenAICompatibleChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<ResponseFormat>,
-    pub temperature: f32,
+    /// Sampling temperature. `None` omits the key entirely, which is required
+    /// for OpenAI o-series reasoning models (they reject `temperature` with a
+    /// 400 error).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
-    /// Reasoning effort for GPT-5.x models (OpenAI only).
-    /// Omitted for providers that don't support it.
+    /// Completion-token limit for OpenAI o-series reasoning models, which
+    /// reject `max_tokens` and require `max_completion_tokens` instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u32>,
+    /// Reasoning effort for OpenAI reasoning-capable models (GPT-5.x and the
+    /// o-series). Omitted for providers that don't support it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
 }
@@ -114,10 +122,63 @@ mod tests {
                 content: OpenAICompatibleMessageContent::Text("hi".to_string()),
             }],
             response_format: None,
-            temperature: 0.0,
+            temperature: None,
             max_tokens: None,
+            max_completion_tokens: None,
             reasoning_effort: None,
         }
+    }
+
+    /// When `temperature` is `None`, the `temperature` key must be absent from
+    /// the serialized request body. o-series reasoning models reject the
+    /// parameter with a 400 error, so omitting it must be possible.
+    #[test]
+    fn test_request_omits_temperature_when_none() {
+        let req = request_with_none_options();
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        let obj = json.as_object().expect("request serializes to an object");
+        assert!(
+            !obj.contains_key("temperature"),
+            "temperature key must be omitted when None, got: {json}"
+        );
+    }
+
+    /// When `temperature` is `Some(..)`, the serialized request body must carry
+    /// the numeric value under the `temperature` key.
+    #[test]
+    fn test_request_includes_temperature_when_some() {
+        let mut req = request_with_none_options();
+        req.temperature = Some(0.5);
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        assert_eq!(json["temperature"], serde_json::json!(0.5));
+    }
+
+    /// When `max_completion_tokens` is `None`, the key must be absent from the
+    /// serialized request body.
+    #[test]
+    fn test_request_omits_max_completion_tokens_when_none() {
+        let req = request_with_none_options();
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        let obj = json.as_object().expect("request serializes to an object");
+        assert!(
+            !obj.contains_key("max_completion_tokens"),
+            "max_completion_tokens key must be omitted when None, got: {json}"
+        );
+    }
+
+    /// When `max_completion_tokens` is `Some(..)`, the serialized request body
+    /// must carry the numeric value under the `max_completion_tokens` key
+    /// (the limit parameter o-series reasoning models require).
+    #[test]
+    fn test_request_includes_max_completion_tokens_when_some() {
+        let mut req = request_with_none_options();
+        req.max_completion_tokens = Some(1024);
+        let json = serde_json::to_value(&req).expect("serialization should succeed");
+
+        assert_eq!(json["max_completion_tokens"], serde_json::json!(1024));
     }
 
     /// When `max_tokens` is `None`, the `max_tokens` key must be absent from the
@@ -199,8 +260,10 @@ mod tests {
         assert_eq!(json["response_format"]["type"], "json_schema");
     }
 
-    /// Sanity check: the always-serialized fields (`model`, `messages`,
-    /// `temperature`) remain present even when every `Option` field is `None`.
+    /// Sanity check: the always-serialized fields (`model`, `messages`) remain
+    /// present even when every `Option` field is `None`. `temperature` is no
+    /// longer unconditional: it is omitted for o-series reasoning models,
+    /// which reject the parameter.
     #[test]
     fn test_request_required_fields_present_with_all_none() {
         let req = request_with_none_options();
@@ -211,10 +274,6 @@ mod tests {
         assert!(
             obj.contains_key("messages"),
             "messages must always be present"
-        );
-        assert!(
-            obj.contains_key("temperature"),
-            "temperature must always be present"
         );
     }
 

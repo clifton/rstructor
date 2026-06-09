@@ -104,6 +104,40 @@ define_model_enum! {
     }
 }
 
+impl Model {
+    /// Returns `true` if this is an o-series reasoning model
+    /// (`o1`, `o1-pro`, `o3`, `o3-mini`, `o4-mini`, ...).
+    ///
+    /// o-series models accept different request parameters than other chat
+    /// models on `/v1/chat/completions`: they reject `temperature` with a 400
+    /// error and require `max_completion_tokens` instead of `max_tokens`.
+    /// [`OpenAIClient`] consults this predicate to shape requests
+    /// automatically, so all models work without extra configuration.
+    ///
+    /// Custom model identifiers are matched by prefix, so o-series models
+    /// without a named variant (e.g. `o3-pro`) are detected too.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rstructor::OpenAIModel;
+    ///
+    /// assert!(OpenAIModel::O3.is_reasoning_model());
+    /// assert!(OpenAIModel::O1Pro.is_reasoning_model());
+    /// assert!(OpenAIModel::from_string("o3-pro").is_reasoning_model());
+    ///
+    /// assert!(!OpenAIModel::Gpt4O.is_reasoning_model());
+    /// assert!(!OpenAIModel::Gpt5.is_reasoning_model());
+    /// ```
+    pub fn is_reasoning_model(&self) -> bool {
+        let id = self.as_str();
+        matches!(id, "o1" | "o3" | "o4")
+            || id.starts_with("o1-")
+            || id.starts_with("o3-")
+            || id.starts_with("o4-")
+    }
+}
+
 /// Configuration for the OpenAI client
 #[derive(Debug, Clone)]
 pub struct OpenAIConfig {
@@ -126,6 +160,17 @@ pub struct OpenAIConfig {
 pub struct OpenAIClient {
     config: OpenAIConfig,
     client: reqwest::Client,
+}
+
+/// Per-request parameters derived from the configured model's capabilities.
+///
+/// See [`OpenAIClient::request_tuning`] for the per-model rules.
+#[derive(Debug)]
+struct RequestTuning {
+    temperature: Option<f32>,
+    max_tokens: Option<u32>,
+    max_completion_tokens: Option<u32>,
+    reasoning_effort: Option<String>,
 }
 
 // ResponseFormat and JsonSchemaFormat are imported from utils and shared
@@ -298,6 +343,56 @@ impl OpenAIClient {
         self
     }
 
+    /// Derive the sampling, token-limit, and reasoning parameters for the
+    /// configured model's capabilities.
+    ///
+    /// - o-series reasoning models (`o1`, `o3`, `o4-mini`, ...): `temperature`
+    ///   is omitted entirely (the API rejects it with a 400 error) and the
+    ///   configured token limit is sent as `max_completion_tokens` instead of
+    ///   `max_tokens`. `reasoning_effort` is sent for the configured thinking
+    ///   level, except `Off` ("none"), which o-series models don't accept.
+    /// - GPT-5.x models: `reasoning_effort` is sent for the configured
+    ///   thinking level, and `temperature` is forced to 1.0 while reasoning is
+    ///   enabled (required by the API).
+    /// - All other models: `temperature` and `max_tokens` are sent exactly as
+    ///   configured.
+    fn request_tuning(&self) -> RequestTuning {
+        if self.config.model.is_reasoning_model() {
+            let reasoning_effort = self
+                .config
+                .thinking_level
+                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
+                .filter(|effort| effort != "none");
+            return RequestTuning {
+                temperature: None,
+                max_tokens: None,
+                max_completion_tokens: self.config.max_tokens,
+                reasoning_effort,
+            };
+        }
+
+        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
+        let reasoning_effort = if is_gpt5 {
+            self.config
+                .thinking_level
+                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
+        } else {
+            None
+        };
+        // GPT-5.x with reasoning requires temperature=1.0
+        let temperature = if reasoning_effort.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+        RequestTuning {
+            temperature: Some(temperature),
+            max_tokens: self.config.max_tokens,
+            max_completion_tokens: None,
+            reasoning_effort,
+        }
+    }
+
     /// Internal implementation of materialize (without retry logic)
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
@@ -335,22 +430,9 @@ impl OpenAIClient {
             Some("Output in the specified format. Include ALL required fields and follow the schema exactly.".to_string()),
         );
 
-        // Build reasoning_effort for GPT-5.x models
-        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
-        let reasoning_effort = if is_gpt5 {
-            self.config
-                .thinking_level
-                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
-        } else {
-            None
-        };
-
-        // GPT-5.x with reasoning requires temperature=1.0
-        let effective_temp = if reasoning_effort.is_some() {
-            1.0
-        } else {
-            self.config.temperature
-        };
+        // Derive per-model request parameters (temperature, token limits,
+        // reasoning effort) from the configured model's capabilities.
+        let tuning = self.request_tuning();
 
         // Convert ChatMessage to OpenAI's format
         let api_messages =
@@ -365,9 +447,10 @@ impl OpenAIClient {
             model: self.config.model.as_str().to_string(),
             messages: api_messages,
             response_format: Some(response_format),
-            temperature: effective_temp,
-            max_tokens: self.config.max_tokens,
-            reasoning_effort,
+            temperature: tuning.temperature,
+            max_tokens: tuning.max_tokens,
+            max_completion_tokens: tuning.max_completion_tokens,
+            reasoning_effort: tuning.reasoning_effort,
         };
 
         // Send the request to OpenAI
@@ -460,19 +543,7 @@ impl OpenAIClient {
         prompt: &str,
         response_format: Option<ResponseFormat>,
     ) -> serde_json::Value {
-        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
-        let reasoning_effort = if is_gpt5 {
-            self.config
-                .thinking_level
-                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
-        } else {
-            None
-        };
-        let effective_temp = if reasoning_effort.is_some() {
-            1.0
-        } else {
-            self.config.temperature
-        };
+        let tuning = self.request_tuning();
         let request = OpenAICompatibleChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
             messages: vec![OpenAICompatibleChatMessage {
@@ -480,9 +551,10 @@ impl OpenAIClient {
                 content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
             }],
             response_format,
-            temperature: effective_temp,
-            max_tokens: self.config.max_tokens,
-            reasoning_effort,
+            temperature: tuning.temperature,
+            max_tokens: tuning.max_tokens,
+            max_completion_tokens: tuning.max_completion_tokens,
+            reasoning_effort: tuning.reasoning_effort,
         };
         let mut body = serde_json::to_value(&request).unwrap_or_else(|_| serde_json::json!({}));
         body["stream"] = serde_json::Value::Bool(true);
@@ -667,22 +739,9 @@ impl LLMClient for OpenAIClient {
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         info!("Generating raw text response with OpenAI");
 
-        // Build reasoning_effort for GPT-5.x models
-        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
-        let reasoning_effort = if is_gpt5 {
-            self.config
-                .thinking_level
-                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
-        } else {
-            None
-        };
-
-        // GPT-5.x with reasoning requires temperature=1.0
-        let effective_temp = if reasoning_effort.is_some() {
-            1.0
-        } else {
-            self.config.temperature
-        };
+        // Derive per-model request parameters (temperature, token limits,
+        // reasoning effort) from the configured model's capabilities.
+        let tuning = self.request_tuning();
 
         // Build the request for text generation (no structured output)
         debug!("Building OpenAI API request for text generation");
@@ -693,9 +752,10 @@ impl LLMClient for OpenAIClient {
                 content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
             }],
             response_format: None,
-            temperature: effective_temp,
-            max_tokens: self.config.max_tokens,
-            reasoning_effort,
+            temperature: tuning.temperature,
+            max_tokens: tuning.max_tokens,
+            max_completion_tokens: tuning.max_completion_tokens,
+            reasoning_effort: tuning.reasoning_effort,
         };
 
         // Send the request to OpenAI

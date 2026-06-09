@@ -7,7 +7,7 @@
 //! shaping and the retry loop it drives are shared by the OpenAI-compatible path.
 #![cfg(feature = "openai")]
 
-use rstructor::{ApiErrorKind, Instructor, LLMClient, OpenAIClient, RStructorError};
+use rstructor::{ApiErrorKind, Instructor, LLMClient, OpenAIClient, RStructorError, ThinkingLevel};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -355,6 +355,200 @@ async fn non_gpt5_omits_reasoning_effort_and_passes_temperature_through() {
         body["temperature"],
         json!(0.2),
         "configured temperature must pass through unchanged"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// o-series request parameters (offline_mockito)
+// ---------------------------------------------------------------------------
+
+/// Mount a catch-all `/chat/completions` mock that records every request body
+/// into the returned buffer and responds with `chat_completion(content)`.
+async fn capture_chat_request(
+    server: &mut mockito::Server,
+    content: &str,
+) -> (mockito::Mock, std::sync::Arc<std::sync::Mutex<Vec<Value>>>) {
+    let captured: std::sync::Arc<std::sync::Mutex<Vec<Value>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = captured.clone();
+    let mock = server
+        .mock("POST", "/chat/completions")
+        .match_request(move |req| {
+            if let Ok(body) = req.utf8_lossy_body()
+                && let Ok(v) = serde_json::from_str::<Value>(&body)
+            {
+                sink.lock().unwrap().push(v);
+            }
+            true
+        })
+        .with_status(200)
+        .with_body(chat_completion(content))
+        .expect(1)
+        .create_async()
+        .await;
+    (mock, captured)
+}
+
+/// o-series reasoning models (here `o3`) reject `temperature` (400) and require
+/// `max_completion_tokens` instead of `max_tokens`. The structured-output
+/// request must omit `temperature` and `max_tokens` entirely, carry the
+/// configured limit as `max_completion_tokens`, and still send
+/// `reasoning_effort` (the default thinking level is Medium).
+#[tokio::test]
+async fn o_series_omits_temperature_and_maps_max_tokens() {
+    let mut server = mockito::Server::new_async().await;
+    let (m, captured) =
+        capture_chat_request(&mut server, r#"{"title":"Inception","year":2010}"#).await;
+
+    let movie: Movie = OpenAIClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .model("o3")
+        .temperature(0.7)
+        .max_tokens(1234)
+        .materialize("Describe Inception")
+        .await
+        .unwrap();
+    assert_eq!(movie.title, "Inception");
+    m.assert_async().await;
+
+    let bodies = captured.lock().unwrap();
+    assert_eq!(bodies.len(), 1, "expected exactly one request");
+    let body = &bodies[0];
+    assert!(
+        body.get("temperature").is_none(),
+        "temperature must be omitted for o-series models, got {body}"
+    );
+    assert!(
+        body.get("max_tokens").is_none(),
+        "max_tokens must be omitted for o-series models, got {body}"
+    );
+    assert_eq!(
+        body["max_completion_tokens"],
+        json!(1234),
+        "configured max_tokens must be sent as max_completion_tokens"
+    );
+    assert_eq!(
+        body["reasoning_effort"],
+        json!("medium"),
+        "default thinking level (Medium) must map to reasoning_effort"
+    );
+}
+
+/// An o-series model with `ThinkingLevel::Off` must omit `reasoning_effort`
+/// (o-series models don't accept `"none"`), and with no `max_tokens` configured
+/// no token-limit key may appear at all.
+#[tokio::test]
+async fn o_series_thinking_off_omits_reasoning_effort() {
+    let mut server = mockito::Server::new_async().await;
+    let (m, captured) = capture_chat_request(&mut server, "ok").await;
+
+    let text = OpenAIClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .model("o4-mini")
+        .thinking_level(ThinkingLevel::Off)
+        .generate("hi")
+        .await
+        .unwrap();
+    assert_eq!(text, "ok");
+    m.assert_async().await;
+
+    let bodies = captured.lock().unwrap();
+    assert_eq!(bodies.len(), 1, "expected exactly one request");
+    let body = &bodies[0];
+    assert!(
+        body.get("reasoning_effort").is_none(),
+        "reasoning_effort 'none' must not be sent to o-series models, got {body}"
+    );
+    assert!(
+        body.get("temperature").is_none(),
+        "temperature must be omitted for o-series models, got {body}"
+    );
+    assert!(
+        body.get("max_tokens").is_none(),
+        "max_tokens must be omitted for o-series models, got {body}"
+    );
+    assert!(
+        body.get("max_completion_tokens").is_none(),
+        "max_completion_tokens must be absent when no max_tokens is configured, got {body}"
+    );
+}
+
+/// Non-reasoning models keep the existing contract: `temperature` and
+/// `max_tokens` are sent as configured and `max_completion_tokens` never
+/// appears.
+#[tokio::test]
+async fn non_reasoning_model_keeps_temperature_and_max_tokens() {
+    let mut server = mockito::Server::new_async().await;
+    let (m, captured) = capture_chat_request(&mut server, "ok").await;
+
+    let text = OpenAIClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .model("gpt-4o")
+        .temperature(0.5)
+        .max_tokens(64)
+        .generate("hi")
+        .await
+        .unwrap();
+    assert_eq!(text, "ok");
+    m.assert_async().await;
+
+    let bodies = captured.lock().unwrap();
+    assert_eq!(bodies.len(), 1, "expected exactly one request");
+    let body = &bodies[0];
+    assert_eq!(body["temperature"], json!(0.5));
+    assert_eq!(body["max_tokens"], json!(64));
+    assert!(
+        body.get("max_completion_tokens").is_none(),
+        "max_completion_tokens must never be sent for non-o-series models, got {body}"
+    );
+}
+
+/// Grok shares the OpenAI-compatible request struct but has no o-series
+/// models: its requests must still always carry `temperature` and `max_tokens`
+/// and never `max_completion_tokens` or `reasoning_effort`.
+#[cfg(feature = "grok")]
+#[tokio::test]
+async fn grok_request_still_sends_temperature_and_max_tokens() {
+    use rstructor::GrokClient;
+
+    let mut server = mockito::Server::new_async().await;
+    let (m, captured) = capture_chat_request(&mut server, "ok").await;
+
+    let text = GrokClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .model("grok-3")
+        .temperature(0.5)
+        .max_tokens(64)
+        .generate("hi")
+        .await
+        .unwrap();
+    assert_eq!(text, "ok");
+    m.assert_async().await;
+
+    let bodies = captured.lock().unwrap();
+    assert_eq!(bodies.len(), 1, "expected exactly one request");
+    let body = &bodies[0];
+    assert_eq!(
+        body["temperature"],
+        json!(0.5),
+        "Grok must always send temperature"
+    );
+    assert_eq!(
+        body["max_tokens"],
+        json!(64),
+        "Grok must always send max_tokens"
+    );
+    assert!(
+        body.get("max_completion_tokens").is_none(),
+        "Grok must never send max_completion_tokens, got {body}"
+    );
+    assert!(
+        body.get("reasoning_effort").is_none(),
+        "Grok must never send reasoning_effort, got {body}"
     );
 }
 
