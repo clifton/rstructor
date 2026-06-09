@@ -210,7 +210,17 @@ pub fn generate_struct_schema(
                     };
                     if let Some(inner_ty) = get_box_inner_type(actual_type) {
                         let inner_schema_type = get_schema_type_from_rust_type(inner_ty);
-                        if inner_schema_type == "object" {
+                        if is_self_reference(inner_ty, &struct_name_str) {
+                            // Self-referential type (e.g. Option<Box<Self>>): use $ref
+                            // to prevent infinite recursion at schema() time, mirroring
+                            // the guard in the array branch. The root schema places the
+                            // struct's definition under $defs in this case.
+                            quote! {
+                                let mut props = ::serde_json::Map::new();
+                                props.insert("$ref".to_string(),
+                                    ::serde_json::Value::String(format!("#/$defs/{}", #struct_name_str)));
+                            }
+                        } else if inner_schema_type == "object" {
                             // Inner type is a complex type, use its schema
                             quote! {
                                 let nested_schema = <#inner_ty as ::rstructor::schema::SchemaType>::schema();

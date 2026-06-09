@@ -1008,3 +1008,67 @@ fn chrono_date_array_items_still_sniffed_to_string_format() {
     assert_eq!(past_times["items"]["type"], "string");
     assert_eq!(past_times["items"]["format"], "date-time");
 }
+
+// ============================================================================
+// Recursive types through Box: Option<Box<Self>>, Vec<Box<Self>>
+// ============================================================================
+
+/// Singly-linked list node: recursion through Option<Box<Self>>.
+/// Before the Box-branch $ref guard, calling schema() overflowed the stack.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct LinkedNode {
+    #[llm(description = "Value held by this node")]
+    value: i32,
+    #[llm(description = "Next node in the list, if any")]
+    next: Option<Box<LinkedNode>>,
+}
+
+#[test]
+fn option_box_self_recursion_terminates_with_ref() {
+    // Must terminate (no stack overflow) ...
+    let schema = LinkedNode::schema().to_json();
+    // ... and use the $defs/$ref indirection like the array guard does.
+    assert_eq!(schema["$ref"], "#/$defs/LinkedNode");
+    let def = &schema["$defs"]["LinkedNode"];
+    assert!(def.is_object(), "$defs.LinkedNode must exist");
+    assert_eq!(
+        def["properties"]["next"]["$ref"], "#/$defs/LinkedNode",
+        "Box<Self> field must be emitted as a $ref, got: {:?}",
+        def["properties"]["next"]
+    );
+    assert_eq!(def["properties"]["value"]["type"], "integer");
+    // Option<Box<Self>> must not be required.
+    let required: Vec<&str> = def["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(required.contains(&"value"));
+    assert!(!required.contains(&"next"));
+}
+
+#[test]
+fn option_box_self_recursion_schema_name() {
+    assert_eq!(LinkedNode::schema_name(), Some("LinkedNode".to_string()));
+}
+
+/// Tree node: recursion through Vec<Box<Self>> (array guard with boxed items).
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct BoxedTreeNode {
+    #[llm(description = "Node label")]
+    label: String,
+    #[llm(description = "Child nodes")]
+    #[allow(clippy::vec_box)]
+    children: Vec<Box<BoxedTreeNode>>,
+}
+
+#[test]
+fn vec_box_self_recursion_terminates_with_ref() {
+    let schema = BoxedTreeNode::schema().to_json();
+    assert_eq!(schema["$ref"], "#/$defs/BoxedTreeNode");
+    let def = &schema["$defs"]["BoxedTreeNode"];
+    let children = &def["properties"]["children"];
+    assert_eq!(children["type"], "array");
+    assert_eq!(children["items"]["$ref"], "#/$defs/BoxedTreeNode");
+}
