@@ -1072,3 +1072,128 @@ fn vec_box_self_recursion_terminates_with_ref() {
     assert_eq!(children["type"], "array");
     assert_eq!(children["items"]["$ref"], "#/$defs/BoxedTreeNode");
 }
+
+// ============================================================================
+// Generic types deriving Instructor
+// ============================================================================
+
+use serde::de::DeserializeOwned;
+
+/// A generic wrapper: the derive must emit generics-aware impl blocks
+/// (split_for_impl) for both SchemaType and Instructor.
+///
+/// The `#[serde(bound(...))]` attribute is required by *serde's own derive*
+/// whenever `DeserializeOwned` appears as a struct bound (serde otherwise
+/// emits an ambiguous `T: Deserialize<'de>` + `T: DeserializeOwned` impl);
+/// it is unrelated to the Instructor derive.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+#[serde(bound(deserialize = "T: DeserializeOwned"))]
+struct Wrapper<T: SchemaType + Serialize + DeserializeOwned> {
+    #[llm(description = "The wrapped value")]
+    value: T,
+    #[llm(description = "A label for the value")]
+    label: String,
+}
+
+/// Generics without bounds on the struct itself: the derive adds the
+/// SchemaType / serde bounds to its own impls.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Pair<A, B> {
+    first: A,
+    second: B,
+}
+
+/// Generic enum with a default type parameter and data-carrying variants.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+enum Maybe<T = String> {
+    Nothing,
+    Just(T),
+}
+
+#[test]
+fn generic_struct_compiles_and_produces_schema() {
+    let schema = Wrapper::<i32>::schema().to_json();
+    assert_eq!(schema["type"], "object");
+    assert_eq!(schema["title"], "Wrapper");
+    assert_eq!(schema["properties"]["value"]["type"], "integer");
+    assert_eq!(schema["properties"]["label"]["type"], "string");
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(required.contains(&"value"));
+    assert!(required.contains(&"label"));
+}
+
+#[test]
+fn generic_struct_with_struct_parameter_embeds_schema() {
+    // Instantiated with a derived struct: T's full object schema is embedded.
+    let schema = Wrapper::<Address>::schema().to_json();
+    let value = &schema["properties"]["value"];
+    assert_eq!(value["type"], "object");
+    assert_eq!(value["properties"]["street"]["type"], "string");
+}
+
+#[test]
+fn generic_struct_instructor_impl_validates() {
+    // `use rstructor::Instructor` at the top of this file imports both the
+    // derive macro and the trait, so `validate` is callable here.
+    let wrapped = Wrapper {
+        value: 42i64,
+        label: "answer".to_string(),
+    };
+    assert!(wrapped.validate().is_ok());
+}
+
+#[test]
+fn unbounded_generic_struct_compiles_and_produces_schema() {
+    let schema = Pair::<String, f64>::schema().to_json();
+    assert_eq!(schema["type"], "object");
+    assert_eq!(schema["properties"]["first"]["type"], "string");
+    assert_eq!(schema["properties"]["second"]["type"], "number");
+}
+
+#[test]
+fn generic_enum_compiles_and_produces_schema() {
+    let schema = Maybe::<i32>::schema().to_json();
+    let any_of = schema["anyOf"].as_array().expect("anyOf for data enum");
+    assert_eq!(any_of.len(), 2);
+    // The Just variant carries the type parameter's schema.
+    let just = any_of
+        .iter()
+        .find(|v| v["properties"].get("Just").is_some())
+        .expect("Just variant present");
+    assert_eq!(just["properties"]["Just"]["type"], "integer");
+}
+
+/// Pathological combination of the sniffing and recursion fixes: a recursive
+/// struct that is itself named `Date`. The self-reference $ref must win over
+/// both the name sniff and the SchemaType probe (which would otherwise call
+/// its own schema() forever).
+mod recursive_date {
+    use super::*;
+
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
+    pub struct Date {
+        #[llm(description = "Node label")]
+        pub label: String,
+        #[llm(description = "Nested child dates")]
+        pub children: Vec<Date>,
+    }
+}
+
+#[test]
+fn recursive_struct_named_date_terminates_with_ref() {
+    use rstructor::SchemaType as _;
+    let schema = recursive_date::Date::schema().to_json();
+    assert_eq!(schema["$ref"], "#/$defs/Date");
+    let def = &schema["$defs"]["Date"];
+    assert_eq!(def["properties"]["children"]["type"], "array");
+    assert_eq!(
+        def["properties"]["children"]["items"]["$ref"],
+        "#/$defs/Date"
+    );
+    assert_eq!(def["properties"]["label"]["type"], "string");
+}

@@ -5,9 +5,10 @@ use syn::{DataStruct, Fields, Ident, Type};
 use crate::container_attrs::ContainerAttributes;
 use crate::parsers::field_parser::parse_field_attributes;
 use crate::type_utils::{
-    get_array_inner_type, get_box_inner_type, get_map_types, get_option_inner_type,
-    get_schema_type_from_rust_type, get_tuple_element_types, get_type_name, is_array_type,
-    is_box_type, is_json_value_type, is_map_type, is_option_type, is_self_reference, is_tuple_type,
+    generics_with_bounds, get_array_inner_type, get_box_inner_type, get_map_types,
+    get_option_inner_type, get_schema_type_from_rust_type, get_tuple_element_types, get_type_name,
+    is_array_type, is_box_type, is_json_value_type, is_map_type, is_option_type, is_self_reference,
+    is_tuple_type,
 };
 
 /// Generate the schema implementation for a struct
@@ -15,6 +16,7 @@ pub fn generate_struct_schema(
     name: &Ident,
     data_struct: &DataStruct,
     container_attrs: &ContainerAttributes,
+    generics: &syn::Generics,
 ) -> TokenStream {
     let mut property_setters = Vec::new();
     let mut required_setters = Vec::new();
@@ -421,10 +423,19 @@ pub fn generate_struct_schema(
         quote! {}
     };
 
+    // Emit a generics-aware impl: every type parameter is additionally bound
+    // by SchemaType, since the generated code calls <T as SchemaType>::schema()
+    // for type-parameter fields.
+    let schema_generics = generics_with_bounds(
+        generics,
+        &[syn::parse_quote!(::rstructor::schema::SchemaType)],
+    );
+    let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+
     // Generate implementation with $defs support for recursive types
     if has_self_reference {
         quote! {
-            impl ::rstructor::schema::SchemaType for #name {
+            impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
                 fn schema() -> ::rstructor::schema::Schema {
                     // Create base schema object (properties will be added to $defs)
                     let mut schema_obj = ::serde_json::json!({
@@ -463,7 +474,7 @@ pub fn generate_struct_schema(
         }
     } else {
         quote! {
-            impl ::rstructor::schema::SchemaType for #name {
+            impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
                 fn schema() -> ::rstructor::schema::Schema {
                     // Create base schema object
                     let mut schema_obj = ::serde_json::json!({
@@ -532,6 +543,31 @@ fn sniffed_fallback_schema(is_datetime: bool, is_date_only: bool) -> TokenStream
 /// ...) so every nesting level carries its own `items` schema, and emits a
 /// `$ref` for self-referential element types to prevent infinite recursion.
 fn generate_array_items_schema(inner_type: &Type, struct_name_str: &str) -> TokenStream {
+    // Nested collections: recurse so the inner `items` schema is preserved
+    if is_array_type(inner_type)
+        && let Some(next_inner) = get_array_inner_type(inner_type)
+    {
+        let nested_items = generate_array_items_schema(next_inner, struct_name_str);
+        return quote! {
+            {
+                let mut items_schema = ::serde_json::Map::new();
+                items_schema.insert("type".to_string(), ::serde_json::Value::String("array".to_string()));
+                items_schema.insert("items".to_string(), #nested_items);
+                ::serde_json::Value::Object(items_schema)
+            }
+        };
+    }
+
+    // Self-referential element types use $ref to prevent infinite recursion.
+    // This must run before the well-known-name sniff below: a recursive
+    // struct that happens to be named `Date` must still get a $ref, not a
+    // probe that would call its own schema() and never terminate.
+    if is_self_reference(inner_type, struct_name_str) {
+        return quote! {
+            ::serde_json::json!({ "$ref": format!("#/$defs/{}", #struct_name_str) })
+        };
+    }
+
     // Check for well-known library types by exact match only (no heuristics)
     let inner_type_name = get_type_name(inner_type);
     let is_datetime = matches!(
@@ -553,28 +589,6 @@ fn generate_array_items_schema(inner_type: &Type, struct_name_str: &str) -> Toke
                 ::rstructor::schema::__private::SchemaProbe::<#inner_type>::new()
                     .rstructor_schema_or(#fallback)
             }
-        };
-    }
-
-    // Nested collections: recurse so the inner `items` schema is preserved
-    if is_array_type(inner_type)
-        && let Some(next_inner) = get_array_inner_type(inner_type)
-    {
-        let nested_items = generate_array_items_schema(next_inner, struct_name_str);
-        return quote! {
-            {
-                let mut items_schema = ::serde_json::Map::new();
-                items_schema.insert("type".to_string(), ::serde_json::Value::String("array".to_string()));
-                items_schema.insert("items".to_string(), #nested_items);
-                ::serde_json::Value::Object(items_schema)
-            }
-        };
-    }
-
-    // Self-referential element types use $ref to prevent infinite recursion
-    if is_self_reference(inner_type, struct_name_str) {
-        return quote! {
-            ::serde_json::json!({ "$ref": format!("#/$defs/{}", #struct_name_str) })
         };
     }
 
