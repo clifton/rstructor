@@ -7,10 +7,10 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
-    ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error, materialize_with_media_with_retry,
-    parse_validate_and_create_output,
+    ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeInternalOutput,
+    MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext,
+    build_http_client, check_response_status, generate_with_retry_with_history, handle_http_error,
+    materialize_with_media_with_retry, parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -87,6 +87,8 @@ pub struct GeminiConfig {
     pub model: Model,
     pub temperature: f32,
     pub max_tokens: Option<u32>,
+    /// Total timeout for each HTTP request.
+    /// Defaults to [`DEFAULT_REQUEST_TIMEOUT`](crate::DEFAULT_REQUEST_TIMEOUT) (5 minutes).
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
     /// Custom base URL for Gemini-compatible APIs
@@ -276,13 +278,13 @@ impl GeminiClient {
             model: Model::Gemini35Flash, // Default to Gemini 3.5 Flash (latest Flash, best price/performance)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,        // Default: no timeout (uses reqwest's default)
-            max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,       // Default: use official Gemini API
+            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
+            max_retries: Some(3),                   // Default: 3 retries with error feedback
+            base_url: None,                         // Default: use official Gemini API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3.x
         };
 
-        let client = reqwest::Client::new();
+        let client = build_http_client(DEFAULT_REQUEST_TIMEOUT);
 
         info!(
             model = %config.model.as_str(),
@@ -318,13 +320,13 @@ impl GeminiClient {
             model: Model::Gemini35Flash, // Default to Gemini 3.5 Flash (latest Flash, best price/performance)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,        // Default: no timeout (uses reqwest's default)
-            max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,       // Default: use official Gemini API
+            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
+            max_retries: Some(3),                   // Default: 3 retries with error feedback
+            base_url: None,                         // Default: use official Gemini API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3.x
         };
 
-        let client = reqwest::Client::new();
+        let client = build_http_client(DEFAULT_REQUEST_TIMEOUT);
 
         info!(
             model = %config.model.as_str(),
@@ -1134,6 +1136,26 @@ mod tests {
         assert_eq!(
             list_url,
             "http://localhost:8080/v1beta//models?key=test-key"
+        );
+    }
+
+    #[test]
+    fn default_config_has_default_timeout() {
+        let client = super::GeminiClient::new("test-key").unwrap();
+        assert_eq!(
+            client.config.timeout,
+            Some(crate::backend::DEFAULT_REQUEST_TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn explicit_timeout_overrides_default() {
+        let client = super::GeminiClient::new("test-key")
+            .unwrap()
+            .timeout(std::time::Duration::from_secs(10));
+        assert_eq!(
+            client.config.timeout,
+            Some(std::time::Duration::from_secs(10))
         );
     }
 }

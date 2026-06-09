@@ -5,11 +5,12 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
-    ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
-    ResponseFormat, TokenUsage, ValidationFailureContext, check_response_status,
-    convert_openai_compatible_chat_messages, generate_with_retry_with_history, handle_http_error,
-    materialize_with_media_with_retry, parse_validate_and_create_output, prepare_strict_schema,
+    ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeInternalOutput,
+    MaterializeResult, ModelInfo, OpenAICompatibleChatCompletionRequest,
+    OpenAICompatibleChatCompletionResponse, ResponseFormat, TokenUsage, ValidationFailureContext,
+    build_http_client, check_response_status, convert_openai_compatible_chat_messages,
+    generate_with_retry_with_history, handle_http_error, materialize_with_media_with_retry,
+    parse_validate_and_create_output, prepare_strict_schema,
 };
 #[cfg(feature = "streaming")]
 use crate::backend::{OpenAICompatibleChatMessage, OpenAICompatibleMessageContent};
@@ -61,6 +62,8 @@ pub struct GrokConfig {
     pub model: Model,
     pub temperature: f32,
     pub max_tokens: Option<u32>,
+    /// Total timeout for each HTTP request.
+    /// Defaults to [`DEFAULT_REQUEST_TIMEOUT`](crate::DEFAULT_REQUEST_TIMEOUT) (5 minutes).
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
     /// Custom base URL for Grok-compatible APIs (e.g., local LLMs, proxy endpoints)
@@ -111,15 +114,15 @@ impl GrokClient {
             model: Model::Grok43, // Default to Grok 4.3 (latest recommended chat model)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,        // Default: no timeout (uses reqwest's default)
-            max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,       // Default: use official Grok API
+            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
+            max_retries: Some(3),                   // Default: 3 retries with error feedback
+            base_url: None,                         // Default: use official Grok API
         };
 
         debug!("Grok client created with default configuration");
         Ok(Self {
             config,
-            client: reqwest::Client::new(),
+            client: build_http_client(DEFAULT_REQUEST_TIMEOUT),
         })
     }
 
@@ -151,15 +154,15 @@ impl GrokClient {
             model: Model::Grok43, // Default to Grok 4.3 (latest recommended chat model)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,        // Default: no timeout (uses reqwest's default)
-            max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,       // Default: use official Grok API
+            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
+            max_retries: Some(3),                   // Default: 3 retries with error feedback
+            base_url: None,                         // Default: use official Grok API
         };
 
         debug!("Grok client created with default configuration");
         Ok(Self {
             config,
-            client: reqwest::Client::new(),
+            client: build_http_client(DEFAULT_REQUEST_TIMEOUT),
         })
     }
 
@@ -734,5 +737,25 @@ impl LLMClient for GrokClient {
 
         debug!(count = models.len(), "Fetched Grok models");
         Ok(models)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::DEFAULT_REQUEST_TIMEOUT;
+
+    #[test]
+    fn default_config_has_default_timeout() {
+        let client = GrokClient::new("test-key").unwrap();
+        assert_eq!(client.config.timeout, Some(DEFAULT_REQUEST_TIMEOUT));
+    }
+
+    #[test]
+    fn explicit_timeout_overrides_default() {
+        let client = GrokClient::new("test-key")
+            .unwrap()
+            .timeout(Duration::from_secs(10));
+        assert_eq!(client.config.timeout, Some(Duration::from_secs(10)));
     }
 }
