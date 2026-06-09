@@ -276,6 +276,115 @@ async fn generate_null_content_is_unexpected_response() {
 }
 
 // ---------------------------------------------------------------------------
+// generate / run carry attached media in the request body (offline_mockito)
+// ---------------------------------------------------------------------------
+
+/// `with_media(..).generate(..)` must include the attached image as an
+/// `image_url` content part in the serialized request body — media used to be
+/// silently dropped on the plain-text generation path.
+#[tokio::test]
+async fn generate_request_body_carries_attached_image() {
+    use rstructor::{MediaFile, RequestExt};
+
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "describe" },
+                    {
+                        "type": "image_url",
+                        "image_url": { "url": "data:image/png;base64,YWJj", "detail": "auto" },
+                    },
+                ],
+            }],
+        })))
+        .with_status(200)
+        .with_body(chat_completion("a red square"))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let media = [MediaFile::from_bytes(b"abc", "image/png")];
+    let text = client(&server)
+        .with_media(&media)
+        .generate("describe")
+        .await
+        .unwrap();
+    assert_eq!(text, "a red square");
+    m.assert_async().await;
+}
+
+/// `generate_with_media` with an inline PDF must encode it as the documented
+/// OpenAI `file` content part (`filename` + base64 `file_data`), not `image_url`.
+#[tokio::test]
+async fn generate_request_body_carries_attached_pdf_as_file_part() {
+    use rstructor::MediaFile;
+
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "summarize" },
+                    {
+                        "type": "file",
+                        "file": {
+                            "filename": "document.pdf",
+                            "file_data": "data:application/pdf;base64,JVBERg==",
+                        },
+                    },
+                ],
+            }],
+        })))
+        .with_status(200)
+        .with_body(chat_completion("a summary"))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let media = [MediaFile::from_bytes(b"%PDF", "application/pdf")];
+    let text = client(&server)
+        .generate_with_media("summarize", &media)
+        .await
+        .unwrap();
+    assert_eq!(text, "a summary");
+    m.assert_async().await;
+}
+
+/// A URL-based PDF has no chat-completions pathway: `generate_with_media` must
+/// fail with a clear error *before* any HTTP request is made.
+#[tokio::test]
+async fn generate_with_url_pdf_errors_without_sending_request() {
+    use rstructor::MediaFile;
+
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/chat/completions")
+        .expect(0) // the request must never reach the server
+        .create_async()
+        .await;
+
+    let media = [MediaFile::new(
+        "https://example.com/report.pdf",
+        "application/pdf",
+    )];
+    let err = client(&server)
+        .generate_with_media("summarize", &media)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("URL-based PDF"),
+        "expected a clear URL-PDF error, got: {err}"
+    );
+    m.assert_async().await;
+}
+
+// ---------------------------------------------------------------------------
 // reasoning_effort + temperature override per model (offline_mockito)
 // ---------------------------------------------------------------------------
 
@@ -787,4 +896,49 @@ async fn tool_loop_exhaustion_errors() {
         "error should mention the iteration budget (2), got: {msg}"
     );
     always_tool.assert_async().await;
+}
+
+/// `with_tools(..).media(..).run(..)` must include the attached media in the
+/// initial user turn of the tool loop's request body — media used to be
+/// silently dropped on the `run` path.
+#[cfg(feature = "tools")]
+#[tokio::test]
+async fn tool_run_request_body_carries_attached_media() {
+    use rstructor::{MediaFile, RequestExt, Toolbox};
+    use std::sync::Arc;
+
+    let mut server = mockito::Server::new_async().await;
+    let m = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "what is in the image?" },
+                    {
+                        "type": "image_url",
+                        "image_url": { "url": "data:image/png;base64,YWJj", "detail": "auto" },
+                    },
+                ],
+            }],
+        })))
+        .with_status(200)
+        .with_body(chat_completion("a red square"))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let invoked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let toolbox = Toolbox::new().with(recording_add_tool(invoked.clone()));
+    let media = [MediaFile::from_bytes(b"abc", "image/png")];
+
+    let answer = client(&server)
+        .with_tools(&toolbox)
+        .media(media.to_vec())
+        .run("what is in the image?")
+        .await
+        .unwrap();
+
+    assert_eq!(answer, "a red square");
+    m.assert_async().await;
 }

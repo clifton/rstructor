@@ -78,10 +78,12 @@ pub(crate) use media::{
     AnthropicMessageContent, OpenAICompatibleMessageContent, build_anthropic_message_content,
     build_openai_compatible_message_content,
 };
+#[cfg(feature = "streaming")]
+pub(crate) use openai_compatible::OpenAICompatibleChatMessage;
 #[cfg(feature = "_client")]
 pub(crate) use openai_compatible::{
     OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
-    OpenAICompatibleChatMessage, convert_openai_compatible_chat_messages,
+    convert_openai_compatible_chat_messages,
 };
 #[cfg(feature = "_client")]
 pub(crate) use utils::{

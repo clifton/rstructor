@@ -7,11 +7,12 @@ use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
-    OpenAICompatibleChatMessage, OpenAICompatibleMessageContent, ResponseFormat, ThinkingLevel,
-    TokenUsage, ValidationFailureContext, check_response_status,
+    ResponseFormat, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
     convert_openai_compatible_chat_messages, generate_with_retry_with_history, handle_http_error,
     materialize_with_media_with_retry, parse_validate_and_create_output, prepare_strict_schema,
 };
+#[cfg(feature = "streaming")]
+use crate::backend::{OpenAICompatibleChatMessage, OpenAICompatibleMessageContent};
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
@@ -449,6 +450,110 @@ impl OpenAIClient {
             ))
         }
     }
+
+    /// Internal implementation of raw text generation (no structured output).
+    ///
+    /// Accepts chat messages so that callers can attach media (images/PDFs) to
+    /// the user message; the same content-building path as `materialize_internal`
+    /// is used, so media is encoded per OpenAI's documented multimodal format.
+    async fn generate_internal(&self, messages: &[ChatMessage]) -> Result<GenerateResult> {
+        info!("Generating raw text response with OpenAI");
+
+        // Build reasoning_effort for GPT-5.x models
+        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
+        let reasoning_effort = if is_gpt5 {
+            self.config
+                .thinking_level
+                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
+        } else {
+            None
+        };
+
+        // GPT-5.x with reasoning requires temperature=1.0
+        let effective_temp = if reasoning_effort.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+
+        // Build the request for text generation (no structured output)
+        debug!("Building OpenAI API request for text generation");
+        let request = OpenAICompatibleChatCompletionRequest {
+            model: self.config.model.as_str().to_string(),
+            messages: convert_openai_compatible_chat_messages(messages, "OpenAI")?,
+            response_format: None,
+            temperature: effective_temp,
+            max_tokens: self.config.max_tokens,
+            reasoning_effort,
+        };
+
+        // Send the request to OpenAI
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
+        let url = format!("{}/chat/completions", base_url);
+        debug!(url = %url, "Sending request to OpenAI API");
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| handle_http_error(e, "OpenAI"))?;
+
+        // Parse the response
+        let response = check_response_status(response, "OpenAI").await?;
+
+        debug!("Successfully received response from OpenAI");
+        let completion: OpenAICompatibleChatCompletionResponse =
+            response.json().await.map_err(|e| {
+                error!(error = %e, "Failed to parse JSON response from OpenAI");
+                e
+            })?;
+
+        if completion.choices.is_empty() {
+            error!("OpenAI returned empty choices array");
+            return Err(RStructorError::api_error(
+                "OpenAI",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion choices returned".to_string(),
+                },
+            ));
+        }
+
+        // Extract usage info
+        let model_name = completion
+            .model
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name, u.prompt_tokens, u.completion_tokens));
+
+        let message = &completion.choices[0].message;
+        trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
+
+        if let Some(content) = &message.content {
+            debug!(
+                content_len = content.len(),
+                "Successfully extracted content from response"
+            );
+            Ok(GenerateResult::new(content.clone(), usage))
+        } else {
+            error!("No content in OpenAI response");
+            Err(RStructorError::api_error(
+                "OpenAI",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No content in response".to_string(),
+                },
+            ))
+        }
+    }
 }
 
 #[cfg(feature = "streaming")]
@@ -523,6 +628,7 @@ impl crate::backend::tools::ToolRunner for OpenAIClient {
         &self,
         system: Option<&str>,
         prompt: &str,
+        media: &[super::MediaFile],
         toolbox: &crate::backend::tools::Toolbox,
         max_iterations: usize,
     ) -> Result<String> {
@@ -554,6 +660,7 @@ impl crate::backend::tools::ToolRunner for OpenAIClient {
             None,
             system,
             prompt,
+            media,
             toolbox,
             max_iterations,
         )
@@ -657,6 +764,26 @@ impl LLMClient for OpenAIClient {
     }
 
     #[instrument(
+        name = "openai_generate_with_media",
+        skip(self, prompt, media),
+        fields(
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn generate_with_media(
+        &self,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<String> {
+        let result = self
+            .generate_internal(&[ChatMessage::user_with_media(prompt, media.to_vec())])
+            .await?;
+        Ok(result.text)
+    }
+
+    #[instrument(
         name = "openai_generate_with_metadata",
         skip(self, prompt),
         fields(
@@ -665,105 +792,7 @@ impl LLMClient for OpenAIClient {
         )
     )]
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
-        info!("Generating raw text response with OpenAI");
-
-        // Build reasoning_effort for GPT-5.x models
-        let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
-        let reasoning_effort = if is_gpt5 {
-            self.config
-                .thinking_level
-                .and_then(|level| level.openai_reasoning_effort().map(|s| s.to_string()))
-        } else {
-            None
-        };
-
-        // GPT-5.x with reasoning requires temperature=1.0
-        let effective_temp = if reasoning_effort.is_some() {
-            1.0
-        } else {
-            self.config.temperature
-        };
-
-        // Build the request for text generation (no structured output)
-        debug!("Building OpenAI API request for text generation");
-        let request = OpenAICompatibleChatCompletionRequest {
-            model: self.config.model.as_str().to_string(),
-            messages: vec![OpenAICompatibleChatMessage {
-                role: "user".to_string(),
-                content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
-            }],
-            response_format: None,
-            temperature: effective_temp,
-            max_tokens: self.config.max_tokens,
-            reasoning_effort,
-        };
-
-        // Send the request to OpenAI
-        let base_url = self
-            .config
-            .base_url
-            .as_deref()
-            .unwrap_or("https://api.openai.com/v1");
-        let url = format!("{}/chat/completions", base_url);
-        debug!(url = %url, "Sending request to OpenAI API");
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| handle_http_error(e, "OpenAI"))?;
-
-        // Parse the response
-        let response = check_response_status(response, "OpenAI").await?;
-
-        debug!("Successfully received response from OpenAI");
-        let completion: OpenAICompatibleChatCompletionResponse =
-            response.json().await.map_err(|e| {
-                error!(error = %e, "Failed to parse JSON response from OpenAI");
-                e
-            })?;
-
-        if completion.choices.is_empty() {
-            error!("OpenAI returned empty choices array");
-            return Err(RStructorError::api_error(
-                "OpenAI",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No completion choices returned".to_string(),
-                },
-            ));
-        }
-
-        // Extract usage info
-        let model_name = completion
-            .model
-            .clone()
-            .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion
-            .usage
-            .as_ref()
-            .map(|u| TokenUsage::new(model_name, u.prompt_tokens, u.completion_tokens));
-
-        let message = &completion.choices[0].message;
-        trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
-
-        if let Some(content) = &message.content {
-            debug!(
-                content_len = content.len(),
-                "Successfully extracted content from response"
-            );
-            Ok(GenerateResult::new(content.clone(), usage))
-        } else {
-            error!("No content in OpenAI response");
-            Err(RStructorError::api_error(
-                "OpenAI",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No content in response".to_string(),
-                },
-            ))
-        }
+        self.generate_internal(&[ChatMessage::user(prompt)]).await
     }
 
     #[cfg(feature = "streaming")]

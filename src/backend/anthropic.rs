@@ -418,6 +418,127 @@ impl AnthropicClient {
         trace!(json = %raw_response, "Parsing structured output response");
         parse_validate_and_create_output(raw_response, usage)
     }
+
+    /// Internal implementation of raw text generation (no structured output).
+    ///
+    /// Accepts chat messages so that callers can attach media (images/PDFs) to
+    /// the user message; the same content-building path as `materialize_internal`
+    /// is used, so media is encoded per Anthropic's documented block format.
+    async fn generate_internal(&self, messages: &[ChatMessage]) -> Result<GenerateResult> {
+        info!("Generating raw text response with Anthropic");
+
+        // Build thinking config for Claude 4.x models
+        let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
+            || self.config.model.as_str().contains("opus-4");
+        let thinking_config = self.config.thinking_level.and_then(|level| {
+            if is_thinking_model && level.claude_thinking_enabled() {
+                Some(ClaudeThinkingConfig {
+                    thinking_type: "enabled".to_string(),
+                    budget_tokens: level.claude_budget_tokens(),
+                })
+            } else {
+                None
+            }
+        });
+
+        // Claude requires temperature=1 when thinking is enabled
+        let effective_temp = if thinking_config.is_some() {
+            1.0
+        } else {
+            self.config.temperature
+        };
+
+        // Build API messages, including any attached media blocks
+        let api_messages: Vec<AnthropicMessage> = messages
+            .iter()
+            .map(|msg| {
+                Ok(AnthropicMessage {
+                    role: msg.role.as_str().to_string(),
+                    content: build_anthropic_message_content(msg)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Build the request (no output_format for raw text generation)
+        debug!("Building Anthropic API request for text generation");
+        let request = CompletionRequest {
+            model: self.config.model.as_str().to_string(),
+            messages: api_messages,
+            temperature: effective_temp,
+            max_tokens: effective_max_tokens(self.config.max_tokens, thinking_config.as_ref()),
+            thinking: thinking_config,
+            output_format: None, // Raw text generation doesn't use structured outputs
+        };
+
+        // Send the request to Anthropic
+        debug!(
+            model = %self.config.model.as_str(),
+            max_tokens = request.max_tokens,
+            "Sending request to Anthropic API"
+        );
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.anthropic.com/v1");
+        let url = format!("{}/messages", base_url);
+        debug!(url = %url, "Using Anthropic API endpoint");
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.config.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| handle_http_error(e, "Anthropic"))?;
+
+        // Parse the response
+        let response = check_response_status(response, "Anthropic").await?;
+
+        debug!("Successfully received response from Anthropic");
+        let completion: CompletionResponse = response.json().await.map_err(|e| {
+            error!(error = %e, "Failed to parse JSON response from Anthropic");
+            e
+        })?;
+
+        // Extract usage info
+        let model_name = completion
+            .model
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name, u.input_tokens, u.output_tokens));
+
+        // Extract the content
+        debug!("Extracting text content from response blocks");
+        let content: String = completion
+            .content
+            .iter()
+            .filter(|block| block.block_type == "text")
+            .map(|block| block.text.clone())
+            .collect::<Vec<String>>()
+            .join("");
+
+        if content.is_empty() {
+            error!("No text content in Anthropic response");
+            return Err(RStructorError::api_error(
+                "Anthropic",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No text content in response".to_string(),
+                },
+            ));
+        }
+
+        debug!(
+            content_len = content.len(),
+            "Successfully extracted text content"
+        );
+        Ok(GenerateResult::new(content, usage))
+    }
 }
 
 // Generate builder methods using macro
@@ -565,6 +686,7 @@ impl crate::backend::tools::ToolRunner for AnthropicClient {
         &self,
         system: Option<&str>,
         prompt: &str,
+        media: &[super::MediaFile],
         toolbox: &crate::backend::tools::Toolbox,
         max_iterations: usize,
     ) -> Result<String> {
@@ -584,6 +706,7 @@ impl crate::backend::tools::ToolRunner for AnthropicClient {
                 .unwrap_or(DEFAULT_ANTHROPIC_MAX_TOKENS),
             system,
             prompt,
+            media,
             toolbox,
             max_iterations,
         )
@@ -687,6 +810,26 @@ impl LLMClient for AnthropicClient {
     }
 
     #[instrument(
+        name = "anthropic_generate_with_media",
+        skip(self, prompt, media),
+        fields(
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn generate_with_media(
+        &self,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<String> {
+        let result = self
+            .generate_internal(&[ChatMessage::user_with_media(prompt, media.to_vec())])
+            .await?;
+        Ok(result.text)
+    }
+
+    #[instrument(
         name = "anthropic_generate_with_metadata",
         skip(self, prompt),
         fields(
@@ -695,111 +838,7 @@ impl LLMClient for AnthropicClient {
         )
     )]
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
-        info!("Generating raw text response with Anthropic");
-
-        // Build thinking config for Claude 4.x models
-        let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
-            || self.config.model.as_str().contains("opus-4");
-        let thinking_config = self.config.thinking_level.and_then(|level| {
-            if is_thinking_model && level.claude_thinking_enabled() {
-                Some(ClaudeThinkingConfig {
-                    thinking_type: "enabled".to_string(),
-                    budget_tokens: level.claude_budget_tokens(),
-                })
-            } else {
-                None
-            }
-        });
-
-        // Claude requires temperature=1 when thinking is enabled
-        let effective_temp = if thinking_config.is_some() {
-            1.0
-        } else {
-            self.config.temperature
-        };
-
-        // Build the request (no output_format for raw text generation)
-        debug!("Building Anthropic API request for text generation");
-        let request = CompletionRequest {
-            model: self.config.model.as_str().to_string(),
-            messages: vec![AnthropicMessage {
-                role: "user".to_string(),
-                content: AnthropicMessageContent::Text(prompt.to_string()),
-            }],
-            temperature: effective_temp,
-            max_tokens: effective_max_tokens(self.config.max_tokens, thinking_config.as_ref()),
-            thinking: thinking_config,
-            output_format: None, // Raw text generation doesn't use structured outputs
-        };
-
-        // Send the request to Anthropic
-        debug!(
-            model = %self.config.model.as_str(),
-            max_tokens = request.max_tokens,
-            "Sending request to Anthropic API"
-        );
-        let base_url = self
-            .config
-            .base_url
-            .as_deref()
-            .unwrap_or("https://api.anthropic.com/v1");
-        let url = format!("{}/messages", base_url);
-        debug!(url = %url, "Using Anthropic API endpoint");
-        let response = self
-            .client
-            .post(&url)
-            .header("x-api-key", &self.config.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| handle_http_error(e, "Anthropic"))?;
-
-        // Parse the response
-        let response = check_response_status(response, "Anthropic").await?;
-
-        debug!("Successfully received response from Anthropic");
-        let completion: CompletionResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from Anthropic");
-            e
-        })?;
-
-        // Extract usage info
-        let model_name = completion
-            .model
-            .clone()
-            .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion
-            .usage
-            .as_ref()
-            .map(|u| TokenUsage::new(model_name, u.input_tokens, u.output_tokens));
-
-        // Extract the content
-        debug!("Extracting text content from response blocks");
-        let content: String = completion
-            .content
-            .iter()
-            .filter(|block| block.block_type == "text")
-            .map(|block| block.text.clone())
-            .collect::<Vec<String>>()
-            .join("");
-
-        if content.is_empty() {
-            error!("No text content in Anthropic response");
-            return Err(RStructorError::api_error(
-                "Anthropic",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No text content in response".to_string(),
-                },
-            ));
-        }
-
-        debug!(
-            content_len = content.len(),
-            "Successfully extracted text content"
-        );
-        Ok(GenerateResult::new(content, usage))
+        self.generate_internal(&[ChatMessage::user(prompt)]).await
     }
 
     #[cfg(feature = "streaming")]

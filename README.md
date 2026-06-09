@@ -293,7 +293,7 @@ impl SchemaType for SecurityId {
 }
 ```
 
-## Multimodal (Image Input)
+## Multimodal (Image & PDF Input)
 
 Analyze images with structured extraction across all major providers by
 attaching media to a request with `with_media`:
@@ -329,7 +329,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `MediaFile::new(uri, mime_type)` is also available for URL/URI-based media input.
 The lower-level `LLMClient::materialize_with_media(prompt, &media)` method does
-the same thing in one call when you do not need the builder.
+the same thing in one call when you do not need the builder. Attached media is
+honored by `materialize`, `generate`, and tool `run` alike.
+
+PDFs are supported too: pass `"application/pdf"` as the MIME type and the
+attachment is routed to each provider's documented document format (OpenAI
+`file` part, Anthropic `document` block, Gemini `inlineData`/`fileData`).
+Combinations a provider does not support — PDFs on Grok, or URL-based PDFs on
+OpenAI chat completions — return a clear error instead of a broken request.
 
 Provider examples:
 - `cargo run --example openai_multimodal_example --features openai`

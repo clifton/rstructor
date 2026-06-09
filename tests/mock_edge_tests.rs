@@ -347,6 +347,25 @@ mod builder {
         assert_eq!(req.kind, RequestKind::Materialize);
         assert_eq!(req.prompt, "B\n\nhi");
     }
+
+    /// `with_media(..).generate(..)` routes through `generate_with_media`,
+    /// carrying the attached media instead of silently dropping it.
+    #[tokio::test]
+    async fn with_media_generate_routes_to_generate_with_media() {
+        let client = MockClient::new().with_response("a caption");
+        let media = [MediaFile::new("u", "image/png")];
+        let out = client
+            .with_media(&media)
+            .generate("describe")
+            .await
+            .unwrap();
+        assert_eq!(out, "a caption");
+        let req = client.last_request().unwrap();
+        assert_eq!(req.kind, RequestKind::GenerateWithMedia);
+        assert_eq!(req.prompt, "describe");
+        assert_eq!(req.media.len(), 1);
+        assert_eq!(req.media[0].mime_type, "image/png");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -372,5 +391,47 @@ mod tools {
             req.tool_names.is_empty(),
             "no tools were attached, so no tool loop should have run"
         );
+    }
+
+    /// `run` with NO tools but WITH media falls back to `generate_with_media`,
+    /// carrying the attached media instead of silently dropping it.
+    #[tokio::test]
+    async fn run_with_no_tools_and_media_falls_back_to_generate_with_media() {
+        let client = MockClient::new().with_response("answer");
+        let media = [rstructor::MediaFile::new("u", "image/png")];
+        let out = client.with_media(&media).run("hi").await.unwrap();
+        assert_eq!(out, "answer");
+        let req = client.last_request().unwrap();
+        assert_eq!(req.kind, RequestKind::GenerateWithMedia);
+        assert_eq!(req.media.len(), 1);
+    }
+
+    /// `run` WITH tools forwards attached media into the tool loop's request.
+    #[tokio::test]
+    async fn run_with_tools_carries_media_into_tool_loop() {
+        use rstructor::{FnTool, Instructor, Toolbox};
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Instructor, Serialize, Deserialize)]
+        struct EchoArgs {
+            value: String,
+        }
+
+        let toolbox = Toolbox::new().with(FnTool::new("echo", "Echo", |args: EchoArgs| {
+            std::future::ready(Ok(serde_json::json!(args.value)))
+        }));
+        let client = MockClient::new().with_response("done");
+        let media = [rstructor::MediaFile::new("u", "image/png")];
+        let out = client
+            .with_tools(&toolbox)
+            .media(media.to_vec())
+            .run("hi")
+            .await
+            .unwrap();
+        assert_eq!(out, "done");
+        let req = client.last_request().unwrap();
+        assert_eq!(req.kind, RequestKind::RunToolLoop);
+        assert_eq!(req.media.len(), 1, "media must reach the tool loop");
+        assert_eq!(req.tool_names, vec!["echo"]);
     }
 }

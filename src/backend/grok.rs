@@ -7,11 +7,12 @@ use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
     ModelInfo, OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
-    OpenAICompatibleChatMessage, OpenAICompatibleMessageContent, ResponseFormat, TokenUsage,
-    ValidationFailureContext, check_response_status, convert_openai_compatible_chat_messages,
-    generate_with_retry_with_history, handle_http_error, materialize_with_media_with_retry,
-    parse_validate_and_create_output, prepare_strict_schema,
+    ResponseFormat, TokenUsage, ValidationFailureContext, check_response_status,
+    convert_openai_compatible_chat_messages, generate_with_retry_with_history, handle_http_error,
+    materialize_with_media_with_retry, parse_validate_and_create_output, prepare_strict_schema,
 };
+#[cfg(feature = "streaming")]
+use crate::backend::{OpenAICompatibleChatMessage, OpenAICompatibleMessageContent};
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 
@@ -294,6 +295,94 @@ impl GrokClient {
             ))
         }
     }
+
+    /// Internal implementation of raw text generation (no structured output).
+    ///
+    /// Accepts chat messages so that callers can attach media (images) to the
+    /// user message; the same content-building path as `materialize_internal` is
+    /// used, so unsupported attachments (e.g. PDFs) fail with a clear error
+    /// instead of being silently mislabeled.
+    async fn generate_internal(&self, messages: &[ChatMessage]) -> Result<GenerateResult> {
+        info!("Generating raw text response with Grok");
+
+        // Build the request without structured outputs
+        debug!("Building Grok API request for text generation");
+        let request = OpenAICompatibleChatCompletionRequest {
+            model: self.config.model.as_str().to_string(),
+            messages: convert_openai_compatible_chat_messages(messages, "Grok")?,
+            response_format: None,
+            temperature: self.config.temperature,
+            max_tokens: self.config.max_tokens,
+            reasoning_effort: None,
+        };
+
+        // Send the request to Grok/xAI API
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.x.ai/v1");
+        let url = format!("{}/chat/completions", base_url);
+        debug!(url = %url, "Sending request to Grok API");
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| handle_http_error(e, "Grok"))?;
+
+        // Parse the response
+        let response = check_response_status(response, "Grok").await?;
+
+        debug!("Successfully received response from Grok API");
+        let completion: OpenAICompatibleChatCompletionResponse =
+            response.json().await.map_err(|e| {
+                error!(error = %e, "Failed to parse JSON response from Grok API");
+                e
+            })?;
+
+        if completion.choices.is_empty() {
+            error!("Grok API returned empty choices array");
+            return Err(RStructorError::api_error(
+                "Grok",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion choices returned".to_string(),
+                },
+            ));
+        }
+
+        // Extract usage info
+        let model_name = completion
+            .model
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name, u.prompt_tokens, u.completion_tokens));
+
+        let message = &completion.choices[0].message;
+        trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
+
+        if let Some(content) = &message.content {
+            debug!(
+                content_len = content.len(),
+                "Successfully extracted content from response"
+            );
+            Ok(GenerateResult::new(content.clone(), usage))
+        } else {
+            error!("No content in Grok API response");
+            Err(RStructorError::api_error(
+                "Grok",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No content in response".to_string(),
+                },
+            ))
+        }
+    }
 }
 
 // Generate builder methods using macro
@@ -382,6 +471,7 @@ impl crate::backend::tools::ToolRunner for GrokClient {
         &self,
         system: Option<&str>,
         prompt: &str,
+        media: &[super::MediaFile],
         toolbox: &crate::backend::tools::Toolbox,
         max_iterations: usize,
     ) -> Result<String> {
@@ -403,6 +493,7 @@ impl crate::backend::tools::ToolRunner for GrokClient {
             None,
             system,
             prompt,
+            media,
             toolbox,
             max_iterations,
         )
@@ -506,6 +597,26 @@ impl LLMClient for GrokClient {
     }
 
     #[instrument(
+        name = "grok_generate_with_media",
+        skip(self, prompt, media),
+        fields(
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn generate_with_media(
+        &self,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<String> {
+        let result = self
+            .generate_internal(&[ChatMessage::user_with_media(prompt, media.to_vec())])
+            .await?;
+        Ok(result.text)
+    }
+
+    #[instrument(
         name = "grok_generate_with_metadata",
         skip(self, prompt),
         fields(
@@ -514,88 +625,7 @@ impl LLMClient for GrokClient {
         )
     )]
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
-        info!("Generating raw text response with Grok");
-
-        // Build the request without structured outputs
-        debug!("Building Grok API request for text generation");
-        let request = OpenAICompatibleChatCompletionRequest {
-            model: self.config.model.as_str().to_string(),
-            messages: vec![OpenAICompatibleChatMessage {
-                role: "user".to_string(),
-                content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
-            }],
-            response_format: None,
-            temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
-            reasoning_effort: None,
-        };
-
-        // Send the request to Grok/xAI API
-        let base_url = self
-            .config
-            .base_url
-            .as_deref()
-            .unwrap_or("https://api.x.ai/v1");
-        let url = format!("{}/chat/completions", base_url);
-        debug!(url = %url, "Sending request to Grok API");
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| handle_http_error(e, "Grok"))?;
-
-        // Parse the response
-        let response = check_response_status(response, "Grok").await?;
-
-        debug!("Successfully received response from Grok API");
-        let completion: OpenAICompatibleChatCompletionResponse =
-            response.json().await.map_err(|e| {
-                error!(error = %e, "Failed to parse JSON response from Grok API");
-                e
-            })?;
-
-        if completion.choices.is_empty() {
-            error!("Grok API returned empty choices array");
-            return Err(RStructorError::api_error(
-                "Grok",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No completion choices returned".to_string(),
-                },
-            ));
-        }
-
-        // Extract usage info
-        let model_name = completion
-            .model
-            .clone()
-            .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion
-            .usage
-            .as_ref()
-            .map(|u| TokenUsage::new(model_name, u.prompt_tokens, u.completion_tokens));
-
-        let message = &completion.choices[0].message;
-        trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
-
-        if let Some(content) = &message.content {
-            debug!(
-                content_len = content.len(),
-                "Successfully extracted content from response"
-            );
-            Ok(GenerateResult::new(content.clone(), usage))
-        } else {
-            error!("No content in Grok API response");
-            Err(RStructorError::api_error(
-                "Grok",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No content in response".to_string(),
-                },
-            ))
-        }
+        self.generate_internal(&[ChatMessage::user(prompt)]).await
     }
 
     #[cfg(feature = "streaming")]

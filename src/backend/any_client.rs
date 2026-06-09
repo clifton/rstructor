@@ -209,6 +209,10 @@ impl LLMClient for AnyClient {
         dispatch!(self, c => c.generate(prompt).await)
     }
 
+    async fn generate_with_media(&self, prompt: &str, media: &[MediaFile]) -> Result<String> {
+        dispatch!(self, c => c.generate_with_media(prompt, media).await)
+    }
+
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         dispatch!(self, c => c.generate_with_metadata(prompt).await)
     }
