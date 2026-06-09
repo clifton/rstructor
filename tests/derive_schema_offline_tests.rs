@@ -788,3 +788,91 @@ fn serde_json_value_field_is_any_json() {
     // The neighbor field is unaffected.
     assert_eq!(schema["properties"]["name"]["type"], "string");
 }
+
+// ============================================================================
+// Nested collections: Vec<Vec<T>>, Vec<Vec<Vec<T>>>, Vec<HashSet<T>>
+// ============================================================================
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct NestedCollections {
+    #[llm(description = "A matrix of integers")]
+    matrix: Vec<Vec<i32>>,
+    #[llm(description = "A cube of strings")]
+    cube: Vec<Vec<Vec<String>>>,
+    #[llm(description = "A list of unique-tag sets")]
+    tag_sets: Vec<std::collections::HashSet<String>>,
+    #[llm(description = "Optional matrix")]
+    opt_matrix: Option<Vec<Vec<f64>>>,
+}
+
+#[test]
+fn nested_vec_field_keeps_inner_items() {
+    let schema = NestedCollections::schema().to_json();
+
+    // Vec<Vec<i32>>: every nesting level carries its own items schema.
+    let matrix = &schema["properties"]["matrix"];
+    assert_eq!(matrix["type"], "array");
+    assert_eq!(matrix["items"]["type"], "array");
+    assert_eq!(
+        matrix["items"]["items"]["type"], "integer",
+        "Vec<Vec<i32>> must recurse: items.items.type == integer, got: {matrix:?}"
+    );
+}
+
+#[test]
+fn triply_nested_vec_field_keeps_all_items() {
+    let schema = NestedCollections::schema().to_json();
+    let cube = &schema["properties"]["cube"];
+    assert_eq!(cube["type"], "array");
+    assert_eq!(cube["items"]["type"], "array");
+    assert_eq!(cube["items"]["items"]["type"], "array");
+    assert_eq!(
+        cube["items"]["items"]["items"]["type"], "string",
+        "Vec<Vec<Vec<String>>> must recurse three levels, got: {cube:?}"
+    );
+}
+
+#[test]
+fn vec_of_hashset_field_keeps_inner_items() {
+    let schema = NestedCollections::schema().to_json();
+    let tag_sets = &schema["properties"]["tag_sets"];
+    assert_eq!(tag_sets["type"], "array");
+    assert_eq!(tag_sets["items"]["type"], "array");
+    assert_eq!(tag_sets["items"]["items"]["type"], "string");
+}
+
+#[test]
+fn optional_nested_vec_field_keeps_inner_items() {
+    let schema = NestedCollections::schema().to_json();
+    let opt_matrix = &schema["properties"]["opt_matrix"];
+    assert_eq!(opt_matrix["type"], "array");
+    assert_eq!(opt_matrix["items"]["type"], "array");
+    assert_eq!(opt_matrix["items"]["items"]["type"], "number");
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(!required.contains(&"opt_matrix"));
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct NestedStructMatrix {
+    #[llm(description = "Grid of addresses")]
+    grid: Vec<Vec<Address>>,
+}
+
+#[test]
+fn nested_vec_of_structs_embeds_inner_schema() {
+    let schema = NestedStructMatrix::schema().to_json();
+    let grid = &schema["properties"]["grid"];
+    assert_eq!(grid["type"], "array");
+    assert_eq!(grid["items"]["type"], "array");
+    // Innermost items embed the struct's full object schema.
+    assert_eq!(grid["items"]["items"]["type"], "object");
+    assert_eq!(
+        grid["items"]["items"]["properties"]["street"]["type"],
+        "string"
+    );
+}

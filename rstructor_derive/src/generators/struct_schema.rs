@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{DataStruct, Fields, Ident};
+use syn::{DataStruct, Fields, Ident, Type};
 
 use crate::container_attrs::ContainerAttributes;
 use crate::parsers::field_parser::parse_field_attributes;
@@ -119,113 +119,16 @@ pub fn generate_struct_schema(
                             &field.ty
                         };
                     if let Some(inner_type) = get_array_inner_type(actual_array_type) {
-                        // Get the inner schema type
-                        let inner_schema_type = get_schema_type_from_rust_type(inner_type);
+                        // Generate the items schema, recursing into nested
+                        // collections so e.g. Vec<Vec<i32>> keeps its inner items
+                        let items_expr = generate_array_items_schema(inner_type, &struct_name_str);
+                        quote! {
+                            // Create property for this array field
+                            let mut props = ::serde_json::Map::new();
+                            props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
 
-                        // Extract inner type name for well-known library types only
-                        let inner_type_name = get_type_name(inner_type);
-
-                        // Check for well-known library types by exact match only
-                        let is_datetime = matches!(
-                            inner_type_name.as_deref(),
-                            Some("DateTime") | Some("NaiveDateTime")
-                        );
-                        let is_date_only =
-                            matches!(inner_type_name.as_deref(), Some("NaiveDate") | Some("Date"));
-                        let is_uuid = matches!(inner_type_name.as_deref(), Some("Uuid"));
-
-                        // Generate items schema
-                        if is_datetime {
-                            // Handle array of date-times
-                            quote! {
-                                // Create property for this array field with date-time items
-                                let mut props = ::serde_json::Map::new();
-                                props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-
-                                // Add items schema for date-times
-                                let mut items_schema = ::serde_json::Map::new();
-                                items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
-                                items_schema.insert("format".to_string(), ::serde_json::Value::String("date-time".to_string()));
-                                items_schema.insert("description".to_string(),
-                                    ::serde_json::Value::String("ISO-8601 formatted date and time".to_string()));
-
-                                props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
-                            }
-                        } else if is_date_only {
-                            // Handle array of date-only values
-                            quote! {
-                                // Create property for this array field with date items
-                                let mut props = ::serde_json::Map::new();
-                                props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-
-                                // Add items schema for dates
-                                let mut items_schema = ::serde_json::Map::new();
-                                items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
-                                items_schema.insert("format".to_string(), ::serde_json::Value::String("date".to_string()));
-                                items_schema.insert("description".to_string(),
-                                    ::serde_json::Value::String("ISO-8601 formatted date (YYYY-MM-DD)".to_string()));
-
-                                props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
-                            }
-                        } else if is_uuid {
-                            // Handle array of UUIDs
-                            quote! {
-                                // Create property for this array field with UUID items
-                                let mut props = ::serde_json::Map::new();
-                                props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-
-                                // Add items schema for UUIDs
-                                let mut items_schema = ::serde_json::Map::new();
-                                items_schema.insert("type".to_string(), ::serde_json::Value::String("string".to_string()));
-                                items_schema.insert("format".to_string(), ::serde_json::Value::String("uuid".to_string()));
-                                items_schema.insert("description".to_string(),
-                                    ::serde_json::Value::String("UUID identifier string".to_string()));
-
-                                props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
-                            }
-                        } else if inner_schema_type == "object" {
-                            // Check if this is a self-reference (recursive type)
-                            let struct_name_str = name.to_string();
-                            if is_self_reference(inner_type, &struct_name_str) {
-                                // For self-referential types, use $ref to prevent infinite recursion
-                                quote! {
-                                    // Create property for this array field with recursive reference
-                                    let mut props = ::serde_json::Map::new();
-                                    props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-
-                                    // Use $ref for recursive type
-                                    let mut items_schema = ::serde_json::Map::new();
-                                    items_schema.insert("$ref".to_string(), ::serde_json::Value::String(format!("#/$defs/{}", #struct_name_str)));
-                                    props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
-                                }
-                            } else {
-                                // For arrays of nested structs, embed the inner type's schema directly
-                                // This requires the inner type to implement SchemaType
-                                quote! {
-                                    // Create property for this array field with nested struct items
-                                    let mut props = ::serde_json::Map::new();
-                                    props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-
-                                    // Get the inner type's schema directly
-                                    // This embeds the full schema with properties at compile time
-                                    let inner_schema = <#inner_type as ::rstructor::schema::SchemaType>::schema();
-                                    let items_schema = inner_schema.to_json();
-
-                                    props.insert("items".to_string(), items_schema);
-                                }
-                            }
-                        } else {
-                            // Standard handling for primitive types
-                            quote! {
-                                // Create property for this array field
-                                let mut props = ::serde_json::Map::new();
-                                props.insert("type".to_string(), ::serde_json::Value::String(#schema_type.to_string()));
-
-                                // Add items schema
-                                let mut items_schema = ::serde_json::Map::new();
-                                items_schema.insert("type".to_string(), ::serde_json::Value::String(#inner_schema_type.to_string()));
-                                props.insert("items".to_string(), ::serde_json::Value::Object(items_schema));
-                            }
+                            // Add items schema (recursive for nested collections)
+                            props.insert("items".to_string(), #items_expr);
                         }
                     } else {
                         // Fallback for array without detectable item type
@@ -577,6 +480,88 @@ pub fn generate_struct_schema(
                     Some(stringify!(#name).to_string())
                 }
             }
+        }
+    }
+}
+
+/// Generate an expression evaluating to the JSON Schema `items` value for an
+/// array whose element type is `inner_type`.
+///
+/// Recurses into nested collections (`Vec<Vec<i32>>`, `Vec<HashSet<String>>`,
+/// ...) so every nesting level carries its own `items` schema, and emits a
+/// `$ref` for self-referential element types to prevent infinite recursion.
+fn generate_array_items_schema(inner_type: &Type, struct_name_str: &str) -> TokenStream {
+    // Check for well-known library types by exact match only (no heuristics)
+    let inner_type_name = get_type_name(inner_type);
+    let is_datetime = matches!(
+        inner_type_name.as_deref(),
+        Some("DateTime") | Some("NaiveDateTime")
+    );
+    let is_date_only = matches!(inner_type_name.as_deref(), Some("NaiveDate") | Some("Date"));
+    let is_uuid = matches!(inner_type_name.as_deref(), Some("Uuid"));
+
+    if is_datetime {
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO-8601 formatted date and time"
+            })
+        };
+    }
+    if is_date_only {
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "date",
+                "description": "ISO-8601 formatted date (YYYY-MM-DD)"
+            })
+        };
+    }
+    if is_uuid {
+        return quote! {
+            ::serde_json::json!({
+                "type": "string",
+                "format": "uuid",
+                "description": "UUID identifier string"
+            })
+        };
+    }
+
+    // Nested collections: recurse so the inner `items` schema is preserved
+    if is_array_type(inner_type)
+        && let Some(next_inner) = get_array_inner_type(inner_type)
+    {
+        let nested_items = generate_array_items_schema(next_inner, struct_name_str);
+        return quote! {
+            {
+                let mut items_schema = ::serde_json::Map::new();
+                items_schema.insert("type".to_string(), ::serde_json::Value::String("array".to_string()));
+                items_schema.insert("items".to_string(), #nested_items);
+                ::serde_json::Value::Object(items_schema)
+            }
+        };
+    }
+
+    // Self-referential element types use $ref to prevent infinite recursion
+    if is_self_reference(inner_type, struct_name_str) {
+        return quote! {
+            ::serde_json::json!({ "$ref": format!("#/$defs/{}", #struct_name_str) })
+        };
+    }
+
+    let inner_schema_type = get_schema_type_from_rust_type(inner_type);
+    if inner_schema_type == "object" {
+        // For nested structs (and Box/HashMap wrappers), embed the inner
+        // type's schema directly. This requires the inner type to implement
+        // SchemaType.
+        quote! {
+            <#inner_type as ::rstructor::schema::SchemaType>::schema().to_json()
+        }
+    } else {
+        // Standard handling for primitive types
+        quote! {
+            ::serde_json::json!({ "type": #inner_schema_type })
         }
     }
 }
