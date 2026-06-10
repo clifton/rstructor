@@ -57,7 +57,8 @@ impl<'a, C: ?Sized> Request<'a, C> {
         self
     }
 
-    /// Attach media (images) to the request (used by `materialize`).
+    /// Attach media (images, or PDFs where the provider supports them) to the
+    /// request. Used by `materialize`, `generate`, and `run`.
     #[must_use]
     pub fn media(mut self, media: impl Into<Vec<MediaFile>>) -> Self {
         self.media = media.into();
@@ -106,9 +107,14 @@ impl<C: LLMClient + Sync + ?Sized> Request<'_, C> {
         }
     }
 
-    /// Generate raw text, applying any attached system context.
+    /// Generate raw text, applying any attached system context and media.
     pub async fn generate(self, prompt: &str) -> Result<String> {
-        self.client.generate(&self.combined(prompt)).await
+        let prompt = self.combined(prompt);
+        if self.media.is_empty() {
+            self.client.generate(&prompt).await
+        } else {
+            self.client.generate_with_media(&prompt, &self.media).await
+        }
     }
 }
 
@@ -170,16 +176,30 @@ impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
 #[cfg(feature = "tools")]
 impl<C: crate::backend::tools::ToolRunner + LLMClient + Sync + ?Sized> Request<'_, C> {
     /// Get a text answer, letting the model call attached tools (if any) in a loop
-    /// until it produces a final response. With no tools attached this is
-    /// equivalent to [`generate`](Self::generate).
+    /// until it produces a final response. Attached media is included in the
+    /// initial user turn. With no tools attached this is equivalent to
+    /// [`generate`](Self::generate).
     pub async fn run(self, prompt: &str) -> Result<String> {
         match self.tools {
             Some(toolbox) => {
                 self.client
-                    .run_tool_loop(self.system.as_deref(), prompt, toolbox, self.max_iterations)
+                    .run_tool_loop(
+                        self.system.as_deref(),
+                        prompt,
+                        &self.media,
+                        toolbox,
+                        self.max_iterations,
+                    )
                     .await
             }
-            None => self.client.generate(&self.combined(prompt)).await,
+            None => {
+                let prompt = self.combined(prompt);
+                if self.media.is_empty() {
+                    self.client.generate(&prompt).await
+                } else {
+                    self.client.generate_with_media(&prompt, &self.media).await
+                }
+            }
         }
     }
 }
@@ -199,7 +219,8 @@ pub trait RequestExt: LLMClient {
         Request::new(self).system(system)
     }
 
-    /// Start a request with attached media (images).
+    /// Start a request with attached media (images, or PDFs where the provider
+    /// supports them).
     fn with_media<'a>(&'a self, media: &'a [MediaFile]) -> Request<'a, Self> {
         Request::new(self).media(media.to_vec())
     }

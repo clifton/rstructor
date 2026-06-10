@@ -201,6 +201,50 @@ struct CandidatePart {
     text: Option<String>,
 }
 
+/// Convert provider-agnostic chat messages into Gemini `contents`, including any
+/// attached media as `inlineData` (base64) or `fileData` (URI) parts. Gemini
+/// passes the MIME type through, so images and PDFs share the same encoding.
+fn chat_messages_to_contents(messages: &[ChatMessage]) -> Vec<Content> {
+    messages
+        .iter()
+        .map(|msg| {
+            // Gemini uses "user" and "model" (not "assistant")
+            let role = if msg.role.as_str() == "assistant" {
+                "model"
+            } else {
+                msg.role.as_str()
+            };
+            let mut parts = Vec::new();
+            if !msg.content.is_empty() {
+                parts.push(Part::Text {
+                    text: msg.content.clone(),
+                });
+            }
+            for media in &msg.media {
+                if let Some(ref base64_data) = media.data {
+                    parts.push(Part::InlineData {
+                        inline_data: InlineData {
+                            mime_type: media.mime_type.clone(),
+                            data: base64_data.clone(),
+                        },
+                    });
+                } else {
+                    parts.push(Part::FileData {
+                        file_data: FileData {
+                            mime_type: media.mime_type.clone(),
+                            file_uri: media.uri.clone(),
+                        },
+                    });
+                }
+            }
+            Content {
+                role: Some(role.to_string()),
+                parts,
+            }
+        })
+        .collect()
+}
+
 impl GeminiClient {
     /// Create a new Gemini client with the provided API key.
     ///
@@ -321,44 +365,7 @@ impl GeminiClient {
 
         // Build API contents from conversation history
         // With native response_schema, we don't need to include schema instructions in the prompt
-        let contents: Vec<Content> = messages
-            .iter()
-            .map(|msg| {
-                // Gemini uses "user" and "model" (not "assistant")
-                let role = if msg.role.as_str() == "assistant" {
-                    "model"
-                } else {
-                    msg.role.as_str()
-                };
-                let mut parts = Vec::new();
-                if !msg.content.is_empty() {
-                    parts.push(Part::Text {
-                        text: msg.content.clone(),
-                    });
-                }
-                for media in &msg.media {
-                    if let Some(ref base64_data) = media.data {
-                        parts.push(Part::InlineData {
-                            inline_data: InlineData {
-                                mime_type: media.mime_type.clone(),
-                                data: base64_data.clone(),
-                            },
-                        });
-                    } else {
-                        parts.push(Part::FileData {
-                            file_data: FileData {
-                                mime_type: media.mime_type.clone(),
-                                file_uri: media.uri.clone(),
-                            },
-                        });
-                    }
-                }
-                Content {
-                    role: Some(role.to_string()),
-                    parts,
-                }
-            })
-            .collect();
+        let contents = chat_messages_to_contents(messages);
 
         // Build thinking config only for Gemini 3.x models
         let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
@@ -492,6 +499,123 @@ impl GeminiClient {
             ),
             None,
         ))
+    }
+
+    /// Internal implementation of raw text generation (no structured output).
+    ///
+    /// Accepts chat messages so that callers can attach media (images/PDFs) to
+    /// the user message; the same content-building path as `materialize_internal`
+    /// is used, so media is encoded as `inlineData`/`fileData` parts.
+    async fn generate_internal(&self, messages: &[ChatMessage]) -> Result<GenerateResult> {
+        info!("Generating raw text response with Gemini");
+
+        // Build thinking config only for Gemini 3.x models
+        let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
+        let thinking_config = if is_gemini3 {
+            self.config.thinking_level.and_then(|level| {
+                level.gemini_level().map(|l| ThinkingConfig {
+                    thinking_level: l.to_string(),
+                })
+            })
+        } else {
+            None
+        };
+
+        // Build the request, including any attached media parts
+        debug!("Building Gemini API request");
+        let request = GenerateContentRequest {
+            contents: chat_messages_to_contents(messages),
+            generation_config: GenerationConfig {
+                temperature: self.config.temperature,
+                max_output_tokens: self.config.max_tokens,
+                response_mime_type: None,
+                response_schema: None,
+                thinking_config,
+            },
+        };
+
+        // Send the request to Gemini API
+        let base_url = self
+            .config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://generativelanguage.googleapis.com/v1beta");
+        let url = format!(
+            "{}/models/{}:generateContent",
+            base_url,
+            self.config.model.as_str()
+        );
+        debug!(
+            url = %url,
+            model = %self.config.model.as_str(),
+            "Sending request to Gemini API"
+        );
+        let response = self
+            .client
+            .post(&url)
+            .query(&[("key", &self.config.api_key)])
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| handle_http_error(e, "Gemini"))?;
+
+        // Parse the response
+        let response = check_response_status(response, "Gemini").await?;
+
+        debug!("Successfully received response from Gemini API");
+        let completion: GenerateContentResponse = response.json().await.map_err(|e| {
+            error!(error = %e, "Failed to parse JSON response from Gemini API");
+            e
+        })?;
+
+        if completion.candidates.is_empty() {
+            error!("Gemini API returned empty candidates array");
+            return Err(RStructorError::api_error(
+                "Gemini",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion candidates returned".to_string(),
+                },
+            ));
+        }
+
+        // Extract usage info
+        let model_name = completion
+            .model_version
+            .clone()
+            .unwrap_or_else(|| self.config.model.as_str().to_string());
+        let usage = completion
+            .usage_metadata
+            .as_ref()
+            .map(|u| TokenUsage::new(model_name, u.prompt_token_count, u.candidates_token_count));
+
+        let candidate = &completion.candidates[0];
+        trace!(finish_reason = %candidate.finish_reason, "Completion finish reason");
+
+        // Extract the text content
+        match candidate
+            .content
+            .parts
+            .first()
+            .and_then(|p| p.text.as_ref())
+        {
+            Some(text) => {
+                debug!(
+                    content_len = text.len(),
+                    "Successfully extracted text content from response"
+                );
+                Ok(GenerateResult::new(text.clone(), usage))
+            }
+            None => {
+                error!("No text content in Gemini response");
+                Err(RStructorError::api_error(
+                    "Gemini",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No text content in response".to_string(),
+                    },
+                ))
+            }
+        }
     }
 }
 
@@ -632,6 +756,7 @@ impl crate::backend::tools::ToolRunner for GeminiClient {
         &self,
         system: Option<&str>,
         prompt: &str,
+        media: &[super::MediaFile],
         toolbox: &crate::backend::tools::Toolbox,
         max_iterations: usize,
     ) -> Result<String> {
@@ -649,6 +774,7 @@ impl crate::backend::tools::ToolRunner for GeminiClient {
             self.config.max_tokens,
             system,
             prompt,
+            media,
             toolbox,
             max_iterations,
         )
@@ -752,6 +878,26 @@ impl LLMClient for GeminiClient {
     }
 
     #[instrument(
+        name = "gemini_generate_with_media",
+        skip(self, prompt, media),
+        fields(
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn generate_with_media(
+        &self,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<String> {
+        let result = self
+            .generate_internal(&[ChatMessage::user_with_media(prompt, media.to_vec())])
+            .await?;
+        Ok(result.text)
+    }
+
+    #[instrument(
         name = "gemini_generate_with_metadata",
         skip(self, prompt),
         fields(
@@ -760,120 +906,7 @@ impl LLMClient for GeminiClient {
         )
     )]
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
-        info!("Generating raw text response with Gemini");
-
-        // Build thinking config only for Gemini 3.x models
-        let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
-        let thinking_config = if is_gemini3 {
-            self.config.thinking_level.and_then(|level| {
-                level.gemini_level().map(|l| ThinkingConfig {
-                    thinking_level: l.to_string(),
-                })
-            })
-        } else {
-            None
-        };
-
-        // Build the request
-        debug!("Building Gemini API request");
-        let request = GenerateContentRequest {
-            contents: vec![Content {
-                role: Some("user".to_string()),
-                parts: vec![Part::Text {
-                    text: prompt.to_string(),
-                }],
-            }],
-            generation_config: GenerationConfig {
-                temperature: self.config.temperature,
-                max_output_tokens: self.config.max_tokens,
-                response_mime_type: None,
-                response_schema: None,
-                thinking_config,
-            },
-        };
-
-        // Send the request to Gemini API
-        let base_url = self
-            .config
-            .base_url
-            .as_deref()
-            .unwrap_or("https://generativelanguage.googleapis.com/v1beta");
-        let url = format!(
-            "{}/models/{}:generateContent",
-            base_url,
-            self.config.model.as_str()
-        );
-        debug!(
-            url = %url,
-            model = %self.config.model.as_str(),
-            "Sending request to Gemini API"
-        );
-        let response = self
-            .client
-            .post(&url)
-            .query(&[("key", &self.config.api_key)])
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| handle_http_error(e, "Gemini"))?;
-
-        // Parse the response
-        let response = check_response_status(response, "Gemini").await?;
-
-        debug!("Successfully received response from Gemini API");
-        let completion: GenerateContentResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from Gemini API");
-            e
-        })?;
-
-        if completion.candidates.is_empty() {
-            error!("Gemini API returned empty candidates array");
-            return Err(RStructorError::api_error(
-                "Gemini",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No completion candidates returned".to_string(),
-                },
-            ));
-        }
-
-        // Extract usage info
-        let model_name = completion
-            .model_version
-            .clone()
-            .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion
-            .usage_metadata
-            .as_ref()
-            .map(|u| TokenUsage::new(model_name, u.prompt_token_count, u.candidates_token_count));
-
-        let candidate = &completion.candidates[0];
-        trace!(finish_reason = %candidate.finish_reason, "Completion finish reason");
-
-        // Extract the text content
-        match candidate
-            .content
-            .parts
-            .first()
-            .and_then(|p| p.text.as_ref())
-        {
-            Some(text) => {
-                debug!(
-                    content_len = text.len(),
-                    "Successfully extracted text content from response"
-                );
-                Ok(GenerateResult::new(text.clone(), usage))
-            }
-            None => {
-                error!("No text content in Gemini response");
-                Err(RStructorError::api_error(
-                    "Gemini",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No text content in response".to_string(),
-                    },
-                ))
-            }
-        }
+        self.generate_internal(&[ChatMessage::user(prompt)]).await
     }
 
     #[cfg(feature = "streaming")]

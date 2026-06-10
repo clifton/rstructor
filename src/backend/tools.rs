@@ -264,6 +264,7 @@ pub(crate) async fn run_openai_compatible_tools(
     reasoning_effort: Option<String>,
     system: Option<&str>,
     prompt: &str,
+    media: &[crate::backend::MediaFile],
     toolbox: &Toolbox,
     max_iterations: usize,
 ) -> Result<String> {
@@ -276,7 +277,12 @@ pub(crate) async fn run_openai_compatible_tools(
     if let Some(system) = system {
         messages.push(json!({ "role": "system", "content": system }));
     }
-    messages.push(json!({ "role": "user", "content": prompt }));
+    // Encode any attached media with the same content builder as materialize, so
+    // images/PDFs are carried (or rejected with a clear error) per provider rules.
+    let user_msg = crate::backend::ChatMessage::user_with_media(prompt, media.to_vec());
+    let user_content =
+        crate::backend::build_openai_compatible_message_content(&user_msg, provider)?;
+    messages.push(json!({ "role": "user", "content": user_content }));
 
     for iteration in 0..max_iterations {
         let mut body = json!({
@@ -396,6 +402,7 @@ pub(crate) async fn run_anthropic_tools(
     max_tokens: u32,
     system: Option<&str>,
     prompt: &str,
+    media: &[crate::backend::MediaFile],
     toolbox: &Toolbox,
     max_iterations: usize,
 ) -> Result<String> {
@@ -405,7 +412,11 @@ pub(crate) async fn run_anthropic_tools(
 
     let tools_json = toolbox.anthropic_tools_json();
     let url = format!("{base_url}/messages");
-    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": prompt })];
+    // Encode any attached media with the same content builder as materialize, so
+    // images/PDFs are carried (or rejected with a clear error) per provider rules.
+    let user_msg = crate::backend::ChatMessage::user_with_media(prompt, media.to_vec());
+    let user_content = crate::backend::build_anthropic_message_content(&user_msg)?;
+    let mut messages: Vec<Value> = vec![json!({ "role": "user", "content": user_content })];
 
     for _ in 0..max_iterations {
         let mut body = json!({
@@ -495,6 +506,7 @@ pub(crate) async fn run_gemini_tools(
     max_tokens: Option<u32>,
     system: Option<&str>,
     prompt: &str,
+    media: &[crate::backend::MediaFile],
     toolbox: &Toolbox,
     max_iterations: usize,
 ) -> Result<String> {
@@ -504,7 +516,21 @@ pub(crate) async fn run_gemini_tools(
 
     let tools_json = toolbox.gemini_tools_json();
     let url = format!("{base_url}/models/{model}:generateContent");
-    let mut contents: Vec<Value> = vec![json!({ "role": "user", "parts": [{ "text": prompt }] })];
+    // Attach any media to the initial user turn, mirroring the materialize path:
+    // inline base64 data becomes `inlineData`, URI references become `fileData`.
+    let mut user_parts: Vec<Value> = vec![json!({ "text": prompt })];
+    for m in media {
+        if let Some(data) = m.data.as_ref() {
+            user_parts.push(json!({
+                "inlineData": { "mimeType": m.mime_type, "data": data }
+            }));
+        } else {
+            user_parts.push(json!({
+                "fileData": { "mimeType": m.mime_type, "fileUri": m.uri }
+            }));
+        }
+    }
+    let mut contents: Vec<Value> = vec![json!({ "role": "user", "parts": user_parts })];
 
     for _ in 0..max_iterations {
         let mut generation_config = json!({ "temperature": temperature });
@@ -585,7 +611,8 @@ pub(crate) async fn run_gemini_tools(
 ///
 /// Implemented for each provider client and driven by the fluent
 /// [`Request`](crate::Request) builder (`client.with_tools(..).run(..)`); not
-/// called directly.
+/// called directly. `media` carries any attachments from
+/// [`Request::media`](crate::Request::media), included in the initial user turn.
 #[doc(hidden)]
 #[async_trait]
 pub trait ToolRunner {
@@ -593,6 +620,7 @@ pub trait ToolRunner {
         &self,
         system: Option<&str>,
         prompt: &str,
+        media: &[crate::backend::MediaFile],
         toolbox: &Toolbox,
         max_iterations: usize,
     ) -> Result<String>;

@@ -16,6 +16,13 @@ use crate::model::Instructor;
 ///   Created with [`MediaFile::from_bytes`]. This is useful for public images
 ///   downloaded over HTTPS.
 ///
+/// The `mime_type` decides how each provider encodes the attachment: `image/*`
+/// is sent in the provider's image format, and `application/pdf` is routed to
+/// the provider's document/file format (OpenAI `file` part for inline data,
+/// Anthropic `document` block, Gemini `inlineData`/`fileData`). Combinations a
+/// provider does not document — e.g. any PDF on Grok, or a URL-based PDF on
+/// OpenAI — produce a clear error instead of a silently broken request.
+///
 /// # Examples
 ///
 /// ```no_run
@@ -30,6 +37,10 @@ use crate::model::Instructor;
 /// // Inline data from bytes
 /// let image_bytes = std::fs::read("photo.png").unwrap();
 /// let media = MediaFile::from_bytes(&image_bytes, "image/png");
+///
+/// // Inline PDF (OpenAI, Anthropic, and Gemini)
+/// let pdf_bytes = std::fs::read("report.pdf").unwrap();
+/// let media = MediaFile::from_bytes(&pdf_bytes, "application/pdf");
 /// ```
 #[derive(Debug, Clone)]
 pub struct MediaFile {
@@ -281,6 +292,45 @@ pub trait LLMClient {
     /// # }
     /// ```
     async fn generate(&self, prompt: &str) -> Result<String>;
+
+    /// Raw text completion with media attachments (if supported).
+    ///
+    /// Like [`generate`](Self::generate), but the prompt is sent together with
+    /// `media` (images, or PDFs where the provider supports them), encoded in the
+    /// provider's documented multimodal format.
+    ///
+    /// The default implementation forwards to [`generate`](Self::generate) when
+    /// no media is provided, and otherwise returns
+    /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) so that
+    /// media is never silently dropped. Providers with media support override this
+    /// method. All four built-in clients (OpenAI, Anthropic, Grok, Gemini) support
+    /// media here; PDF support varies by provider (Grok, for example, accepts only
+    /// images and returns a clear error for PDFs).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{LLMClient, OpenAIClient, MediaFile};
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// let pdf_bytes = std::fs::read("report.pdf")?;
+    /// let media = [MediaFile::from_bytes(&pdf_bytes, "application/pdf")];
+    /// let summary = client
+    ///     .generate_with_media("Summarize this report", &media)
+    ///     .await?;
+    /// println!("{summary}");
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn generate_with_media(&self, prompt: &str, media: &[MediaFile]) -> Result<String> {
+        if media.is_empty() {
+            self.generate(prompt).await
+        } else {
+            Err(crate::error::RStructorError::Unsupported(
+                "this client does not support media inputs".to_string(),
+            ))
+        }
+    }
 
     /// Raw completion with metadata (token usage).
     ///

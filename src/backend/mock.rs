@@ -153,6 +153,8 @@ pub enum RequestKind {
     MaterializeWithMedia,
     /// [`LLMClient::generate`](crate::LLMClient::generate)
     Generate,
+    /// [`LLMClient::generate_with_media`](crate::LLMClient::generate_with_media)
+    GenerateWithMedia,
     /// [`LLMClient::generate_with_metadata`](crate::LLMClient::generate_with_metadata)
     GenerateWithMetadata,
     /// [`LLMClient::list_models`](crate::LLMClient::list_models)
@@ -185,7 +187,8 @@ pub struct RecordedRequest {
     pub schema: Option<Value>,
     /// The schema name of the target type, when known.
     pub schema_name: Option<String>,
-    /// Media attached to the call (for `materialize_with_media`).
+    /// Media attached to the call (for `materialize_with_media`,
+    /// `generate_with_media`, and the tool loop).
     pub media: Vec<MediaFile>,
     /// Tool names offered to the call (for the tool loop; empty otherwise).
     #[cfg(feature = "tools")]
@@ -627,6 +630,16 @@ impl LLMClient for MockClient {
         }
     }
 
+    async fn generate_with_media(&self, prompt: &str, media: &[MediaFile]) -> Result<String> {
+        let mut view = MockRequestView::bare(RequestKind::GenerateWithMedia, prompt);
+        view.media = media;
+        self.record(&view);
+        match self.pick_response(&view) {
+            MockResponse::Text(s) => Ok(s),
+            MockResponse::Error(e) => Err(e),
+        }
+    }
+
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         let view = MockRequestView::bare(RequestKind::GenerateWithMetadata, prompt);
         self.record(&view);
@@ -755,11 +768,13 @@ impl crate::backend::tools::ToolRunner for MockClient {
         &self,
         _system: Option<&str>,
         prompt: &str,
+        media: &[MediaFile],
         toolbox: &crate::backend::tools::Toolbox,
         _max_iterations: usize,
     ) -> Result<String> {
         let tool_names = toolbox.tool_names();
         let mut view = MockRequestView::bare(RequestKind::RunToolLoop, prompt);
+        view.media = media;
         view.tool_names = &tool_names;
         self.record(&view);
 
