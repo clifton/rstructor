@@ -1220,6 +1220,22 @@ pub async fn check_response_status(response: Response, provider_name: &str) -> R
     Ok(response)
 }
 
+/// Builds the user-role feedback message sent back to the LLM when a response
+/// fails schema or custom validation (the re-ask prompt).
+///
+/// The array guidance deliberately avoids any minimum-count instruction.
+/// Telling the model to include "at least N" items induces fabrication: a
+/// model that correctly extracted one item (or zero) from the source material
+/// would be instructed to invent more. Instead, the prompt requires arrays to
+/// contain only entries actually supported by the input — a single-item or
+/// empty array is valid when that is all the data supports.
+fn validation_retry_feedback(error_message: &str) -> String {
+    format!(
+        "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n4. Arrays must contain ONLY items actually supported by the input: an array may have a single item or be empty if that is what the data supports — NEVER invent entries to pad an array\n5. Verify all nested objects have their complete structure\n6. Follow ALL type specifications (string, number, boolean, array, object)",
+        error_message
+    )
+}
+
 /// Helper function to execute generation with retry logic using conversation history.
 ///
 /// This function maintains a conversation history across retry attempts, which enables:
@@ -1342,10 +1358,7 @@ where
                         messages.push(ChatMessage::assistant(&ctx.raw_response));
 
                         // Add user message with error feedback
-                        let error_feedback = format!(
-                            "Your previous response contained validation errors. Please provide a complete, valid JSON response that includes ALL required fields and follows the schema exactly.\n\nError details:\n{}\n\nPlease fix the issues in your response. Make sure to:\n1. Include ALL required fields exactly as specified in the schema\n2. For enum fields, use EXACTLY one of the allowed values from the description\n3. CRITICAL: For arrays where items.type = 'object':\n   - You MUST provide an array of OBJECTS, not strings or primitive values\n   - Each object must be a complete JSON object with all its required fields\n   - Include multiple items (at least 2-3) in arrays of objects\n4. Verify all nested objects have their complete structure\n5. Follow ALL type specifications (string, number, boolean, array, object)",
-                            ctx.error_message
-                        );
+                        let error_feedback = validation_retry_feedback(&ctx.error_message);
                         messages.push(ChatMessage::user(error_feedback));
 
                         debug!(
@@ -2653,6 +2666,33 @@ mod tests {
 
         assert_eq!(attempts, 2);
         assert_eq!(output.data, "ok");
+    }
+
+    #[test]
+    fn test_validation_retry_feedback_does_not_induce_array_fabrication() {
+        let feedback = validation_retry_feedback("missing required field: summary");
+
+        // The actual validation error is embedded for the model to act on.
+        assert!(feedback.contains("missing required field: summary"));
+
+        // The prompt previously instructed "Include multiple items (at least
+        // 2-3) in arrays of objects", which told a model that correctly
+        // extracted one item (or zero) to fabricate more. No minimum-count
+        // language may appear.
+        assert!(!feedback.contains("at least 2"));
+        assert!(!feedback.contains("2-3"));
+        assert!(!feedback.contains("multiple items"));
+
+        // Instead, arrays must stay faithful to the source material.
+        assert!(feedback.contains("ONLY items actually supported by the input"));
+        assert!(feedback.contains("may have a single item or be empty"));
+        assert!(feedback.contains("NEVER invent entries to pad an array"));
+
+        // The rest of the prompt's intent is preserved.
+        assert!(feedback.contains("ALL required fields"));
+        assert!(feedback.contains("EXACTLY one of the allowed values"));
+        assert!(feedback.contains("array of OBJECTS, not strings or primitive values"));
+        assert!(feedback.contains("type specifications (string, number, boolean, array, object)"));
     }
 
     // ===================================================================
