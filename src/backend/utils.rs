@@ -19,6 +19,13 @@ use tracing::{debug, error, info, trace, warn};
 /// 1. `additionalProperties: false`
 /// 2. A `required` array listing all property keys
 ///
+/// Optionality cannot be expressed via `required` under strict mode, so before the
+/// `required` array is overwritten with all property keys, every property that was
+/// NOT in the original `required` array (i.e. an `Option<T>` field emitted by the
+/// derive macro) has its schema rewritten to also admit `null`. Without this, the
+/// model would be grammatically forced to fabricate values for optional fields
+/// under constrained decoding.
+///
 /// # Arguments
 ///
 /// * `schema` - The JSON schema to modify
@@ -34,14 +41,18 @@ pub fn prepare_strict_schema(schema: &crate::schema::Schema) -> Value {
 
 /// Recursively prepares a JSON schema for strict mode by adding:
 /// 1. `additionalProperties: false` to all object types
-/// 2. `required` array with all property keys (if not already present)
+/// 2. `null` to the schemas of properties absent from the original `required`
+///    array (optional fields), so constrained decoding can emit `null` for them
+/// 3. `required` array with all property keys (overriding any existing array)
 fn add_additional_properties_false(schema: &mut Value) {
     if let Some(obj) = schema.as_object_mut() {
-        // Check if this is an object type schema
-        let is_object_type = obj
-            .get("type")
-            .and_then(|t| t.as_str())
-            .is_some_and(|t| t == "object");
+        // Check if this is an object type schema (the type may already be a
+        // ["object", "null"] union if a parent marked this schema optional)
+        let is_object_type = match obj.get("type") {
+            Some(Value::String(t)) => t == "object",
+            Some(Value::Array(types)) => types.iter().any(|t| t.as_str() == Some("object")),
+            _ => false,
+        };
 
         // Also check if it has properties (even without explicit type: object)
         let has_properties = obj.contains_key("properties");
@@ -49,17 +60,36 @@ fn add_additional_properties_false(schema: &mut Value) {
         if is_object_type || has_properties {
             obj.insert("additionalProperties".to_string(), serde_json::json!(false));
 
-            // OpenAI strict mode requires ALL properties to be listed in `required`
-            // This overrides any existing `required` array since the derive macro
-            // only includes non-optional fields, but strict mode needs all of them
-            if let Some(properties) = obj.get("properties")
-                && let Some(props_obj) = properties.as_object()
+            // Capture the ORIGINAL `required` array before it is overwritten below.
+            // The derive macro emits only truly-required (non-Option) fields here,
+            // so every property absent from it is optional. If `required` is absent
+            // entirely, ALL properties are treated as optional.
+            let original_required: std::collections::HashSet<String> = obj
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // OpenAI strict mode requires ALL properties to be listed in `required`.
+            // Optional properties must therefore admit `null` instead, otherwise the
+            // model is forced to fabricate values for them.
+            let mut required_keys: Vec<Value> = Vec::new();
+            if let Some(properties) = obj.get_mut("properties")
+                && let Some(props_obj) = properties.as_object_mut()
             {
-                let required_keys: Vec<Value> =
-                    props_obj.keys().map(|k| serde_json::json!(k)).collect();
-                if !required_keys.is_empty() {
-                    obj.insert("required".to_string(), Value::Array(required_keys));
+                for (key, prop_schema) in props_obj.iter_mut() {
+                    if !original_required.contains(key.as_str()) {
+                        make_schema_nullable(prop_schema);
+                    }
                 }
+                required_keys = props_obj.keys().map(|k| serde_json::json!(k)).collect();
+            }
+            if !required_keys.is_empty() {
+                obj.insert("required".to_string(), Value::Array(required_keys));
             }
         }
 
@@ -161,6 +191,81 @@ fn add_additional_properties_false(schema: &mut Value) {
         if let Some(property_names) = obj.get_mut("propertyNames") {
             add_additional_properties_false(property_names);
         }
+    }
+}
+
+/// Returns true if a schema branch explicitly admits `null` via its `type` keyword.
+fn schema_branch_admits_null(branch: &Value) -> bool {
+    match branch.get("type") {
+        Some(Value::String(t)) => t == "null",
+        Some(Value::Array(types)) => types.iter().any(|t| t.as_str() == Some("null")),
+        _ => false,
+    }
+}
+
+/// Rewrite a property schema so that it also admits `null`.
+///
+/// Used for optional (`Option<T>`) fields under strict mode: strict structured
+/// outputs require every property to be listed in `required`, so optionality is
+/// expressed by allowing `null` instead. Handles the schema shapes this crate
+/// emits:
+///
+/// - `"type": "string"` (scalar) becomes `"type": ["string", "null"]`
+/// - `"type": [...]` (already a union) gets `"null"` appended if absent
+/// - an `"enum"` array gets `null` appended (JSON Schema `enum` constrains
+///   values independently of `type`)
+/// - `anyOf`/`oneOf` unions get a `{"type": "null"}` branch if none exists
+/// - a bare `$ref` (emitted for self-referential structs) is wrapped as
+///   `{"anyOf": [{"$ref": ...}, {"type": "null"}]}`
+///
+/// Schemas without any of these keywords (e.g. `{}`) already admit `null` and
+/// are left untouched.
+fn make_schema_nullable(schema: &mut Value) {
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+
+    // Bare $ref: type/enum keywords cannot be reliably combined with $ref, so
+    // wrap the reference in an anyOf union with an explicit null branch.
+    if obj.contains_key("$ref") {
+        let original = Value::Object(std::mem::take(obj));
+        *schema = serde_json::json!({
+            "anyOf": [original, { "type": "null" }]
+        });
+        return;
+    }
+
+    // anyOf/oneOf unions: add a {"type": "null"} branch if no branch admits null.
+    for key in ["anyOf", "oneOf"] {
+        if let Some(branches) = obj.get_mut(key).and_then(|v| v.as_array_mut())
+            && !branches.iter().any(schema_branch_admits_null)
+        {
+            branches.push(serde_json::json!({ "type": "null" }));
+        }
+    }
+
+    // type keyword: scalar becomes a [type, "null"] union; existing unions get
+    // "null" appended if absent.
+    if let Some(type_value) = obj.get_mut("type") {
+        match type_value {
+            Value::String(t) => {
+                if t != "null" {
+                    *type_value = serde_json::json!([t.clone(), "null"]);
+                }
+            }
+            Value::Array(types) if !types.iter().any(|t| t.as_str() == Some("null")) => {
+                types.push(serde_json::json!("null"));
+            }
+            _ => {}
+        }
+    }
+
+    // enum constrains allowed values independently of type, so null must also be
+    // listed as an allowed enum value.
+    if let Some(values) = obj.get_mut("enum").and_then(|e| e.as_array_mut())
+        && !values.iter().any(|v| v.is_null())
+    {
+        values.push(Value::Null);
     }
 }
 
@@ -1661,7 +1766,9 @@ mod tests {
 
     #[test]
     fn test_adds_required_array() {
-        // Schema without required array should get one added with all property keys
+        // Schema without required array should get one added with all property keys.
+        // With no original `required`, ALL properties are treated as optional and
+        // therefore become nullable.
         let mut schema = serde_json::json!({
             "type": "object",
             "properties": {
@@ -1677,12 +1784,24 @@ mod tests {
         assert_eq!(required.len(), 2);
         assert!(required.contains(&serde_json::json!("name")));
         assert!(required.contains(&serde_json::json!("age")));
+
+        // Absent original `required` -> every property admits null.
+        assert_eq!(
+            schema["properties"]["name"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+        assert_eq!(
+            schema["properties"]["age"]["type"],
+            serde_json::json!(["number", "null"])
+        );
     }
 
     #[test]
     fn test_overrides_existing_required_array() {
         // Schema with existing required array should be overridden to include all properties
-        // (OpenAI strict mode requires ALL properties in required, even optional ones)
+        // (OpenAI strict mode requires ALL properties in required, even optional ones).
+        // Properties absent from the ORIGINAL required array must become nullable so
+        // the model is not forced to fabricate values for optional fields.
         let mut schema = serde_json::json!({
             "type": "object",
             "properties": {
@@ -1700,6 +1819,308 @@ mod tests {
         assert_eq!(required.len(), 2);
         assert!(required.contains(&serde_json::json!("name")));
         assert!(required.contains(&serde_json::json!("age")));
+
+        // Originally-required field keeps its scalar type.
+        assert_eq!(schema["properties"]["name"]["type"], "string");
+        // Originally-optional field becomes nullable.
+        assert_eq!(
+            schema["properties"]["age"]["type"],
+            serde_json::json!(["number", "null"])
+        );
+    }
+
+    #[test]
+    fn test_strict_mode_optional_fields_become_nullable() {
+        // Derive-shaped schema: only `a` is truly required. After strict
+        // preparation `b` and `c` must admit null (type AND enum) while `a`
+        // stays a plain string, and `required` lists every key.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "a": { "type": "string" },
+                "b": { "type": "integer" },
+                "c": { "type": "string", "enum": ["x", "y"] }
+            },
+            "required": ["a"]
+        });
+        add_additional_properties_false(&mut schema);
+
+        // `a` was originally required: untouched scalar type.
+        assert_eq!(schema["properties"]["a"]["type"], "string");
+
+        // `b` was optional: type becomes a ["integer", "null"] union.
+        assert_eq!(
+            schema["properties"]["b"]["type"],
+            serde_json::json!(["integer", "null"])
+        );
+
+        // `c` was optional with an enum: null is added to BOTH type and enum
+        // (enum constrains values independently of type).
+        assert_eq!(
+            schema["properties"]["c"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+        assert_eq!(
+            schema["properties"]["c"]["enum"],
+            serde_json::json!(["x", "y", null])
+        );
+
+        // `required` still lists ALL keys, as strict mode demands.
+        let required = schema["required"]
+            .as_array()
+            .expect("required should be an array");
+        assert_eq!(required.len(), 3);
+        for key in ["a", "b", "c"] {
+            assert!(required.contains(&serde_json::json!(key)));
+        }
+    }
+
+    #[test]
+    fn test_strict_mode_optional_nested_object_and_array() {
+        // Optionality is resolved per object level: the outer object's optional
+        // `meta` (a nested object) and `tags` (an array) become nullable, while
+        // the nested object applies its OWN original `required` to its fields.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string" },
+                "meta": {
+                    "type": "object",
+                    "properties": {
+                        "author": { "type": "string" },
+                        "year": { "type": "integer" }
+                    },
+                    "required": ["author"]
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": { "type": "string" },
+                            "weight": { "type": "number" }
+                        },
+                        "required": ["label"]
+                    }
+                }
+            },
+            "required": ["title"]
+        });
+        add_additional_properties_false(&mut schema);
+
+        // Required outer field untouched.
+        assert_eq!(schema["properties"]["title"]["type"], "string");
+
+        // Optional nested object becomes nullable but is still fully prepared
+        // for strict mode (additionalProperties: false, all keys required).
+        let meta = &schema["properties"]["meta"];
+        assert_eq!(meta["type"], serde_json::json!(["object", "null"]));
+        assert_eq!(meta["additionalProperties"], serde_json::json!(false));
+        let meta_required = meta["required"].as_array().expect("meta required");
+        assert_eq!(meta_required.len(), 2);
+        // Inside `meta`, only `year` was optional (per meta's own original
+        // required array), so `author` stays scalar and `year` admits null.
+        assert_eq!(meta["properties"]["author"]["type"], "string");
+        assert_eq!(
+            meta["properties"]["year"]["type"],
+            serde_json::json!(["integer", "null"])
+        );
+
+        // Optional array becomes nullable; its item objects are prepared
+        // independently with their own original required arrays.
+        let tags = &schema["properties"]["tags"];
+        assert_eq!(tags["type"], serde_json::json!(["array", "null"]));
+        let items = &tags["items"];
+        assert_eq!(items["additionalProperties"], serde_json::json!(false));
+        assert_eq!(items["properties"]["label"]["type"], "string");
+        assert_eq!(
+            items["properties"]["weight"]["type"],
+            serde_json::json!(["number", "null"])
+        );
+        let items_required = items["required"].as_array().expect("items required");
+        assert_eq!(items_required.len(), 2);
+    }
+
+    #[test]
+    fn test_strict_mode_optional_type_union_appends_null_once() {
+        // A property whose type is already a union gets "null" appended; one
+        // that already admits null is left alone (no duplicate "null").
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "mixed": { "type": ["string", "integer"] },
+                "already_nullable": { "type": ["string", "null"] }
+            },
+            "required": []
+        });
+        add_additional_properties_false(&mut schema);
+
+        assert_eq!(
+            schema["properties"]["mixed"]["type"],
+            serde_json::json!(["string", "integer", "null"])
+        );
+        assert_eq!(
+            schema["properties"]["already_nullable"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+    }
+
+    #[test]
+    fn test_strict_mode_optional_anyof_gets_null_branch() {
+        // Optional union (anyOf) properties get a {"type": "null"} branch; a
+        // union that already has one is left unchanged.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "choice": {
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "integer" }
+                    ]
+                },
+                "already_nullable": {
+                    "anyOf": [
+                        { "type": "string" },
+                        { "type": "null" }
+                    ]
+                }
+            },
+            "required": []
+        });
+        add_additional_properties_false(&mut schema);
+
+        let choice_any_of = schema["properties"]["choice"]["anyOf"]
+            .as_array()
+            .expect("anyOf should be an array");
+        assert_eq!(choice_any_of.len(), 3);
+        assert_eq!(choice_any_of[2], serde_json::json!({ "type": "null" }));
+
+        let nullable_any_of = schema["properties"]["already_nullable"]["anyOf"]
+            .as_array()
+            .expect("anyOf should be an array");
+        assert_eq!(nullable_any_of.len(), 2, "no duplicate null branch");
+    }
+
+    #[test]
+    fn test_strict_mode_optional_oneof_gets_null_branch() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "variant": {
+                    "oneOf": [
+                        { "type": "object", "properties": { "a": { "type": "string" } }, "required": ["a"] }
+                    ]
+                }
+            },
+            "required": []
+        });
+        add_additional_properties_false(&mut schema);
+
+        let one_of = schema["properties"]["variant"]["oneOf"]
+            .as_array()
+            .expect("oneOf should be an array");
+        assert_eq!(one_of.len(), 2);
+        assert_eq!(one_of[1], serde_json::json!({ "type": "null" }));
+        // The original object branch is still strict-prepared.
+        assert_eq!(one_of[0]["additionalProperties"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn test_strict_mode_optional_bare_ref_wrapped_in_anyof() {
+        // The derive macro emits a bare $ref for self-referential struct fields
+        // (e.g. `next: Option<Box<Node>>`). An optional $ref is wrapped in an
+        // anyOf union with an explicit null branch.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "value": { "type": "integer" },
+                "next": { "$ref": "#/$defs/Node" }
+            },
+            "required": ["value"],
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": { "type": "integer" }
+                    },
+                    "required": ["value"]
+                }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+
+        assert_eq!(
+            schema["properties"]["next"],
+            serde_json::json!({
+                "anyOf": [
+                    { "$ref": "#/$defs/Node" },
+                    { "type": "null" }
+                ]
+            })
+        );
+        // Required (non-optional) refs would be left alone; the definition
+        // itself is still strict-prepared.
+        assert_eq!(
+            schema["$defs"]["Node"]["additionalProperties"],
+            serde_json::json!(false)
+        );
+    }
+
+    #[test]
+    fn test_strict_mode_absent_required_treats_all_optional() {
+        // When `required` is absent entirely, every property is optional and
+        // must admit null.
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "a": { "type": "string" },
+                "b": { "type": "boolean" }
+            }
+        });
+        add_additional_properties_false(&mut schema);
+
+        assert_eq!(
+            schema["properties"]["a"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+        assert_eq!(
+            schema["properties"]["b"]["type"],
+            serde_json::json!(["boolean", "null"])
+        );
+        let required = schema["required"].as_array().expect("required array");
+        assert_eq!(required.len(), 2);
+    }
+
+    #[test]
+    fn test_strict_mode_optional_null_passes_serde_into_option() {
+        // End-to-end sanity: a strict-prepared schema admits null for optional
+        // fields, and serde deserializes that null into Option::None.
+        #[derive(serde::Deserialize)]
+        struct Person {
+            name: String,
+            nickname: Option<String>,
+        }
+
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "nickname": { "type": "string" }
+            },
+            "required": ["name"]
+        });
+        add_additional_properties_false(&mut schema);
+
+        // The schema now permits null for `nickname`...
+        assert_eq!(
+            schema["properties"]["nickname"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+
+        // ...and serde maps that null to None.
+        let parsed: Person = serde_json::from_str(r#"{"name": "Ada", "nickname": null}"#).unwrap();
+        assert_eq!(parsed.name, "Ada");
+        assert!(parsed.nickname.is_none());
     }
 
     #[test]
