@@ -213,13 +213,8 @@ fn openai_model_roundtrip_all_variants() {
         (Gpt4Turbo, "gpt-4-turbo"),
         (Gpt4, "gpt-4"),
         (Gpt35Turbo, "gpt-3.5-turbo"),
-        (O4Mini, "o4-mini"),
-        (O3, "o3"),
-        (O3Mini, "o3-mini"),
-        (O1, "o1"),
-        (O1Pro, "o1-pro"),
     ];
-    assert_eq!(table.len(), 31, "OpenAI variant table drifted from source");
+    assert_eq!(table.len(), 26, "OpenAI variant table drifted from source");
     for (variant, id) in table {
         assert_model_roundtrip!(OpenAIModel, variant.clone(), id);
     }

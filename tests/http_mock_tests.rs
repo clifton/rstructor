@@ -472,7 +472,8 @@ async fn non_gpt5_omits_reasoning_effort_and_passes_temperature_through() {
 // ---------------------------------------------------------------------------
 
 /// `list_models` keeps only chat-completion model ids (those prefixed
-/// `gpt-`/`o1`/`o3`/`o4`) and drops embeddings, whisper, dall-e, etc.
+/// `gpt-`) and drops embeddings, whisper, dall-e, and the legacy o-series
+/// reasoning models (which reject this client's request parameters).
 #[tokio::test]
 async fn list_models_keeps_only_chat_models() {
     let mut server = mockito::Server::new_async().await;
@@ -498,7 +499,7 @@ async fn list_models_keeps_only_chat_models() {
 
     let models = client(&server).list_models().await.unwrap();
     let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
-    assert_eq!(ids, vec!["gpt-4o", "o3", "o4-mini", "o1-pro"]);
+    assert_eq!(ids, vec!["gpt-4o"]);
     m.assert_async().await;
 }
 

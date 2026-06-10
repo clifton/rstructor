@@ -93,16 +93,6 @@ define_model_enum! {
         Gpt4 => "gpt-4",
         /// GPT-3.5 Turbo (efficient model for simple tasks)
         Gpt35Turbo => "gpt-3.5-turbo",
-        /// O4 Mini (previous small reasoning model)
-        O4Mini => "o4-mini",
-        /// O3 (reasoning model)
-        O3 => "o3",
-        /// O3 Mini (smaller reasoning model)
-        O3Mini => "o3-mini",
-        /// O1 (reasoning model optimized for complex problem-solving)
-        O1 => "o1",
-        /// O1 Pro (most capable reasoning model)
-        O1Pro => "o1-pro",
     }
 }
 
@@ -896,12 +886,11 @@ impl LLMClient for OpenAIClient {
                     .iter()
                     .filter_map(|model| {
                         let id = model.get("id").and_then(|id| id.as_str())?;
-                        // Filter to only GPT models (chat completion models)
-                        if id.starts_with("gpt-")
-                            || id.starts_with("o1")
-                            || id.starts_with("o3")
-                            || id.starts_with("o4")
-                        {
+                        // Filter to only GPT models (chat completion models).
+                        // The legacy o-series reasoning models are deliberately
+                        // excluded: they reject the request parameters this
+                        // client sends (`temperature`, `max_tokens`).
+                        if id.starts_with("gpt-") {
                             Some(ModelInfo {
                                 id: id.to_string(),
                                 name: None,
