@@ -376,3 +376,25 @@ pub fn get_core_type_name(ty: &Type) -> Option<String> {
 pub fn is_self_reference(ty: &Type, struct_name: &str) -> bool {
     get_core_type_name(ty).is_some_and(|name| name == struct_name)
 }
+
+/// Clone `generics`, adding the given trait bounds to every type parameter.
+///
+/// Used when emitting `impl` blocks for generic types: the generated schema
+/// code calls `<T as SchemaType>::schema()` for type-parameter fields, so the
+/// `SchemaType` impl needs every type parameter bound by `SchemaType` (and
+/// the `Instructor` impl additionally by serde's traits, which `Instructor`
+/// requires as supertraits).
+pub fn generics_with_bounds(
+    generics: &syn::Generics,
+    bounds: &[syn::TypeParamBound],
+) -> syn::Generics {
+    let mut generics = generics.clone();
+    for param in generics.params.iter_mut() {
+        if let syn::GenericParam::Type(type_param) = param {
+            for bound in bounds {
+                type_param.bounds.push(bound.clone());
+            }
+        }
+    }
+    generics
+}

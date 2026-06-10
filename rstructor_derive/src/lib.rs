@@ -158,10 +158,10 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
     // Generate the schema implementation
     let schema_impl = match &input.data {
         Data::Struct(data_struct) => {
-            generators::generate_struct_schema(name, data_struct, &container_attrs)
+            generators::generate_struct_schema(name, data_struct, &container_attrs, &input.generics)
         }
         Data::Enum(data_enum) => {
-            generators::generate_enum_schema(name, data_enum, &container_attrs)
+            generators::generate_enum_schema(name, data_enum, &container_attrs, &input.generics)
         }
         _ => panic!("Instructor can only be derived for structs and enums"),
     };
@@ -180,8 +180,21 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
     } else {
         quote::quote! {}
     };
+    // `Instructor` requires `SchemaType + Serialize + DeserializeOwned` as
+    // supertraits, so for generic types every type parameter must be bound by
+    // those traits for the impl to typecheck (mirroring serde's own derive,
+    // which bounds type parameters by `Serialize`/`Deserialize`).
+    let instructor_generics = type_utils::generics_with_bounds(
+        &input.generics,
+        &[
+            syn::parse_quote!(::rstructor::schema::SchemaType),
+            syn::parse_quote!(::serde::Serialize),
+            syn::parse_quote!(::serde::de::DeserializeOwned),
+        ],
+    );
+    let (impl_generics, ty_generics, where_clause) = instructor_generics.split_for_impl();
     let instructor_impl = quote::quote! {
-        impl ::rstructor::model::Instructor for #name {
+        impl #impl_generics ::rstructor::model::Instructor for #name #ty_generics #where_clause {
             fn validate(&self) -> ::rstructor::error::Result<()> {
                 #[allow(unused_imports)]
                 use ::rstructor::model::__private::ProbeFallback as _;

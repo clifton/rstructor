@@ -788,3 +788,412 @@ fn serde_json_value_field_is_any_json() {
     // The neighbor field is unaffected.
     assert_eq!(schema["properties"]["name"]["type"], "string");
 }
+
+// ============================================================================
+// Nested collections: Vec<Vec<T>>, Vec<Vec<Vec<T>>>, Vec<HashSet<T>>
+// ============================================================================
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct NestedCollections {
+    #[llm(description = "A matrix of integers")]
+    matrix: Vec<Vec<i32>>,
+    #[llm(description = "A cube of strings")]
+    cube: Vec<Vec<Vec<String>>>,
+    #[llm(description = "A list of unique-tag sets")]
+    tag_sets: Vec<std::collections::HashSet<String>>,
+    #[llm(description = "Optional matrix")]
+    opt_matrix: Option<Vec<Vec<f64>>>,
+}
+
+#[test]
+fn nested_vec_field_keeps_inner_items() {
+    let schema = NestedCollections::schema().to_json();
+
+    // Vec<Vec<i32>>: every nesting level carries its own items schema.
+    let matrix = &schema["properties"]["matrix"];
+    assert_eq!(matrix["type"], "array");
+    assert_eq!(matrix["items"]["type"], "array");
+    assert_eq!(
+        matrix["items"]["items"]["type"], "integer",
+        "Vec<Vec<i32>> must recurse: items.items.type == integer, got: {matrix:?}"
+    );
+}
+
+#[test]
+fn triply_nested_vec_field_keeps_all_items() {
+    let schema = NestedCollections::schema().to_json();
+    let cube = &schema["properties"]["cube"];
+    assert_eq!(cube["type"], "array");
+    assert_eq!(cube["items"]["type"], "array");
+    assert_eq!(cube["items"]["items"]["type"], "array");
+    assert_eq!(
+        cube["items"]["items"]["items"]["type"], "string",
+        "Vec<Vec<Vec<String>>> must recurse three levels, got: {cube:?}"
+    );
+}
+
+#[test]
+fn vec_of_hashset_field_keeps_inner_items() {
+    let schema = NestedCollections::schema().to_json();
+    let tag_sets = &schema["properties"]["tag_sets"];
+    assert_eq!(tag_sets["type"], "array");
+    assert_eq!(tag_sets["items"]["type"], "array");
+    assert_eq!(tag_sets["items"]["items"]["type"], "string");
+}
+
+#[test]
+fn optional_nested_vec_field_keeps_inner_items() {
+    let schema = NestedCollections::schema().to_json();
+    let opt_matrix = &schema["properties"]["opt_matrix"];
+    assert_eq!(opt_matrix["type"], "array");
+    assert_eq!(opt_matrix["items"]["type"], "array");
+    assert_eq!(opt_matrix["items"]["items"]["type"], "number");
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(!required.contains(&"opt_matrix"));
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct NestedStructMatrix {
+    #[llm(description = "Grid of addresses")]
+    grid: Vec<Vec<Address>>,
+}
+
+#[test]
+fn nested_vec_of_structs_embeds_inner_schema() {
+    let schema = NestedStructMatrix::schema().to_json();
+    let grid = &schema["properties"]["grid"];
+    assert_eq!(grid["type"], "array");
+    assert_eq!(grid["items"]["type"], "array");
+    // Innermost items embed the struct's full object schema.
+    assert_eq!(grid["items"]["items"]["type"], "object");
+    assert_eq!(
+        grid["items"]["items"]["properties"]["street"]["type"],
+        "string"
+    );
+}
+
+// ============================================================================
+// Well-known type-name sniffing vs user-defined types named Date/DateTime
+// ============================================================================
+
+/// A user-defined struct that happens to share its name with chrono's `Date`.
+/// It derives Instructor, so its real object schema must win over the
+/// name-sniffed `{type: "string", format: "date"}`.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Date {
+    #[llm(description = "Day of month")]
+    day: u8,
+    #[llm(description = "Month number")]
+    month: u8,
+    #[llm(description = "Full year")]
+    year: i32,
+}
+
+/// Same collision for `DateTime` (no generic parameters, unlike chrono's).
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct DateTime {
+    #[llm(description = "Unix timestamp")]
+    epoch_seconds: i64,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Appointment {
+    title: String,
+    date: Date,
+    starts_at: DateTime,
+    ends_at: Option<Date>,
+    reschedule_options: Vec<Date>,
+}
+
+#[test]
+fn user_defined_date_struct_keeps_its_object_schema() {
+    let schema = Appointment::schema().to_json();
+    let date = &schema["properties"]["date"];
+    assert_eq!(
+        date["type"], "object",
+        "user struct named Date must keep its derived object schema, got: {date:?}"
+    );
+    assert_eq!(date["properties"]["day"]["type"], "integer");
+    assert_eq!(date["properties"]["month"]["type"], "integer");
+    assert_eq!(date["properties"]["year"]["type"], "integer");
+    assert!(
+        date.get("format").is_none(),
+        "user struct named Date must not be sniffed into format: date"
+    );
+}
+
+#[test]
+fn user_defined_datetime_struct_keeps_its_object_schema() {
+    let schema = Appointment::schema().to_json();
+    let starts_at = &schema["properties"]["starts_at"];
+    assert_eq!(starts_at["type"], "object");
+    assert_eq!(starts_at["properties"]["epoch_seconds"]["type"], "integer");
+    assert!(starts_at.get("format").is_none());
+}
+
+#[test]
+fn optional_user_defined_date_struct_keeps_its_object_schema() {
+    let schema = Appointment::schema().to_json();
+    let ends_at = &schema["properties"]["ends_at"];
+    assert_eq!(ends_at["type"], "object");
+    assert_eq!(ends_at["properties"]["day"]["type"], "integer");
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(!required.contains(&"ends_at"));
+}
+
+#[test]
+fn vec_of_user_defined_date_struct_embeds_object_items() {
+    let schema = Appointment::schema().to_json();
+    let opts = &schema["properties"]["reschedule_options"];
+    assert_eq!(opts["type"], "array");
+    assert_eq!(opts["items"]["type"], "object");
+    assert_eq!(opts["items"]["properties"]["year"]["type"], "integer");
+}
+
+/// chrono's real date/time types must still be sniffed into string/format
+/// schemas (chrono types do not implement SchemaType, so the probe falls back).
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct ChronoEvent {
+    name: String,
+    on_date: chrono::NaiveDate,
+    at: chrono::DateTime<chrono::Utc>,
+    local_ts: chrono::NaiveDateTime,
+    maybe_date: Option<chrono::NaiveDate>,
+    past_dates: Vec<chrono::NaiveDate>,
+    past_times: Vec<chrono::DateTime<chrono::Utc>>,
+}
+
+#[test]
+fn chrono_date_fields_still_sniffed_to_string_format() {
+    let schema = ChronoEvent::schema().to_json();
+
+    let on_date = &schema["properties"]["on_date"];
+    assert_eq!(on_date["type"], "string");
+    assert_eq!(on_date["format"], "date");
+
+    let at = &schema["properties"]["at"];
+    assert_eq!(at["type"], "string");
+    assert_eq!(at["format"], "date-time");
+
+    let local_ts = &schema["properties"]["local_ts"];
+    assert_eq!(local_ts["type"], "string");
+    assert_eq!(local_ts["format"], "date-time");
+
+    let maybe_date = &schema["properties"]["maybe_date"];
+    assert_eq!(maybe_date["type"], "string");
+    assert_eq!(maybe_date["format"], "date");
+}
+
+#[test]
+fn chrono_date_array_items_still_sniffed_to_string_format() {
+    let schema = ChronoEvent::schema().to_json();
+
+    let past_dates = &schema["properties"]["past_dates"];
+    assert_eq!(past_dates["type"], "array");
+    assert_eq!(past_dates["items"]["type"], "string");
+    assert_eq!(past_dates["items"]["format"], "date");
+
+    let past_times = &schema["properties"]["past_times"];
+    assert_eq!(past_times["type"], "array");
+    assert_eq!(past_times["items"]["type"], "string");
+    assert_eq!(past_times["items"]["format"], "date-time");
+}
+
+// ============================================================================
+// Recursive types through Box: Option<Box<Self>>, Vec<Box<Self>>
+// ============================================================================
+
+/// Singly-linked list node: recursion through Option<Box<Self>>.
+/// Before the Box-branch $ref guard, calling schema() overflowed the stack.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct LinkedNode {
+    #[llm(description = "Value held by this node")]
+    value: i32,
+    #[llm(description = "Next node in the list, if any")]
+    next: Option<Box<LinkedNode>>,
+}
+
+#[test]
+fn option_box_self_recursion_terminates_with_ref() {
+    // Must terminate (no stack overflow) ...
+    let schema = LinkedNode::schema().to_json();
+    // ... and use the $defs/$ref indirection like the array guard does.
+    assert_eq!(schema["$ref"], "#/$defs/LinkedNode");
+    let def = &schema["$defs"]["LinkedNode"];
+    assert!(def.is_object(), "$defs.LinkedNode must exist");
+    assert_eq!(
+        def["properties"]["next"]["$ref"], "#/$defs/LinkedNode",
+        "Box<Self> field must be emitted as a $ref, got: {:?}",
+        def["properties"]["next"]
+    );
+    assert_eq!(def["properties"]["value"]["type"], "integer");
+    // Option<Box<Self>> must not be required.
+    let required: Vec<&str> = def["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(required.contains(&"value"));
+    assert!(!required.contains(&"next"));
+}
+
+#[test]
+fn option_box_self_recursion_schema_name() {
+    assert_eq!(LinkedNode::schema_name(), Some("LinkedNode".to_string()));
+}
+
+/// Tree node: recursion through Vec<Box<Self>> (array guard with boxed items).
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct BoxedTreeNode {
+    #[llm(description = "Node label")]
+    label: String,
+    #[llm(description = "Child nodes")]
+    #[allow(clippy::vec_box)]
+    children: Vec<Box<BoxedTreeNode>>,
+}
+
+#[test]
+fn vec_box_self_recursion_terminates_with_ref() {
+    let schema = BoxedTreeNode::schema().to_json();
+    assert_eq!(schema["$ref"], "#/$defs/BoxedTreeNode");
+    let def = &schema["$defs"]["BoxedTreeNode"];
+    let children = &def["properties"]["children"];
+    assert_eq!(children["type"], "array");
+    assert_eq!(children["items"]["$ref"], "#/$defs/BoxedTreeNode");
+}
+
+// ============================================================================
+// Generic types deriving Instructor
+// ============================================================================
+
+use serde::de::DeserializeOwned;
+
+/// A generic wrapper: the derive must emit generics-aware impl blocks
+/// (split_for_impl) for both SchemaType and Instructor.
+///
+/// The `#[serde(bound(...))]` attribute is required by *serde's own derive*
+/// whenever `DeserializeOwned` appears as a struct bound (serde otherwise
+/// emits an ambiguous `T: Deserialize<'de>` + `T: DeserializeOwned` impl);
+/// it is unrelated to the Instructor derive.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+#[serde(bound(deserialize = "T: DeserializeOwned"))]
+struct Wrapper<T: SchemaType + Serialize + DeserializeOwned> {
+    #[llm(description = "The wrapped value")]
+    value: T,
+    #[llm(description = "A label for the value")]
+    label: String,
+}
+
+/// Generics without bounds on the struct itself: the derive adds the
+/// SchemaType / serde bounds to its own impls.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Pair<A, B> {
+    first: A,
+    second: B,
+}
+
+/// Generic enum with a default type parameter and data-carrying variants.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+enum Maybe<T = String> {
+    Nothing,
+    Just(T),
+}
+
+#[test]
+fn generic_struct_compiles_and_produces_schema() {
+    let schema = Wrapper::<i32>::schema().to_json();
+    assert_eq!(schema["type"], "object");
+    assert_eq!(schema["title"], "Wrapper");
+    assert_eq!(schema["properties"]["value"]["type"], "integer");
+    assert_eq!(schema["properties"]["label"]["type"], "string");
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(required.contains(&"value"));
+    assert!(required.contains(&"label"));
+}
+
+#[test]
+fn generic_struct_with_struct_parameter_embeds_schema() {
+    // Instantiated with a derived struct: T's full object schema is embedded.
+    let schema = Wrapper::<Address>::schema().to_json();
+    let value = &schema["properties"]["value"];
+    assert_eq!(value["type"], "object");
+    assert_eq!(value["properties"]["street"]["type"], "string");
+}
+
+#[test]
+fn generic_struct_instructor_impl_validates() {
+    // `use rstructor::Instructor` at the top of this file imports both the
+    // derive macro and the trait, so `validate` is callable here.
+    let wrapped = Wrapper {
+        value: 42i64,
+        label: "answer".to_string(),
+    };
+    assert!(wrapped.validate().is_ok());
+}
+
+#[test]
+fn unbounded_generic_struct_compiles_and_produces_schema() {
+    let schema = Pair::<String, f64>::schema().to_json();
+    assert_eq!(schema["type"], "object");
+    assert_eq!(schema["properties"]["first"]["type"], "string");
+    assert_eq!(schema["properties"]["second"]["type"], "number");
+}
+
+#[test]
+fn generic_enum_compiles_and_produces_schema() {
+    let schema = Maybe::<i32>::schema().to_json();
+    let any_of = schema["anyOf"].as_array().expect("anyOf for data enum");
+    assert_eq!(any_of.len(), 2);
+    // The Just variant carries the type parameter's schema.
+    let just = any_of
+        .iter()
+        .find(|v| v["properties"].get("Just").is_some())
+        .expect("Just variant present");
+    assert_eq!(just["properties"]["Just"]["type"], "integer");
+}
+
+/// Pathological combination of the sniffing and recursion fixes: a recursive
+/// struct that is itself named `Date`. The self-reference $ref must win over
+/// both the name sniff and the SchemaType probe (which would otherwise call
+/// its own schema() forever).
+mod recursive_date {
+    use super::*;
+
+    #[derive(Instructor, Serialize, Deserialize, Debug)]
+    pub struct Date {
+        #[llm(description = "Node label")]
+        pub label: String,
+        #[llm(description = "Nested child dates")]
+        pub children: Vec<Date>,
+    }
+}
+
+#[test]
+fn recursive_struct_named_date_terminates_with_ref() {
+    use rstructor::SchemaType as _;
+    let schema = recursive_date::Date::schema().to_json();
+    assert_eq!(schema["$ref"], "#/$defs/Date");
+    let def = &schema["$defs"]["Date"];
+    assert_eq!(def["properties"]["children"]["type"], "array");
+    assert_eq!(
+        def["properties"]["children"]["items"]["$ref"],
+        "#/$defs/Date"
+    );
+    assert_eq!(def["properties"]["label"]["type"], "string");
+}

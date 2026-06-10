@@ -214,5 +214,58 @@ pub trait SchemaType {
     }
 }
 
+/// Internal helpers used by `#[derive(Instructor)]`. Not part of the public API
+/// and exempt from semver guarantees.
+#[doc(hidden)]
+pub mod __private {
+    use super::SchemaType;
+    use serde_json::Value;
+    use std::marker::PhantomData;
+
+    /// Autoref-specialization probe that lets generated code use a field type's
+    /// own [`SchemaType`] schema **iff** the type implements it, and otherwise
+    /// fall back to a name-based well-known schema (e.g. `{"type": "string",
+    /// "format": "date"}` for `chrono::NaiveDate`) — without the derive macro
+    /// having to know which crate a type named `Date` comes from.
+    ///
+    /// `#[derive(Instructor)]` emits
+    /// `SchemaProbe::<FieldType>::new().rstructor_schema_or(fallback)` for
+    /// fields whose type *name* matches a well-known library type (`Date`,
+    /// `DateTime`, `NaiveDate`, `NaiveDateTime`, `Uuid`). When the field's
+    /// type implements `SchemaType` (e.g. a user-defined `struct Date` that
+    /// derives `Instructor`), the inherent method below is selected (inherent
+    /// methods take priority over trait methods) and the type's real schema
+    /// wins; otherwise method resolution falls back to
+    /// [`SchemaProbeFallback`], which returns the sniffed fallback schema.
+    pub struct SchemaProbe<T: ?Sized>(PhantomData<T>);
+
+    impl<T: ?Sized> SchemaProbe<T> {
+        #[allow(clippy::new_without_default)]
+        pub fn new() -> Self {
+            SchemaProbe(PhantomData)
+        }
+    }
+
+    /// Fallback for field types that do not implement [`SchemaType`]
+    /// (e.g. `chrono::NaiveDate`, `uuid::Uuid`).
+    pub trait SchemaProbeFallback {
+        fn rstructor_schema_or(&self, fallback: Value) -> Value;
+    }
+
+    impl<T: ?Sized> SchemaProbeFallback for SchemaProbe<T> {
+        fn rstructor_schema_or(&self, fallback: Value) -> Value {
+            fallback
+        }
+    }
+
+    impl<T: SchemaType + ?Sized> SchemaProbe<T> {
+        /// Return the wrapped type's real schema (selected over the trait
+        /// method when `T: SchemaType`).
+        pub fn rstructor_schema_or(&self, _fallback: Value) -> Value {
+            T::schema().to_json()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

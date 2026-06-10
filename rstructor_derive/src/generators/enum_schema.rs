@@ -17,6 +17,7 @@ pub fn generate_enum_schema(
     name: &Ident,
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
+    generics: &syn::Generics,
 ) -> TokenStream {
     // Check if it's a simple enum (no data)
     let all_simple = data_enum.variants.iter().all(|v| v.fields.is_empty());
@@ -24,11 +25,22 @@ pub fn generate_enum_schema(
 
     if all_simple && !has_tag {
         // Generate implementation for simple enum as before
-        generate_simple_enum_schema(name, data_enum, container_attrs)
+        generate_simple_enum_schema(name, data_enum, container_attrs, generics)
     } else {
         // Generate implementation for enum with associated data
-        generate_complex_enum_schema(name, data_enum, container_attrs)
+        generate_complex_enum_schema(name, data_enum, container_attrs, generics)
     }
+}
+
+/// Clone the enum's generics, additionally binding every type parameter by
+/// `SchemaType` — the generated code calls `<T as SchemaType>::schema()` for
+/// type-parameter fields inside variants. Use with `split_for_impl()` to emit
+/// the `impl ... SchemaType for ...` header.
+fn schema_bounded_generics(generics: &syn::Generics) -> syn::Generics {
+    crate::type_utils::generics_with_bounds(
+        generics,
+        &[syn::parse_quote!(::rstructor::schema::SchemaType)],
+    )
 }
 
 /// Generate schema for a simple enum (no associated data)
@@ -36,6 +48,7 @@ fn generate_simple_enum_schema(
     name: &Ident,
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
+    generics: &syn::Generics,
 ) -> TokenStream {
     // Generate implementation for simple enum with serde rename support
     let variant_values: Vec<_> = data_enum
@@ -92,8 +105,11 @@ fn generate_simple_enum_schema(
         quote! {}
     };
 
+    let schema_generics = schema_bounded_generics(generics);
+    let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+
     quote! {
-        impl ::rstructor::schema::SchemaType for #name {
+        impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 // Create array of enum values
                 let enum_values = vec![
@@ -124,10 +140,11 @@ fn generate_complex_enum_schema(
     name: &Ident,
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
+    generics: &syn::Generics,
 ) -> TokenStream {
     // Dispatch to appropriate generator based on serde tagging mode
     if container_attrs.serde_untagged {
-        return generate_untagged_enum_schema(name, data_enum, container_attrs);
+        return generate_untagged_enum_schema(name, data_enum, container_attrs, generics);
     } else if let Some(tag) = &container_attrs.serde_tag {
         if let Some(content) = &container_attrs.serde_content {
             // Adjacent tagging: #[serde(tag = "...", content = "...")]
@@ -135,17 +152,24 @@ fn generate_complex_enum_schema(
                 name,
                 data_enum,
                 container_attrs,
+                generics,
                 tag,
                 content,
             );
         } else {
             // Internal tagging: #[serde(tag = "...")]
-            return generate_internally_tagged_enum_schema(name, data_enum, container_attrs, tag);
+            return generate_internally_tagged_enum_schema(
+                name,
+                data_enum,
+                container_attrs,
+                generics,
+                tag,
+            );
         }
     }
 
     // Default: External tagging (current behavior)
-    generate_externally_tagged_enum_schema(name, data_enum, container_attrs)
+    generate_externally_tagged_enum_schema(name, data_enum, container_attrs, generics)
 }
 
 /// Generate schema for externally tagged enums (default serde behavior)
@@ -154,6 +178,7 @@ fn generate_externally_tagged_enum_schema(
     name: &Ident,
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
+    generics: &syn::Generics,
 ) -> TokenStream {
     // Create variants for oneOf schema
     let mut variant_schemas = Vec::new();
@@ -392,8 +417,11 @@ fn generate_externally_tagged_enum_schema(
     };
 
     // Generate the final schema implementation
+    let schema_generics = schema_bounded_generics(generics);
+    let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+
     quote! {
-        impl ::rstructor::schema::SchemaType for #name {
+        impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 // Create oneOf schema for enum variants
                 let variant_schemas = vec![
@@ -698,6 +726,7 @@ fn generate_internally_tagged_enum_schema(
     name: &Ident,
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
+    generics: &syn::Generics,
     tag_name: &str,
 ) -> TokenStream {
     let mut variant_schemas = Vec::new();
@@ -921,8 +950,11 @@ fn generate_internally_tagged_enum_schema(
     // Container attributes
     let container_setter = generate_container_setters(container_attrs);
 
+    let schema_generics = schema_bounded_generics(generics);
+    let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+
     quote! {
-        impl ::rstructor::schema::SchemaType for #name {
+        impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 let variant_schemas = vec![
                     #(#variant_schemas),*
@@ -951,6 +983,7 @@ fn generate_adjacently_tagged_enum_schema(
     name: &Ident,
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
+    generics: &syn::Generics,
     tag_name: &str,
     content_name: &str,
 ) -> TokenStream {
@@ -1212,8 +1245,11 @@ fn generate_adjacently_tagged_enum_schema(
     // Container attributes
     let container_setter = generate_container_setters(container_attrs);
 
+    let schema_generics = schema_bounded_generics(generics);
+    let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+
     quote! {
-        impl ::rstructor::schema::SchemaType for #name {
+        impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 let variant_schemas = vec![
                     #(#variant_schemas),*
@@ -1242,6 +1278,7 @@ fn generate_untagged_enum_schema(
     name: &Ident,
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
+    generics: &syn::Generics,
 ) -> TokenStream {
     let mut variant_schemas = Vec::new();
 
@@ -1369,8 +1406,11 @@ fn generate_untagged_enum_schema(
     // Container attributes
     let container_setter = generate_container_setters(container_attrs);
 
+    let schema_generics = schema_bounded_generics(generics);
+    let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+
     quote! {
-        impl ::rstructor::schema::SchemaType for #name {
+        impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 let variant_schemas = vec![
                     #(#variant_schemas),*
