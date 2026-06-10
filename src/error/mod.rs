@@ -366,6 +366,11 @@ impl RStructorError {
     /// - Gateway errors (520-524)
     /// - Server errors (500, 502)
     /// - Timeout errors
+    /// - Transient connection failures (connection refused/reset, DNS errors,
+    ///   connect timeouts) — these are just as transient as the 5xx errors above
+    ///
+    /// HTTP errors that occur after a response is received (e.g. body or decode
+    /// errors) remain non-retryable.
     ///
     /// # Example
     ///
@@ -386,6 +391,8 @@ impl RStructorError {
         match self {
             RStructorError::ApiError { kind, .. } => kind.is_retryable(),
             RStructorError::Timeout => true,
+            #[cfg(feature = "_client")]
+            RStructorError::HttpError(e) => e.is_connect() || e.is_timeout(),
             _ => false,
         }
     }
@@ -397,6 +404,10 @@ impl RStructorError {
         match self {
             RStructorError::ApiError { kind, .. } => kind.retry_delay(),
             RStructorError::Timeout => Some(Duration::from_secs(1)),
+            #[cfg(feature = "_client")]
+            RStructorError::HttpError(e) if e.is_connect() || e.is_timeout() => {
+                Some(Duration::from_secs(1))
+            }
             _ => None,
         }
     }

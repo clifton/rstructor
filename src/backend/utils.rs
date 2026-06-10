@@ -11,6 +11,60 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, trace, warn};
 
+/// Default timeout for an entire HTTP request to an LLM provider (5 minutes).
+///
+/// LLM calls — especially with reasoning models — can legitimately run for
+/// several minutes, but a request should never hang forever (reqwest applies
+/// no timeout by default). All provider clients use this value unless an
+/// explicit timeout is set with the `timeout()` builder method.
+///
+/// # Example
+///
+/// ```
+/// use rstructor::DEFAULT_REQUEST_TIMEOUT;
+/// use std::time::Duration;
+///
+/// assert_eq!(DEFAULT_REQUEST_TIMEOUT, Duration::from_secs(300));
+/// ```
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Default timeout for establishing a TCP connection to an LLM provider (30 seconds).
+///
+/// This bounds only the connect phase of a request; the overall request is
+/// bounded by [`DEFAULT_REQUEST_TIMEOUT`] (or the timeout set via the client's
+/// `timeout()` builder method). A healthy provider endpoint accepts connections
+/// well within 30 seconds, so a slower connect almost always indicates a
+/// network problem worth surfacing quickly.
+///
+/// # Example
+///
+/// ```
+/// use rstructor::DEFAULT_CONNECT_TIMEOUT;
+/// use std::time::Duration;
+///
+/// assert_eq!(DEFAULT_CONNECT_TIMEOUT, Duration::from_secs(30));
+/// ```
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Build the reqwest client used by all provider clients.
+///
+/// Applies the given total request timeout plus the default connect timeout
+/// ([`DEFAULT_CONNECT_TIMEOUT`]). Falls back to `reqwest::Client::new()` if the
+/// builder fails (which should never happen with these options).
+pub fn build_http_client(timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .connect_timeout(DEFAULT_CONNECT_TIMEOUT)
+        .build()
+        .unwrap_or_else(|e| {
+            warn!(
+                error = %e,
+                "Failed to build reqwest client with timeout, using default client"
+            );
+            reqwest::Client::new()
+        })
+}
+
 /// Prepare a JSON schema for strict mode by recursively adding required fields
 /// to all object types in the schema.
 ///
@@ -1055,6 +1109,11 @@ where
 }
 
 /// Convert a reqwest error to a RStructorError, handling timeout errors specially.
+///
+/// Request timeouts become [`RStructorError::Timeout`]. Other transport errors
+/// become [`RStructorError::HttpError`]; transient connection failures
+/// (connection refused/reset, DNS errors) are classified as retryable by
+/// [`RStructorError::is_retryable`], while body/decode errors are not.
 pub fn handle_http_error(e: reqwest::Error, provider_name: &str) -> RStructorError {
     error!(error = %e, "HTTP request to {} failed", provider_name);
     if e.is_timeout() {
@@ -1497,8 +1556,13 @@ macro_rules! impl_client_builder_methods {
 
             /// Set the timeout for HTTP requests.
             ///
-            /// This sets the timeout for both the connection and the entire request.
-            /// The timeout applies to each HTTP request made by the client.
+            /// This sets the total timeout for each HTTP request made by the
+            /// client (connection + response). The connect phase additionally
+            /// keeps the default connect timeout of 30 seconds
+            /// ([`DEFAULT_CONNECT_TIMEOUT`](crate::DEFAULT_CONNECT_TIMEOUT)).
+            ///
+            /// If not called, requests use the default timeout of 5 minutes
+            /// ([`DEFAULT_REQUEST_TIMEOUT`](crate::DEFAULT_REQUEST_TIMEOUT)).
             ///
             /// # Arguments
             ///
@@ -1512,17 +1576,8 @@ macro_rules! impl_client_builder_methods {
                 );
                 self.config.timeout = Some(timeout);
 
-                // Rebuild reqwest client with timeout immediately
-                self.client = reqwest::Client::builder()
-                    .timeout(timeout)
-                    .build()
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(
-                            error = %e,
-                            "Failed to build reqwest client with timeout, using default"
-                        );
-                        reqwest::Client::new()
-                    });
+                // Rebuild reqwest client with the new timeout immediately
+                self.client = $crate::backend::utils::build_http_client(timeout);
 
                 self
             }
@@ -3053,6 +3108,80 @@ mod tests {
             RStructorError::Unsupported("nope".into()).retry_delay(),
             None
         );
+    }
+
+    // ===================================================================
+    // HTTP client defaults & transient connection error classification
+    // ===================================================================
+
+    #[tokio::test]
+    async fn connection_refused_error_is_retryable() {
+        // Bind to an ephemeral port, then drop the listener so a connection
+        // to that port is deterministically refused. No external network.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local_addr");
+        drop(listener);
+
+        let client = build_http_client(Duration::from_secs(5));
+        let err = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .expect_err("request to a closed port must fail");
+        assert!(
+            err.is_connect(),
+            "expected a connection error, got: {err:?}"
+        );
+
+        let converted = handle_http_error(err, "Test");
+        assert!(
+            matches!(converted, RStructorError::HttpError(_)),
+            "connection errors should remain HttpError, got: {converted:?}"
+        );
+        assert!(
+            converted.is_retryable(),
+            "connection-refused errors must be retryable"
+        );
+        assert_eq!(converted.retry_delay(), Some(Duration::from_secs(1)));
+    }
+
+    #[tokio::test]
+    async fn request_timeout_applies_and_maps_to_timeout_error() {
+        // A listener that accepts connections (kernel backlog) but never
+        // responds: the TCP handshake completes, no HTTP response arrives,
+        // so the total request timeout configured on the client must fire.
+        // This verifies build_http_client actually applies the timeout.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("local_addr");
+
+        let client = build_http_client(Duration::from_millis(200));
+        let err = client
+            .get(format!("http://{addr}/"))
+            .send()
+            .await
+            .expect_err("request to an unresponsive server must time out");
+        assert!(err.is_timeout(), "expected a timeout error, got: {err:?}");
+
+        let converted = handle_http_error(err, "Test");
+        assert_eq!(converted, RStructorError::Timeout);
+        assert!(converted.is_retryable());
+        drop(listener);
+    }
+
+    #[test]
+    fn non_transient_http_error_is_not_retryable() {
+        // A reqwest error that is neither a timeout nor a connection failure
+        // (here: an invalid URL at build time) must remain non-retryable.
+        let err = reqwest::Client::new()
+            .get("not a valid url")
+            .build()
+            .expect_err("invalid URL must fail to build");
+        assert!(!err.is_connect() && !err.is_timeout());
+
+        let converted = handle_http_error(err, "Test");
+        assert!(matches!(converted, RStructorError::HttpError(_)));
+        assert!(!converted.is_retryable());
+        assert_eq!(converted.retry_delay(), None);
     }
 
     // ===================================================================

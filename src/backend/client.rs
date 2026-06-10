@@ -126,6 +126,9 @@ impl MediaFile {
 ///   - Gemini: `GEMINI_API_KEY`
 /// - Builder methods: `model()`, `temperature()`, `max_tokens()`, `timeout()`
 /// - All clients validate `max_tokens >= 1` to avoid API errors
+/// - Requests default to a 5-minute total timeout (`DEFAULT_REQUEST_TIMEOUT`) with a
+///   30-second connect timeout (`DEFAULT_CONNECT_TIMEOUT`), so a hung connection can
+///   never block forever
 /// - Timeout is applied immediately when `timeout()` is called - no need to call `build()`
 ///
 /// # Examples

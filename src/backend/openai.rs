@@ -5,9 +5,10 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
-    ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
-    ResponseFormat, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
+    ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeInternalOutput,
+    MaterializeResult, ModelInfo, OpenAICompatibleChatCompletionRequest,
+    OpenAICompatibleChatCompletionResponse, ResponseFormat, ThinkingLevel, TokenUsage,
+    ValidationFailureContext, build_http_client, check_response_status,
     convert_openai_compatible_chat_messages, generate_with_retry_with_history, handle_http_error,
     materialize_with_media_with_retry, parse_validate_and_create_output, prepare_strict_schema,
 };
@@ -112,6 +113,8 @@ pub struct OpenAIConfig {
     pub model: Model,
     pub temperature: f32,
     pub max_tokens: Option<u32>,
+    /// Total timeout for each HTTP request.
+    /// Defaults to [`DEFAULT_REQUEST_TIMEOUT`](crate::DEFAULT_REQUEST_TIMEOUT) (5 minutes).
     pub timeout: Option<Duration>,
     pub max_retries: Option<usize>,
     /// Custom base URL for OpenAI-compatible APIs (e.g., local LLMs, proxy endpoints)
@@ -165,16 +168,16 @@ impl OpenAIClient {
             model: Model::Gpt55, // Default to GPT-5.5 (latest frontier model)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,        // Default: no timeout (uses reqwest's default)
-            max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,       // Default: use official OpenAI API
+            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
+            max_retries: Some(3),                   // Default: 3 retries with error feedback
+            base_url: None,                         // Default: use official OpenAI API
             thinking_level: Some(ThinkingLevel::Medium), // GPT-5.5 defaults to medium reasoning
         };
 
         debug!("OpenAI client created with default configuration");
         Ok(Self {
             config,
-            client: reqwest::Client::new(),
+            client: build_http_client(DEFAULT_REQUEST_TIMEOUT),
         })
     }
 
@@ -206,16 +209,16 @@ impl OpenAIClient {
             model: Model::Gpt55, // Default to GPT-5.5 (latest frontier model)
             temperature: 0.0,
             max_tokens: None,
-            timeout: None,        // Default: no timeout (uses reqwest's default)
-            max_retries: Some(3), // Default: 3 retries with error feedback
-            base_url: None,       // Default: use official OpenAI API
+            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
+            max_retries: Some(3),                   // Default: 3 retries with error feedback
+            base_url: None,                         // Default: use official OpenAI API
             thinking_level: Some(ThinkingLevel::Medium), // GPT-5.5 defaults to medium reasoning
         };
 
         debug!("OpenAI client created with default configuration");
         Ok(Self {
             config,
-            client: reqwest::Client::new(),
+            client: build_http_client(DEFAULT_REQUEST_TIMEOUT),
         })
     }
 
@@ -914,5 +917,25 @@ impl LLMClient for OpenAIClient {
 
         debug!(count = models.len(), "Fetched OpenAI models");
         Ok(models)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::DEFAULT_REQUEST_TIMEOUT;
+
+    #[test]
+    fn default_config_has_default_timeout() {
+        let client = OpenAIClient::new("test-key").unwrap();
+        assert_eq!(client.config.timeout, Some(DEFAULT_REQUEST_TIMEOUT));
+    }
+
+    #[test]
+    fn explicit_timeout_overrides_default() {
+        let client = OpenAIClient::new("test-key")
+            .unwrap()
+            .timeout(Duration::from_secs(10));
+        assert_eq!(client.config.timeout, Some(Duration::from_secs(10)));
     }
 }
