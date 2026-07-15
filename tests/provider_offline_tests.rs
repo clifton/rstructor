@@ -187,6 +187,10 @@ macro_rules! assert_model_roundtrip {
 fn openai_model_roundtrip_all_variants() {
     use OpenAIModel::*;
     let table: &[(OpenAIModel, &str)] = &[
+        (Gpt56, "gpt-5.6"),
+        (Gpt56Sol, "gpt-5.6-sol"),
+        (Gpt56Terra, "gpt-5.6-terra"),
+        (Gpt56Luna, "gpt-5.6-luna"),
         (Gpt55Pro, "gpt-5.5-pro"),
         (Gpt55, "gpt-5.5"),
         (Gpt54Pro, "gpt-5.4-pro"),
@@ -214,7 +218,7 @@ fn openai_model_roundtrip_all_variants() {
         (Gpt4, "gpt-4"),
         (Gpt35Turbo, "gpt-3.5-turbo"),
     ];
-    assert_eq!(table.len(), 26, "OpenAI variant table drifted from source");
+    assert_eq!(table.len(), 30, "OpenAI variant table drifted from source");
     for (variant, id) in table {
         assert_model_roundtrip!(OpenAIModel, variant.clone(), id);
     }
@@ -224,6 +228,8 @@ fn openai_model_roundtrip_all_variants() {
 fn anthropic_model_roundtrip_all_variants() {
     use AnthropicModel::*;
     let table: &[(AnthropicModel, &str)] = &[
+        (ClaudeFable5, "claude-fable-5"),
+        (ClaudeSonnet5, "claude-sonnet-5"),
         (ClaudeOpus48, "claude-opus-4-8"),
         (ClaudeOpus47, "claude-opus-4-7"),
         (ClaudeSonnet46, "claude-sonnet-4-6"),
@@ -232,8 +238,6 @@ fn anthropic_model_roundtrip_all_variants() {
         (ClaudeHaiku45, "claude-haiku-4-5-20251001"),
         (ClaudeSonnet45, "claude-sonnet-4-5-20250929"),
         (ClaudeOpus41, "claude-opus-4-1-20250805"),
-        (ClaudeOpus4, "claude-opus-4-20250514"),
-        (ClaudeSonnet4, "claude-sonnet-4-20250514"),
     ];
     assert_eq!(
         table.len(),
@@ -281,13 +285,14 @@ fn gemini_model_roundtrip_all_variants() {
 fn grok_model_roundtrip_all_variants() {
     use GrokModel::*;
     let table: &[(GrokModel, &str)] = &[
+        (Grok45, "grok-4.5"),
         (Grok43, "grok-4.3"),
         (Grok420Reasoning, "grok-4.20-0309-reasoning"),
         (Grok420NonReasoning, "grok-4.20-0309-non-reasoning"),
         (Grok420MultiAgent, "grok-4.20-multi-agent-0309"),
         (GrokBuild01, "grok-build-0.1"),
     ];
-    assert_eq!(table.len(), 5, "Grok variant table drifted from source");
+    assert_eq!(table.len(), 6, "Grok variant table drifted from source");
     for (variant, id) in table {
         assert_model_roundtrip!(GrokModel, variant.clone(), id);
     }

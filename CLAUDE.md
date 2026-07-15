@@ -47,18 +47,18 @@
 ### Official Model Documentation Sources
 
 **OpenAI:**
-- Model Documentation: https://platform.openai.com/docs/models
+- Model Documentation: https://developers.openai.com/api/docs/models
 - Models API Endpoint: https://platform.openai.com/docs/api-reference/models/list
 
 **Anthropic:**
-- All Models Overview: https://docs.anthropic.com/en/docs/about-claude/models/all-models
+- All Models Overview: https://platform.claude.com/docs/en/about-claude/models/overview
 - Models List API: https://docs.anthropic.com/en/api/models-list
 
 **xAI (Grok):**
-- Models Documentation: https://docs.x.ai/docs/models
+- Models Documentation: https://docs.x.ai/developers/models
 
 **Google (Gemini):**
-- Models Documentation: https://ai.google.dev/models
+- Models Documentation: https://ai.google.dev/gemini-api/docs/models
 - Models API Endpoint: `GET https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY`
 
 ### Update Process
@@ -67,20 +67,20 @@
 1. **ALWAYS use API endpoints to get current models** - Never guess or rely on web search. Use the official API endpoints:
    - **OpenAI**: `GET https://api.openai.com/v1/models` (requires `Authorization: Bearer $OPENAI_API_KEY`)
    - **Anthropic**: `GET https://api.anthropic.com/v1/models` (requires `x-api-key: $ANTHROPIC_API_KEY` and `anthropic-version: 2023-06-01`)
-   - **xAI (Grok)**: Check `https://docs.x.ai/docs/models` or use their API if available
+   - **xAI (Grok)**: Check `https://docs.x.ai/developers/models` or use their API if available
    - **Google (Gemini)**: `GET https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY` (API key as query parameter)
 2. **NEVER guess model identifiers** - Always get exact model names from API responses or official documentation
 3. **NEVER rely on web search results** - Web search often returns outdated, incorrect, or speculative information
-4. **ALWAYS use exact API identifiers** - Model identifiers must match exactly what the API expects (e.g., `gpt-5-chat-latest`, `claude-sonnet-4-5-20250929`, `grok-4-0709`, `gemini-1.5-flash`)
+4. **ALWAYS use exact API identifiers** - Model identifiers must match exactly what the API expects (e.g., `gpt-5.6-sol`, `claude-sonnet-5`, `grok-4.5`, `gemini-3.5-flash`)
 5. **If API key is not available**: Ask the user to provide the exact model identifiers from the API endpoint response, rather than guessing or using web search
 6. **NEVER use web search for model lists** - Web search results are often outdated, incorrect, or speculative. Always use official API endpoints or documentation
-7. **Verify date stamps make sense** - If version X.Y is newer than X.Z, its date stamp should be later (e.g., Claude 3.7 date should be after Claude 3.5 date)
-8. **Check for new major versions** - Don't assume only minor version updates; check for major version releases (e.g., Claude 4, GPT-5, Gemini 2.0)
+7. **Verify versioning conventions** - Some providers use dated snapshots while newer Anthropic models use dateless pinned IDs; confirm the current provider convention rather than inferring one
+8. **Check for new major versions** - Don't assume only minor version updates; check for major version releases (e.g., Claude 5, GPT-5.6, Gemini 3.5)
 9. **Verify model name format** - Different providers may use different naming conventions:
-   - OpenAI: `gpt-4-turbo`, `gpt-5-chat-latest`
-   - Anthropic: `claude-sonnet-4-20250514` (includes date)
-   - Grok: `grok-4-0709` (includes date)
-   - Gemini: `gemini-1.5-flash`, `gemini-2.0-flash` (may include version and suffix)
+   - OpenAI: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
+   - Anthropic: `claude-sonnet-5` (dateless pinned ID for current generations)
+   - Grok: `grok-4.5`
+   - Gemini: `gemini-3.5-flash`, `gemini-3.1-pro-preview` (may include a preview suffix)
 10. **Filter for chat completion models** - Only include models suitable for chat completions:
     - **OpenAI**: Filter for chat completion models (exclude `whisper-*`, `text-embedding-*`, `text-moderation-*`, etc.)
     - **Anthropic**: Filter for chat completion models (exclude specialized variants unless needed)
@@ -92,18 +92,18 @@
    - **OpenAI**: `curl https://api.openai.com/v1/models -H "Authorization: Bearer $OPENAI_API_KEY"`
    - **Anthropic**: `curl https://api.anthropic.com/v1/models -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01"`
    - **Gemini**: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY"`
-   - **Grok**: Check documentation at `https://docs.x.ai/docs/models` (API endpoint may not be publicly available)
+   - **Grok**: Check documentation at `https://docs.x.ai/developers/models` (API endpoint may not be publicly available)
 2. **Parse API response**: Extract model identifiers from the JSON response (field names vary by provider):
-   - **OpenAI**: Extract `id` field (e.g., `"id": "gpt-4-turbo"`)
-   - **Anthropic**: Extract `id` field (e.g., `"id": "claude-sonnet-4-20250514"`)
-   - **Gemini**: Extract `name` field and remove `models/` prefix (e.g., `"name": "models/gemini-1.5-flash"` → use `gemini-1.5-flash`)
+   - **OpenAI**: Extract `id` field (e.g., `"id": "gpt-5.6-sol"`)
+   - **Anthropic**: Extract `id` field (e.g., `"id": "claude-sonnet-5"`)
+   - **Gemini**: Extract `name` field and remove `models/` prefix (e.g., `"name": "models/gemini-3.5-flash"` → use `gemini-3.5-flash`)
    - **Grok**: Extract from documentation or ask user for exact identifiers
 3. **Filter appropriate models**: For chat completions, include main chat models and exclude specialized variants:
    - **OpenAI**: Filter for chat completion models (exclude `whisper-*`, `text-embedding-*`, `text-moderation-*`, etc.)
    - **Anthropic**: Filter for chat completion models (exclude specialized variants unless needed)
    - **Gemini**: Filter for models with `generateContent` in `supportedGenerationMethods` array (check API response structure)
    - **Grok**: Include all documented chat completion models
-4. **Verify model identifiers**: Ensure date stamps and version numbers are correct (e.g., Claude 3.7 date should be after Claude 3.5 date)
+4. **Verify model identifiers**: Ensure version numbers and provider-specific snapshot conventions match the API response and official documentation
 5. **When updating**: Add new models to the appropriate enum (`Model`, `AnthropicModel`, `GrokModel`, `GeminiModel`) in the respective backend files, ordered newest to oldest
 6. **Remove deprecated models**: Check API response for models that are no longer available and remove them
 7. **Default models**: Update default model selection to use the latest recommended model when appropriate

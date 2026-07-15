@@ -41,9 +41,17 @@ define_model_enum! {
     /// let model = OpenAIModel::from_string("gpt-4-custom");
     /// ```
     pub enum Model {
+        /// GPT-5.6 (alias for GPT-5.6 Sol, the latest flagship model)
+        Gpt56 => "gpt-5.6",
+        /// GPT-5.6 Sol (flagship model for frontier capability)
+        Gpt56Sol => "gpt-5.6-sol",
+        /// GPT-5.6 Terra (balanced intelligence, latency, and cost)
+        Gpt56Terra => "gpt-5.6-terra",
+        /// GPT-5.6 Luna (efficient model for high-volume workloads)
+        Gpt56Luna => "gpt-5.6-luna",
         /// GPT-5.5 Pro (most capable GPT-5.5 model)
         Gpt55Pro => "gpt-5.5-pro",
-        /// GPT-5.5 (latest frontier model for complex professional work)
+        /// GPT-5.5 (previous frontier model for complex professional work)
         Gpt55 => "gpt-5.5",
         /// GPT-5.4 Pro (most capable GPT-5.4-class model)
         Gpt54Pro => "gpt-5.4-pro",
@@ -141,7 +149,7 @@ impl OpenAIClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt55))]
+    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt56))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -155,13 +163,13 @@ impl OpenAIClient {
 
         let config = OpenAIConfig {
             api_key,
-            model: Model::Gpt55, // Default to GPT-5.5 (latest frontier model)
+            model: Model::Gpt56, // Default to GPT-5.6 (latest flagship alias)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official OpenAI API
-            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.5 defaults to medium reasoning
+            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.6 defaults to medium reasoning
         };
 
         debug!("OpenAI client created with default configuration");
@@ -186,7 +194,7 @@ impl OpenAIClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt55))]
+    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt56))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| RStructorError::api_error("OpenAI", ApiErrorKind::AuthenticationFailed))?;
@@ -196,13 +204,13 @@ impl OpenAIClient {
 
         let config = OpenAIConfig {
             api_key,
-            model: Model::Gpt55, // Default to GPT-5.5 (latest frontier model)
+            model: Model::Gpt56, // Default to GPT-5.6 (latest flagship alias)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official OpenAI API
-            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.5 defaults to medium reasoning
+            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.6 defaults to medium reasoning
         };
 
         debug!("OpenAI client created with default configuration");
@@ -615,6 +623,11 @@ impl OpenAIClient {
 }
 
 #[cfg(feature = "tools")]
+fn tool_reasoning_effort(model: &str) -> Option<String> {
+    model.starts_with("gpt-5.6").then(|| "none".to_string())
+}
+
+#[cfg(feature = "tools")]
 #[async_trait]
 impl crate::backend::tools::ToolRunner for OpenAIClient {
     async fn run_tool_loop(
@@ -632,15 +645,16 @@ impl crate::backend::tools::ToolRunner for OpenAIClient {
             .unwrap_or("https://api.openai.com/v1");
         let url = format!("{}/chat/completions", base_url);
 
-        // GPT-5.x models require temperature=1.0. `reasoning_effort` combined with
-        // function tools is rejected on /v1/chat/completions, so it is omitted for
-        // the tool loop.
+        // GPT-5.x models require temperature=1.0. GPT-5.6 defaults to medium
+        // reasoning, but Chat Completions function tools require effective
+        // reasoning `none`, so make that override explicit for the 5.6 family.
         let is_gpt5 = self.config.model.as_str().starts_with("gpt-5");
         let effective_temp = if is_gpt5 {
             1.0
         } else {
             self.config.temperature
         };
+        let reasoning_effort = tool_reasoning_effort(self.config.model.as_str());
 
         crate::backend::tools::run_openai_compatible_tools(
             &self.client,
@@ -650,7 +664,7 @@ impl crate::backend::tools::ToolRunner for OpenAIClient {
             self.config.model.as_str(),
             effective_temp,
             self.config.max_tokens,
-            None,
+            reasoning_effort,
             system,
             prompt,
             media,
@@ -921,10 +935,26 @@ mod tests {
     }
 
     #[test]
+    fn default_config_uses_latest_model() {
+        let client = OpenAIClient::new("test-key").unwrap();
+        assert_eq!(client.config.model, Model::Gpt56);
+    }
+
+    #[test]
     fn explicit_timeout_overrides_default() {
         let client = OpenAIClient::new("test-key")
             .unwrap()
             .timeout(Duration::from_secs(10));
         assert_eq!(client.config.timeout, Some(Duration::from_secs(10)));
+    }
+
+    #[cfg(feature = "tools")]
+    #[test]
+    fn gpt56_tool_calls_explicitly_disable_reasoning() {
+        for model in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            assert_eq!(tool_reasoning_effort(model), Some("none".to_string()));
+        }
+        assert_eq!(tool_reasoning_effort("gpt-5.5"), None);
+        assert_eq!(tool_reasoning_effort("gpt-4.1-mini"), None);
     }
 }

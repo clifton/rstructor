@@ -25,9 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let image_bytes = reqwest::get(image_url).await?.bytes().await?;
     let media = MediaFile::from_bytes(&image_bytes, "image/png");
 
-    let client = AnthropicClient::from_env()?
-        .model(AnthropicModel::ClaudeSonnet46)
-        .temperature(0.0);
+    let client = AnthropicClient::from_env()?.model(AnthropicModel::ClaudeSonnet5);
 
     let analysis: ImageAnalysis = client
         .materialize_with_media("Describe this image and list dominant colors.", &[media])

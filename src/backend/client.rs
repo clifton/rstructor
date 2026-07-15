@@ -151,7 +151,7 @@ impl MediaFile {
 ///
 /// // Create a client
 /// let client = OpenAIClient::new("your-openai-api-key")?
-///     .model(OpenAIModel::Gpt55)
+///     .model(OpenAIModel::Gpt56)
 ///     .temperature(0.0)
 ///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///
@@ -184,8 +184,7 @@ impl MediaFile {
 ///
 /// // Create a client
 /// let client = AnthropicClient::new("your-anthropic-api-key")?
-///     .model(AnthropicModel::ClaudeSonnet4)
-///     .temperature(0.0)
+///     .model(AnthropicModel::ClaudeSonnet5)
 ///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///
 /// // Materialize a structured response

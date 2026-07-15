@@ -22,7 +22,7 @@ define_model_enum! {
     ///
     /// These are convenience variants for common Grok models.
     /// For the latest available models and their identifiers, check the
-    /// [xAI Models Documentation](https://docs.x.ai/docs/models).
+    /// [xAI Models Documentation](https://docs.x.ai/developers/models).
     ///
     /// # Using Custom Models
     ///
@@ -42,7 +42,9 @@ define_model_enum! {
     /// let model = GrokModel::from_string("grok-custom");
     /// ```
     pub enum Model {
-        /// Grok 4.3 (latest recommended chat model, multimodal text + image input)
+        /// Grok 4.5 (latest recommended chat and coding model)
+        Grok45 => "grok-4.5",
+        /// Grok 4.3 (previous recommended chat model, multimodal text + image input)
         Grok43 => "grok-4.3",
         /// Grok 4.20 Reasoning (reasoning-optimized variant)
         Grok420Reasoning => "grok-4.20-0309-reasoning",
@@ -96,7 +98,7 @@ impl GrokClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "grok_client_new", skip(api_key), fields(model = ?Model::Grok43))]
+    #[instrument(name = "grok_client_new", skip(api_key), fields(model = ?Model::Grok45))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -111,7 +113,7 @@ impl GrokClient {
 
         let config = GrokConfig {
             api_key,
-            model: Model::Grok43, // Default to Grok 4.3 (latest recommended chat model)
+            model: Model::Grok45, // Default to Grok 4.5 (latest recommended chat model)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
@@ -141,7 +143,7 @@ impl GrokClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "grok_client_from_env", fields(model = ?Model::Grok43))]
+    #[instrument(name = "grok_client_from_env", fields(model = ?Model::Grok45))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("XAI_API_KEY")
             .map_err(|_| RStructorError::api_error("Grok", ApiErrorKind::AuthenticationFailed))?;
@@ -151,7 +153,7 @@ impl GrokClient {
 
         let config = GrokConfig {
             api_key,
-            model: Model::Grok43, // Default to Grok 4.3 (latest recommended chat model)
+            model: Model::Grok45, // Default to Grok 4.5 (latest recommended chat model)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
@@ -749,6 +751,12 @@ mod tests {
     fn default_config_has_default_timeout() {
         let client = GrokClient::new("test-key").unwrap();
         assert_eq!(client.config.timeout, Some(DEFAULT_REQUEST_TIMEOUT));
+    }
+
+    #[test]
+    fn default_config_uses_latest_model() {
+        let client = GrokClient::new("test-key").unwrap();
+        assert_eq!(client.config.model, Model::Grok45);
     }
 
     #[test]
