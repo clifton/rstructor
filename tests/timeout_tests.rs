@@ -35,7 +35,7 @@ mod timeout_tests {
         // Test with a very short timeout (should likely timeout)
         let client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
-            .model(OpenAIModel::Gpt55)
+            .model(OpenAIModel::Gpt56)
             .temperature(0.0)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
@@ -61,7 +61,7 @@ mod timeout_tests {
 
         let _client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
-            .model(OpenAIModel::Gpt55)
+            .model(OpenAIModel::Gpt56)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
@@ -81,8 +81,7 @@ mod timeout_tests {
         // Test with a very short timeout (should likely timeout)
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::ClaudeSonnet46)
-            .temperature(0.0)
+            .model(AnthropicModel::ClaudeSonnet5)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
         // Try to make a request - it should timeout
@@ -108,7 +107,7 @@ mod timeout_tests {
 
         let _client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::ClaudeSonnet46)
+            .model(AnthropicModel::ClaudeSonnet5)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests
@@ -150,7 +149,7 @@ mod timeout_tests {
         // Test with empty string to use XAI_API_KEY env var
         let client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok43)
+            .model(GrokModel::Grok45)
             .temperature(0.0)
             .timeout(Duration::from_millis(1)); // 1ms timeout - should timeout
 
@@ -175,7 +174,7 @@ mod timeout_tests {
         // Test with empty string to use XAI_API_KEY env var
         let _client = GrokClient::from_env()
             .expect("XAI_API_KEY must be set for this test")
-            .model(GrokModel::Grok43)
+            .model(GrokModel::Grok45)
             .temperature(0.5)
             .max_tokens(100)
             .timeout(Duration::from_secs(2)); // 2 second timeout for unit tests

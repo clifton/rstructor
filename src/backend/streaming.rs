@@ -337,11 +337,8 @@ fn repair_json(s: &str) -> Option<String> {
         }
         if out.ends_with(':') {
             // Drop the dangling `"key":` back to the previous `{` or `,`.
-            if let Some(cut) = out.rfind(['{', ',']) {
-                out.truncate(cut + 1);
-            } else {
-                return None;
-            }
+            let cut = out.rfind(['{', ','])?;
+            out.truncate(cut + 1);
             continue;
         }
         break;

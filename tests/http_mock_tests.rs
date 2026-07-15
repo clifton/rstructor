@@ -607,6 +607,50 @@ struct AddArgs {
     b: i64,
 }
 
+/// GPT-5.6 rejects Chat Completions function tools unless reasoning is disabled.
+/// Verify the compatibility override reaches the serialized HTTP request rather
+/// than only testing the model-name predicate in isolation.
+#[cfg(feature = "tools")]
+#[tokio::test]
+async fn gpt56_tool_request_disables_reasoning() {
+    use rstructor::{RequestExt, Toolbox};
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    let mut server = mockito::Server::new_async().await;
+    let captured: Arc<std::sync::Mutex<Option<Value>>> = Arc::new(std::sync::Mutex::new(None));
+    let sink = captured.clone();
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_request(move |req| {
+            let body = serde_json::from_str(&req.utf8_lossy_body().unwrap()).unwrap();
+            *sink.lock().unwrap() = Some(body);
+            true
+        })
+        .with_status(200)
+        .with_body(chat_completion("tools are ready"))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let toolbox = Toolbox::new().with(recording_add_tool(Arc::new(AtomicBool::new(false))));
+    let answer = OpenAIClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .model("gpt-5.6")
+        .with_tools(&toolbox)
+        .run("say hello")
+        .await
+        .unwrap();
+
+    assert_eq!(answer, "tools are ready");
+    request.assert_async().await;
+    let body = captured.lock().unwrap();
+    let body = body.as_ref().expect("request body should be captured");
+    assert_eq!(body["reasoning_effort"], json!("none"));
+    assert_eq!(body["temperature"], json!(1.0));
+}
+
 /// Full OpenAI tool round-trip: the first response asks for a tool call, the loop
 /// executes the (real) tool and feeds the result back as a `role: tool` message
 /// carrying the original `tool_call_id`, and the second response returns the final

@@ -19,7 +19,7 @@ define_model_enum! {
     /// Gemini models available for completion
     ///
     /// For the latest available models and their identifiers, check the
-    /// [Google AI Models Documentation](https://ai.google.dev/models).
+    /// [Google AI Models Documentation](https://ai.google.dev/gemini-api/docs/models).
     /// Use the API endpoint `GET https://generativelanguage.googleapis.com/v1beta/models?key=$GEMINI_API_KEY`
     /// to get the current list of available models.
     ///
@@ -1146,6 +1146,12 @@ mod tests {
             client.config.timeout,
             Some(crate::backend::DEFAULT_REQUEST_TIMEOUT)
         );
+    }
+
+    #[test]
+    fn default_config_uses_latest_stable_model() {
+        let client = super::GeminiClient::new("test-key").unwrap();
+        assert_eq!(client.config.model, super::Model::Gemini35Flash);
     }
 
     #[test]

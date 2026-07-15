@@ -20,8 +20,17 @@ mod tests {
         let model = OpenAIModel::from_str("gpt-4o-mini").unwrap();
         assert_eq!(model, OpenAIModel::Gpt4OMini);
 
-        let model = OpenAIModel::from_str("gpt-5.5").unwrap();
-        assert_eq!(model, OpenAIModel::Gpt55);
+        let model = OpenAIModel::from_str("gpt-5.6").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt56);
+
+        let model = OpenAIModel::from_str("gpt-5.6-sol").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt56Sol);
+
+        let model = OpenAIModel::from_str("gpt-5.6-terra").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt56Terra);
+
+        let model = OpenAIModel::from_str("gpt-5.6-luna").unwrap();
+        assert_eq!(model, OpenAIModel::Gpt56Luna);
 
         let model = OpenAIModel::from_str("gpt-5.5-pro").unwrap();
         assert_eq!(model, OpenAIModel::Gpt55Pro);
@@ -37,8 +46,11 @@ mod tests {
     #[test]
     fn test_anthropic_model_from_string() {
         // Test known model
-        let model = AnthropicModel::from_string("claude-sonnet-4-6");
-        assert_eq!(model, AnthropicModel::ClaudeSonnet46);
+        let model = AnthropicModel::from_string("claude-sonnet-5");
+        assert_eq!(model, AnthropicModel::ClaudeSonnet5);
+
+        let model = AnthropicModel::from_string("claude-fable-5");
+        assert_eq!(model, AnthropicModel::ClaudeFable5);
 
         let model = AnthropicModel::from_string("claude-opus-4-7");
         assert_eq!(model, AnthropicModel::ClaudeOpus47);
@@ -54,6 +66,7 @@ mod tests {
     #[test]
     fn test_grok_model_as_str() {
         let models = vec![
+            GrokModel::Grok45,
             GrokModel::Grok43,
             GrokModel::Grok420Reasoning,
             GrokModel::Grok420NonReasoning,
@@ -71,6 +84,7 @@ mod tests {
     #[test]
     fn test_grok_model_from_string() {
         let test_strings = vec![
+            "grok-4.5",
             "grok-4.3",
             "grok-4.20-0309-reasoning",
             "grok-4.20-0309-non-reasoning",

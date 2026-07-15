@@ -81,7 +81,7 @@ pub enum Provider {
 /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
 /// use rstructor::{AnyClient, OpenAIClient, OpenAIModel};
 ///
-/// let configured = OpenAIClient::from_env()?.model(OpenAIModel::Gpt55);
+/// let configured = OpenAIClient::from_env()?.model(OpenAIModel::Gpt56);
 /// let client: AnyClient = configured.into();
 /// # let _ = client;
 /// # Ok(())
