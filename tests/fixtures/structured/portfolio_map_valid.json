@@ -1,0 +1,16 @@
+{
+  "portfolio_id": "HF-ALPHA-001",
+  "as_of": "2026-07-24",
+  "positions": {
+    "AAPL": {
+      "asset_class": "equity",
+      "quantity": 125000,
+      "mark_price": 213.76
+    },
+    "ESU6": {
+      "asset_class": "future",
+      "quantity": -240,
+      "mark_price": 6378.25
+    }
+  }
+}

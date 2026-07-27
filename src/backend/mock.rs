@@ -122,6 +122,17 @@ fn clone_error(e: &RStructorError) -> RStructorError {
         },
         RStructorError::ValidationError(s) => RStructorError::ValidationError(s.clone()),
         RStructorError::SchemaError(s) => RStructorError::SchemaError(s.clone()),
+        RStructorError::SchemaCompatibilityError {
+            provider,
+            context,
+            path,
+            message,
+        } => RStructorError::SchemaCompatibilityError {
+            provider: provider.clone(),
+            context: context.clone(),
+            path: path.clone(),
+            message: message.clone(),
+        },
         RStructorError::SerializationError(s) => RStructorError::SerializationError(s.clone()),
         RStructorError::OutputDecodeError { path, message } => RStructorError::OutputDecodeError {
             path: path.clone(),

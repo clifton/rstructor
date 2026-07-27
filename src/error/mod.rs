@@ -304,6 +304,20 @@ pub enum RStructorError {
     #[error("Schema error: {0}")]
     SchemaError(String),
 
+    /// A provider cannot represent part of the requested schema without changing
+    /// which values the Rust type accepts.
+    #[error("{provider} cannot represent {context} at {path}: {message}")]
+    SchemaCompatibilityError {
+        /// Provider whose structured-output dialect rejected the schema.
+        provider: Box<str>,
+        /// Human-readable schema context, such as a structured output or tool arguments.
+        context: Box<str>,
+        /// JSONPath-style location of the incompatible schema node.
+        path: Box<str>,
+        /// Explanation of the unsupported construct and available remediation.
+        message: Box<str>,
+    },
+
     /// Error serializing or deserializing data
     #[error("Serialization error: {0}")]
     SerializationError(String),
@@ -449,6 +463,25 @@ impl PartialEq for RStructorError {
             ) => p1 == p2 && k1 == k2,
             (Self::ValidationError(a), Self::ValidationError(b)) => a == b,
             (Self::SchemaError(a), Self::SchemaError(b)) => a == b,
+            (
+                Self::SchemaCompatibilityError {
+                    provider: provider_a,
+                    context: context_a,
+                    path: path_a,
+                    message: message_a,
+                },
+                Self::SchemaCompatibilityError {
+                    provider: provider_b,
+                    context: context_b,
+                    path: path_b,
+                    message: message_b,
+                },
+            ) => {
+                provider_a == provider_b
+                    && context_a == context_b
+                    && path_a == path_b
+                    && message_a == message_b
+            }
             (Self::SerializationError(a), Self::SerializationError(b)) => a == b,
             (
                 Self::OutputDecodeError {

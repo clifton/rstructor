@@ -385,7 +385,8 @@ impl GeminiClient {
         let adjacently_tagged_info =
             crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
 
-        // Prepare schema for Gemini by stripping unsupported keywords (examples, additionalProperties, etc.)
+        // Prepare schema for Gemini by stripping unsupported metadata while
+        // preserving supported typed-map constraints.
         let gemini_schema = crate::backend::utils::prepare_gemini_schema(&schema);
         let generation_config = GenerationConfig {
             temperature: self.config.temperature,

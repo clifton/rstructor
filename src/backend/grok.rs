@@ -7,10 +7,10 @@ use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeInternalOutput,
     MaterializeResult, ModelInfo, OpenAICompatibleChatCompletionRequest,
-    OpenAICompatibleChatCompletionResponse, ResponseFormat, TokenUsage, ValidationFailureContext,
-    build_http_client, check_response_status, convert_openai_compatible_chat_messages,
-    generate_with_retry_with_history, handle_http_error, materialize_with_media_with_retry,
-    parse_validate_and_create_output, prepare_strict_schema,
+    OpenAICompatibleChatCompletionResponse, ResponseFormat, StrictSchemaProvider, TokenUsage,
+    ValidationFailureContext, build_http_client, check_response_status, compile_strict_schema,
+    convert_openai_compatible_chat_messages, generate_with_retry_with_history, handle_http_error,
+    materialize_with_media_with_retry, parse_validate_and_create_output,
 };
 #[cfg(feature = "streaming")]
 use crate::backend::{OpenAICompatibleChatMessage, OpenAICompatibleMessageContent};
@@ -198,8 +198,11 @@ impl GrokClient {
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
-        // Prepare schema with additionalProperties: false recursively for all nested objects
-        let schema_json = prepare_strict_schema(&schema);
+        // Reject typed dynamic maps before Grok's strict object transform can
+        // silently narrow them to empty objects.
+        let schema_json =
+            compile_strict_schema(&schema, StrictSchemaProvider::Grok, "structured output")
+                .map_err(|error| (error, None))?;
 
         // Build API messages from conversation history
         // With native structured outputs, we don't need to include schema instructions in the prompt
@@ -656,7 +659,14 @@ impl LLMClient for GrokClient {
     {
         let schema = T::schema();
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
-        let schema_json = prepare_strict_schema(&schema);
+        let schema_json = match compile_strict_schema(
+            &schema,
+            StrictSchemaProvider::Grok,
+            "streamed structured output",
+        ) {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let response_format = ResponseFormat::json_schema(schema_name, schema_json, None);
         let body = self.stream_body(prompt, Some(response_format));
         crate::backend::streaming::object_stream(
@@ -674,7 +684,14 @@ impl LLMClient for GrokClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
-        let item_schema = prepare_strict_schema(&T::schema());
+        let item_schema = match compile_strict_schema(
+            &T::schema(),
+            StrictSchemaProvider::Grok,
+            "streamed item",
+        ) {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, true);
         let response_format = ResponseFormat::json_schema("items".to_string(), wrapper, None);
         let body = self.stream_body(prompt, Some(response_format));

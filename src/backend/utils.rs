@@ -454,8 +454,8 @@ pub fn transform_internally_to_adjacently_tagged(
 /// Prepare a JSON schema for Gemini by stripping unsupported keywords.
 ///
 /// Gemini's structured outputs API doesn't support certain JSON Schema keywords like
-/// `examples`, `additionalProperties`, `title`, etc. This function recursively removes
-/// them from the schema.
+/// `examples` and schema metadata. Supported object constraints, including boolean
+/// and schema-valued `additionalProperties`, are preserved.
 ///
 /// # Arguments
 ///
@@ -784,95 +784,7 @@ fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
         obj.remove("definitions");
         obj.remove("$ref"); // Should be resolved by now, but remove if any remain
 
-        // Handle additionalProperties: remove if boolean, keep if it's a schema for maps
-        if let Some(additional) = obj.get("additionalProperties")
-            && additional.is_boolean()
-        {
-            obj.remove("additionalProperties");
-        }
-
-        // For object types with additionalProperties but no properties, this is a Map type
-        // Gemini requires properties to be non-empty for object types
-        // Since Gemini doesn't support map types natively, we remove type constraint
-        // and add a description. The response won't be strictly validated but should
-        // parse correctly.
-        let is_object = obj.get("type").and_then(|t| t.as_str()) == Some("object");
-        let has_properties = obj.contains_key("properties");
-        let has_additional_props = obj.contains_key("additionalProperties");
-
-        if is_object && !has_properties && has_additional_props {
-            // This is a map type - Gemini doesn't support this natively
-            // We need to generate a workaround schema that Gemini can understand
-            let additional = obj.remove("additionalProperties");
-
-            // Get existing description if any
-            let existing_desc = obj
-                .get("description")
-                .and_then(|d| d.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default();
-
-            // For Gemini, we'll define a few placeholder property keys that represent
-            // the expected dynamic key structure. This is a workaround since Gemini
-            // requires properties to be defined.
-            let value_schema = additional.unwrap_or(serde_json::json!({}));
-
-            // Try to extract specific keys from x-enum-keys extension field first,
-            // then fall back to parsing the description string for backward compatibility
-            let mut keys = vec!["key1".to_string(), "key2".to_string(), "key3".to_string()];
-            if let Some(enum_keys) = obj.remove("x-enum-keys")
-                && let Some(arr) = enum_keys.as_array()
-            {
-                let extracted_keys: Vec<String> = arr
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect();
-                if !extracted_keys.is_empty() {
-                    keys = extracted_keys;
-                }
-            } else if let Some(start) = existing_desc.find("Keys: [")
-                && let Some(end) = existing_desc[start..].find(']')
-            {
-                let keys_str = &existing_desc[start + 7..start + end];
-                let extracted_keys: Vec<String> = keys_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if !extracted_keys.is_empty() {
-                    keys = extracted_keys;
-                }
-            }
-
-            // Create placeholder properties with the value schema
-            // Using extracted keys if available, otherwise generic key names
-            let mut placeholder_props = serde_json::Map::new();
-            for key in &keys {
-                placeholder_props.insert(key.clone(), value_schema.clone());
-            }
-
-            obj.insert("properties".to_string(), Value::Object(placeholder_props));
-
-            // Update description to explain this is a map with specific or example keys
-            let map_desc = if existing_desc.contains("Keys: [") {
-                // If keys were specified, keep the original description as-is
-                existing_desc
-            } else if existing_desc.is_empty() {
-                format!(
-                    "Object with any string keys ({} are examples - use actual meaningful key names)",
-                    keys.join(", ")
-                )
-            } else {
-                format!(
-                    "{} ({} are example keys - use actual meaningful key names)",
-                    existing_desc,
-                    keys.join(", ")
-                )
-            };
-            obj.insert("description".to_string(), Value::String(map_desc));
-        }
-
-        // Strip x-enum-keys extension (consumed above for maps, not needed in final schema)
+        // `x-enum-keys` is a rstructor hint, not part of Gemini's schema dialect.
         obj.remove("x-enum-keys");
 
         // Recursively process nested schemas
@@ -2381,7 +2293,7 @@ mod tests {
     }
 
     #[test]
-    fn test_gemini_schema_strips_additional_properties() {
+    fn test_gemini_schema_preserves_closed_object_constraint() {
         let mut schema_json = serde_json::json!({
             "type": "object",
             "properties": {
@@ -2392,10 +2304,7 @@ mod tests {
 
         strip_gemini_unsupported_keywords(&mut schema_json);
 
-        assert!(
-            schema_json.get("additionalProperties").is_none(),
-            "additionalProperties should be stripped"
-        );
+        assert_eq!(schema_json["additionalProperties"], false);
     }
 
     #[test]
@@ -2526,7 +2435,7 @@ mod tests {
     }
 
     #[test]
-    fn test_gemini_map_with_x_enum_keys() {
+    fn test_gemini_map_preserves_typed_additional_properties() {
         let mut schema = serde_json::json!({
             "type": "object",
             "properties": {
@@ -2539,25 +2448,18 @@ mod tests {
             }
         });
         strip_gemini_unsupported_keywords_recursive(&mut schema);
-        let props = schema["properties"]["counts"]["properties"]
-            .as_object()
-            .unwrap();
-        assert!(props.contains_key("info"), "should have 'info' key");
-        assert!(props.contains_key("warn"), "should have 'warn' key");
-        assert!(props.contains_key("error"), "should have 'error' key");
+        let counts = &schema["properties"]["counts"];
+        assert_eq!(counts["type"], "object");
+        assert_eq!(counts["additionalProperties"]["type"], "integer");
+        assert!(counts.get("properties").is_none());
         assert!(
-            !props.contains_key("key1"),
-            "should not have placeholder 'key1'"
-        );
-        assert!(
-            schema["properties"]["counts"].get("x-enum-keys").is_none(),
+            counts.get("x-enum-keys").is_none(),
             "x-enum-keys should be stripped from final schema"
         );
     }
 
     #[test]
-    fn test_gemini_map_with_description_only_keys_hint() {
-        // Backward compat: description-only "Keys: [...]" pattern still works
+    fn test_gemini_map_description_does_not_change_map_shape() {
         let mut schema = serde_json::json!({
             "type": "object",
             "properties": {
@@ -2569,16 +2471,10 @@ mod tests {
             }
         });
         strip_gemini_unsupported_keywords_recursive(&mut schema);
-        let props = schema["properties"]["counts"]["properties"]
-            .as_object()
-            .unwrap();
-        assert!(props.contains_key("alpha"), "should have 'alpha' key");
-        assert!(props.contains_key("beta"), "should have 'beta' key");
-        assert!(props.contains_key("gamma"), "should have 'gamma' key");
-        assert!(
-            !props.contains_key("key1"),
-            "should not have placeholder 'key1'"
-        );
+        let counts = &schema["properties"]["counts"];
+        assert_eq!(counts["description"], "Keys: [alpha, beta, gamma]");
+        assert_eq!(counts["additionalProperties"]["type"], "integer");
+        assert!(counts.get("properties").is_none());
     }
 
     #[test]
@@ -3518,10 +3414,10 @@ mod tests {
     }
 
     #[test]
-    fn strict_then_gemini_combination_strips_added_props_keeps_required() {
+    fn strict_then_gemini_combination_preserves_closed_objects_and_required() {
         // First run strict mode (adds additionalProperties:false + required at
-        // every object level), then run gemini stripping (removes the boolean
-        // additionalProperties but leaves `required` intact at both levels).
+        // every object level), then run Gemini cleanup. Gemini now supports the
+        // boolean constraint, so both compatibility requirements survive.
         let mut schema = serde_json::json!({
             "type": "object",
             "properties": {
@@ -3545,12 +3441,10 @@ mod tests {
 
         strip_gemini_unsupported_keywords(&mut schema);
 
-        // Boolean additionalProperties stripped at both levels.
-        assert!(schema.get("additionalProperties").is_none());
-        assert!(
-            schema["properties"]["nested"]
-                .get("additionalProperties")
-                .is_none()
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert_eq!(
+            schema["properties"]["nested"]["additionalProperties"],
+            serde_json::json!(false)
         );
 
         // required survives at both levels (strict populated it from properties).
@@ -3566,8 +3460,8 @@ mod tests {
     #[test]
     fn gemini_map_value_with_nested_keywords_is_recleaned() {
         // A map (additionalProperties object) whose value schema itself carries
-        // unsupported keywords (title/examples). After the map placeholder keys
-        // are synthesized, the value schemas must be re-cleaned.
+        // unsupported keywords (title/examples). The map shape is preserved while
+        // its value schema is recursively cleaned.
         let mut schema = serde_json::json!({
             "type": "object",
             "additionalProperties": {
@@ -3582,17 +3476,18 @@ mod tests {
         });
         strip_gemini_unsupported_keywords_recursive(&mut schema);
 
-        let placeholder = &schema["properties"]["alpha"];
-        assert_eq!(placeholder["type"], "object");
+        let value_schema = &schema["additionalProperties"];
+        assert_eq!(value_schema["type"], "object");
         assert!(
-            placeholder.get("title").is_none(),
+            value_schema.get("title").is_none(),
             "nested title should be re-cleaned"
         );
         assert!(
-            placeholder.get("examples").is_none(),
+            value_schema.get("examples").is_none(),
             "nested examples should be re-cleaned"
         );
-        assert_eq!(placeholder["properties"]["a"]["type"], "integer");
+        assert_eq!(value_schema["properties"]["a"]["type"], "integer");
+        assert!(schema.get("properties").is_none());
         assert!(schema.get("x-enum-keys").is_none());
     }
 
@@ -3672,18 +3567,16 @@ mod tests {
     }
 
     #[test]
-    fn gemini_map_additional_properties_true_no_placeholders() {
-        // additionalProperties: true (boolean) is simply removed; no placeholder
-        // properties are synthesized.
+    fn gemini_map_preserves_additional_properties_true() {
         let mut schema = serde_json::json!({
             "type": "object",
             "additionalProperties": true
         });
         strip_gemini_unsupported_keywords_recursive(&mut schema);
-        assert!(schema.get("additionalProperties").is_none());
+        assert_eq!(schema["additionalProperties"], true);
         assert!(
             schema.get("properties").is_none(),
-            "boolean additionalProperties should not synthesize placeholder properties"
+            "dynamic maps should not synthesize placeholder properties"
         );
     }
 

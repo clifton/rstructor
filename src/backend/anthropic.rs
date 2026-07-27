@@ -8,10 +8,10 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     AnthropicMessageContent, ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient,
-    MaterializeInternalOutput, MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage,
-    ValidationFailureContext, build_anthropic_message_content, build_http_client,
-    check_response_status, generate_with_retry_with_history, handle_http_error,
-    materialize_with_media_with_retry, parse_validate_and_create_output, prepare_strict_schema,
+    MaterializeInternalOutput, MaterializeResult, ModelInfo, StrictSchemaProvider, ThinkingLevel,
+    TokenUsage, ValidationFailureContext, build_anthropic_message_content, build_http_client,
+    check_response_status, compile_strict_schema, generate_with_retry_with_history,
+    handle_http_error, materialize_with_media_with_retry, parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -301,8 +301,14 @@ impl AnthropicClient {
         let schema = T::schema();
         trace!("Retrieved JSON schema for type");
 
-        // Prepare schema with additionalProperties: false recursively for all nested objects
-        let schema_json = prepare_strict_schema(&schema);
+        // Reject dynamic maps before Anthropic's strict object transform can
+        // silently narrow them to empty objects.
+        let schema_json = compile_strict_schema(
+            &schema,
+            StrictSchemaProvider::Anthropic,
+            "structured output",
+        )
+        .map_err(|error| (error, None))?;
 
         // Build API messages from conversation history
         // With native structured outputs, we don't need to include schema instructions in the prompt
@@ -879,7 +885,14 @@ impl LLMClient for AnthropicClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
-        let schema_json = prepare_strict_schema(&T::schema());
+        let schema_json = match compile_strict_schema(
+            &T::schema(),
+            StrictSchemaProvider::Anthropic,
+            "streamed structured output",
+        ) {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let output_format = serde_json::json!({
             "type": "json_schema",
             "schema": schema_json,
@@ -900,7 +913,14 @@ impl LLMClient for AnthropicClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
-        let item_schema = prepare_strict_schema(&T::schema());
+        let item_schema = match compile_strict_schema(
+            &T::schema(),
+            StrictSchemaProvider::Anthropic,
+            "streamed item",
+        ) {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, true);
         let output_format = serde_json::json!({ "type": "json_schema", "schema": wrapper });
         let body = self.stream_body(prompt, Some(output_format));

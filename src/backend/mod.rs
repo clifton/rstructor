@@ -12,6 +12,8 @@ mod model_macro;
 mod openai_compatible;
 #[cfg(feature = "_client")]
 mod request;
+#[cfg(feature = "_client")]
+mod schema_compatibility;
 #[cfg(feature = "streaming")]
 pub mod streaming;
 #[cfg(feature = "tools")]
@@ -86,12 +88,13 @@ pub(crate) use openai_compatible::{
     convert_openai_compatible_chat_messages,
 };
 #[cfg(feature = "_client")]
+pub(crate) use schema_compatibility::{StrictSchemaProvider, compile_strict_schema};
+#[cfg(feature = "_client")]
 pub use utils::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
 #[cfg(feature = "_client")]
 pub(crate) use utils::{
     ResponseFormat, build_http_client, check_response_status, generate_with_retry_with_history,
     handle_http_error, materialize_with_media_with_retry, parse_validate_and_create_output,
-    prepare_strict_schema,
 };
 
 /// Thinking level configuration for models that support extended reasoning.

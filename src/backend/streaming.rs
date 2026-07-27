@@ -36,6 +36,20 @@ pub type TextStream<'a> = Pin<Box<dyn Stream<Item = Result<String>> + Send + 'a>
 /// A boxed stream of [`StreamedObject`] items for a streaming structured request.
 pub type ObjectStream<'a, T> = Pin<Box<dyn Stream<Item = Result<StreamedObject<T>>> + Send + 'a>>;
 
+/// Build a stream that yields one locally detected error and performs no I/O.
+///
+/// Provider methods use this when synchronous request construction discovers an
+/// incompatible schema but their public streaming API cannot return `Result`
+/// directly.
+pub(crate) fn error_stream<'a, T>(
+    error: RStructorError,
+) -> Pin<Box<dyn Stream<Item = Result<T>> + Send + 'a>>
+where
+    T: Send + 'a,
+{
+    Box::pin(futures_util::stream::once(async move { Err(error) }))
+}
+
 /// An item yielded by a streaming structured ("object") request.
 #[derive(Debug, Clone)]
 pub enum StreamedObject<T> {
