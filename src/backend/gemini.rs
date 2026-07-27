@@ -157,8 +157,8 @@ struct GenerationConfig {
     max_output_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_mime_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    response_schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "responseJsonSchema")]
+    response_json_schema: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "thinkingConfig")]
     thinking_config: Option<ThinkingConfig>,
 }
@@ -344,7 +344,7 @@ impl GeminiClient {
     /// Accepts conversation history for multi-turn interactions.
     /// Returns the data, raw response, and optional usage info.
     ///
-    /// Uses Gemini's native Structured Outputs with `response_schema`
+    /// Uses Gemini's native Structured Outputs with `responseJsonSchema`
     /// for guaranteed schema compliance via constrained decoding.
     ///
     /// The raw response is included to enable conversation history tracking for retries,
@@ -366,7 +366,7 @@ impl GeminiClient {
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
         // Build API contents from conversation history
-        // With native response_schema, we don't need to include schema instructions in the prompt
+        // With native responseJsonSchema, we don't need to include schema instructions in the prompt
         let contents = chat_messages_to_contents(messages);
 
         // Build thinking config only for Gemini 3.x models
@@ -392,7 +392,7 @@ impl GeminiClient {
             temperature: self.config.temperature,
             max_output_tokens: self.config.max_tokens,
             response_mime_type: Some("application/json".to_string()),
-            response_schema: Some(gemini_schema),
+            response_json_schema: Some(gemini_schema),
             thinking_config,
         };
 
@@ -472,7 +472,7 @@ impl GeminiClient {
             if let Some(text) = &part.text {
                 let mut raw_response = text.clone();
                 debug!(content_len = raw_response.len(), "Processing text part");
-                // With native response_schema, the response is guaranteed to be valid JSON
+                // With native responseJsonSchema, the response is guaranteed to be valid JSON
                 trace!(json = %raw_response, "Parsing structured output response");
 
                 // Transform internally tagged enums back to adjacently tagged format if needed
@@ -532,7 +532,7 @@ impl GeminiClient {
                 temperature: self.config.temperature,
                 max_output_tokens: self.config.max_tokens,
                 response_mime_type: None,
-                response_schema: None,
+                response_json_schema: None,
                 thinking_config,
             },
         };
@@ -691,9 +691,9 @@ impl GeminiClient {
 #[cfg(feature = "streaming")]
 impl GeminiClient {
     /// Build the JSON request body for a streaming call, optionally with a
-    /// structured-output `response_schema`. (Gemini streams via the
+    /// structured-output `responseJsonSchema`. (Gemini streams via the
     /// `:streamGenerateContent?alt=sse` endpoint; the body itself is unchanged.)
-    fn stream_body(&self, prompt: &str, response_schema: Option<Value>) -> Value {
+    fn stream_body(&self, prompt: &str, response_json_schema: Option<Value>) -> Value {
         let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
         let thinking_config = if is_gemini3 {
             self.config.thinking_level.and_then(|level| {
@@ -714,10 +714,10 @@ impl GeminiClient {
             generation_config: GenerationConfig {
                 temperature: self.config.temperature,
                 max_output_tokens: self.config.max_tokens,
-                response_mime_type: response_schema
+                response_mime_type: response_json_schema
                     .as_ref()
                     .map(|_| "application/json".to_string()),
-                response_schema,
+                response_json_schema,
                 thinking_config,
             },
         };

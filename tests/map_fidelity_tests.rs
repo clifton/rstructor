@@ -172,6 +172,112 @@ async fn openai_tool_map_is_rejected_before_http() {
     ));
 }
 
+#[cfg(all(feature = "gemini", feature = "tools"))]
+#[tokio::test]
+async fn gemini_tool_sends_and_invokes_a_native_typed_map() {
+    use rstructor::{FnTool, RequestExt, Toolbox};
+    use serde_json::{Value, json};
+
+    #[derive(Instructor, Serialize, Deserialize)]
+    struct ScenarioArgs {
+        scenario_prices: HashMap<String, f64>,
+    }
+
+    let mut server = mockito::Server::new_async().await;
+    let first_request = server
+        .mock("POST", "/models/test-map-model:generateContent")
+        .match_query(mockito::Matcher::UrlEncoded(
+            "key".to_string(),
+            "test-key".to_string(),
+        ))
+        .match_request(|request| {
+            let body: Value =
+                serde_json::from_str(&request.utf8_lossy_body().expect("UTF-8 request body"))
+                    .expect("JSON request body");
+            let declaration = &body["tools"][0]["functionDeclarations"][0];
+            let map = &declaration["parametersJsonSchema"]["properties"]["scenario_prices"];
+
+            declaration["name"] == "scenario_price"
+                && declaration.get("parameters").is_none()
+                && map["type"] == "object"
+                && map["additionalProperties"]["type"] == "number"
+                && map.get("properties").is_none()
+                && body["contents"]
+                    .as_array()
+                    .is_some_and(|items| items.len() == 1)
+        })
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!({
+                "candidates": [{
+                    "content": {
+                        "parts": [{
+                            "functionCall": {
+                                "name": "scenario_price",
+                                "args": {
+                                    "scenario_prices": {
+                                        "AAPL": 190.25,
+                                        "ESU6": 6200.0
+                                    }
+                                }
+                            }
+                        }]
+                    }
+                }]
+            })
+            .to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
+    let second_request = server
+        .mock("POST", "/models/test-map-model:generateContent")
+        .match_query(mockito::Matcher::UrlEncoded(
+            "key".to_string(),
+            "test-key".to_string(),
+        ))
+        .match_request(|request| {
+            let body: Value =
+                serde_json::from_str(&request.utf8_lossy_body().expect("UTF-8 request body"))
+                    .expect("JSON request body");
+            body.pointer("/contents/2/parts/0/functionResponse/response/count") == Some(&json!(2))
+        })
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!({
+                "candidates": [{
+                    "content": {
+                        "parts": [{ "text": "priced 2 symbols" }]
+                    }
+                }]
+            })
+            .to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    let toolbox = Toolbox::new().with(FnTool::new(
+        "scenario_price",
+        "Apply per-symbol scenario prices",
+        |args: ScenarioArgs| async move { Ok(json!({ "count": args.scenario_prices.len() })) },
+    ));
+    let answer = rstructor::GeminiClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .model("test-map-model")
+        .with_tools(&toolbox)
+        .run("Apply AAPL at 190.25 and ESU6 at 6200")
+        .await
+        .unwrap();
+
+    first_request.assert_async().await;
+    second_request.assert_async().await;
+    assert_eq!(answer, "priced 2 symbols");
+}
+
 #[cfg(feature = "gemini")]
 #[tokio::test]
 async fn gemini_sends_and_decodes_a_native_typed_map() {
@@ -226,12 +332,13 @@ async fn gemini_sends_and_decodes_a_native_typed_map() {
     assert_eq!(portfolio.positions["ESU6"].quantity, -240);
 
     let body = captured.lock().expect("capture lock");
-    let positions_schema = &body.as_ref().expect("captured request")["generation_config"]["response_schema"]
-        ["properties"]["positions"];
+    let generation_config = &body.as_ref().expect("captured request")["generation_config"];
+    let positions_schema = &generation_config["responseJsonSchema"]["properties"]["positions"];
     assert_eq!(positions_schema["type"], "object");
     assert_eq!(
         positions_schema["additionalProperties"]["properties"]["quantity"]["type"],
         "integer"
     );
     assert!(positions_schema.get("properties").is_none());
+    assert!(generation_config.get("response_schema").is_none());
 }

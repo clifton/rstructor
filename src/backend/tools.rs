@@ -52,7 +52,7 @@ pub trait DynTool: Send + Sync {
     /// Provider-specific compatibility checks and transformations are applied
     /// when the toolbox is rendered for a request.
     fn parameters_schema(&self) -> Value;
-    /// The argument schema with Gemini-unsupported keywords stripped.
+    /// The argument schema prepared for Gemini's JSON Schema transport.
     fn parameters_schema_gemini(&self) -> Value;
     /// Invoke the tool with raw JSON arguments (deserialized into `Args`).
     async fn invoke_json(&self, args: Value) -> Result<Value>;
@@ -256,7 +256,7 @@ impl Toolbox {
                 serde_json::json!({
                     "name": t.name(),
                     "description": t.description(),
-                    "parameters": t.parameters_schema_gemini(),
+                    "parametersJsonSchema": t.parameters_schema_gemini(),
                 })
             })
             .collect();
@@ -919,15 +919,16 @@ mod tests {
         let decl = &declarations[0];
         assert_eq!(decl["name"], "add");
         assert_eq!(decl["description"], "Add two integers");
-        assert_eq!(decl["parameters"]["type"], "object");
+        assert_eq!(decl["parametersJsonSchema"]["type"], "object");
+        assert!(decl.get("parameters").is_none());
 
         // Gemini schema strips examples/title.
         assert!(
-            decl["parameters"].get("examples").is_none(),
+            decl["parametersJsonSchema"].get("examples").is_none(),
             "examples should be stripped from Gemini schema"
         );
         assert!(
-            decl["parameters"].get("title").is_none(),
+            decl["parametersJsonSchema"].get("title").is_none(),
             "title should be stripped from Gemini schema"
         );
     }
@@ -937,11 +938,12 @@ mod tests {
     fn gemini_tool_preserves_typed_dynamic_map() {
         let toolbox = Toolbox::new().with(scenario_price_tool());
         let rendered = toolbox.gemini_tools_json();
-        let map =
-            &rendered[0]["functionDeclarations"][0]["parameters"]["properties"]["scenario_prices"];
+        let declaration = &rendered[0]["functionDeclarations"][0];
+        let map = &declaration["parametersJsonSchema"]["properties"]["scenario_prices"];
 
         assert_eq!(map["type"], "object");
         assert_eq!(map["additionalProperties"]["type"], "number");
         assert!(map.get("properties").is_none());
+        assert!(declaration.get("parameters").is_none());
     }
 }
