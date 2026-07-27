@@ -427,6 +427,7 @@ struct RecursiveNode {
     #[llm(description = "Node label")]
     label: String,
     #[llm(description = "Child nodes")]
+    #[allow(clippy::vec_box)] // Explicitly exercises schema generation through Vec<Box<T>>.
     children: Vec<Box<RecursiveNode>>,
 }
 
