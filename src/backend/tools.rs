@@ -75,8 +75,7 @@ impl<T: Tool> DynTool for T {
     }
 
     async fn invoke_json(&self, args: Value) -> Result<Value> {
-        let typed: T::Args = serde_json::from_value(args)
-            .map_err(|e| RStructorError::SerializationError(e.to_string()))?;
+        let typed: T::Args = crate::decode::tool_arguments_from_value(args)?;
         self.invoke(typed).await
     }
 }
@@ -355,14 +354,19 @@ pub(crate) async fn run_openai_compatible_tools(
                 .and_then(|f| f.get("arguments"))
                 .and_then(Value::as_str)
                 .unwrap_or("{}");
-            let args: Value = serde_json::from_str(args_str).unwrap_or_else(|_| json!({}));
 
             debug!(tool = name, "Model requested tool call");
             let result = match toolbox.get(name) {
-                Some(tool) => tool.invoke_json(args).await.unwrap_or_else(|e| {
-                    warn!(tool = name, error = %e, "Tool returned an error");
-                    json!({ "error": e.to_string() })
-                }),
+                Some(tool) => {
+                    let invocation = match crate::decode::tool_arguments_from_str(args_str) {
+                        Ok(args) => tool.invoke_json(args).await,
+                        Err(error) => Err(error),
+                    };
+                    invocation.unwrap_or_else(|error| {
+                        warn!(tool = name, error = %error, "Tool returned an error");
+                        json!({ "error": error.to_string() })
+                    })
+                }
                 None => {
                     warn!(tool = name, "Model called an unknown tool");
                     json!({ "error": format!("unknown tool: {name}") })

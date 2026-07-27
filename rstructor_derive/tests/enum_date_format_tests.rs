@@ -70,7 +70,7 @@ fn test_externally_tagged_enum_naive_date_format() {
         .find(|v| {
             v["properties"]
                 .as_object()
-                .map_or(false, |props| props.contains_key("SingleDay"))
+                .is_some_and(|props| props.contains_key("SingleDay"))
         })
         .expect("Should find SingleDay variant");
 
@@ -102,7 +102,7 @@ fn test_externally_tagged_enum_naive_datetime_format() {
         .find(|v| {
             v["properties"]
                 .as_object()
-                .map_or(false, |props| props.contains_key("Timestamped"))
+                .is_some_and(|props| props.contains_key("Timestamped"))
         })
         .expect("Should find Timestamped variant");
 
@@ -167,7 +167,7 @@ fn test_enum_vec_naive_date_items_format() {
         .find(|v| {
             v["properties"]
                 .as_object()
-                .map_or(false, |props| props.contains_key("Recurring"))
+                .is_some_and(|props| props.contains_key("Recurring"))
         })
         .expect("Should find Recurring variant");
 

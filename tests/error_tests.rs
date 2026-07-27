@@ -280,6 +280,20 @@ mod error_tests {
         assert!(!RStructorError::ValidationError("test".into()).is_retryable());
         assert!(!RStructorError::SchemaError("test".into()).is_retryable());
         assert!(!RStructorError::SerializationError("test".into()).is_retryable());
+        assert!(
+            !RStructorError::OutputDecodeError {
+                path: "$.positions[1].quantity".into(),
+                message: "invalid type".into(),
+            }
+            .is_retryable()
+        );
+        assert!(
+            !RStructorError::ToolArgumentDecodeError {
+                path: "$.order.quantity".into(),
+                message: "invalid type".into(),
+            }
+            .is_retryable()
+        );
     }
 
     #[test]
@@ -309,6 +323,41 @@ mod error_tests {
         let err = RStructorError::SerializationError("Failed to serialize".to_string());
         let err_string = format!("{}", err);
         assert_eq!(err_string, "Serialization error: Failed to serialize");
+    }
+
+    #[test]
+    fn test_path_aware_decode_error_display_and_equality() {
+        let output = RStructorError::OutputDecodeError {
+            path: "$.positions[1].quantity".to_string(),
+            message: "invalid type: string, expected i64".to_string(),
+        };
+        assert_eq!(
+            output.to_string(),
+            "Failed to decode structured output at $.positions[1].quantity: invalid type: string, expected i64"
+        );
+        assert_eq!(
+            output,
+            RStructorError::OutputDecodeError {
+                path: "$.positions[1].quantity".to_string(),
+                message: "invalid type: string, expected i64".to_string(),
+            }
+        );
+
+        let tool = RStructorError::ToolArgumentDecodeError {
+            path: "$.order.quantity".to_string(),
+            message: "invalid type: string, expected i64".to_string(),
+        };
+        assert_eq!(
+            tool.to_string(),
+            "Failed to decode tool arguments at $.order.quantity: invalid type: string, expected i64"
+        );
+        assert_eq!(
+            tool,
+            RStructorError::ToolArgumentDecodeError {
+                path: "$.order.quantity".to_string(),
+                message: "invalid type: string, expected i64".to_string(),
+            }
+        );
     }
 
     #[test]

@@ -7,8 +7,8 @@
 //! deserialize + [`Instructor::validate`](crate::Instructor::validate) round-trip:
 //! you can exercise schema/validation failures, not just happy paths.
 //!
-//! This module is only compiled with the `mock` feature. It pulls in **no extra
-//! dependencies** and works even in a schema-only build
+//! This module is only compiled with the `mock` feature. It pulls in only the
+//! lightweight path-aware decoder and works without the HTTP client
 //! (`default-features = false, features = ["derive", "mock"]`); the streaming and
 //! tool-calling overrides additionally require the `streaming` / `tools` features.
 //!
@@ -123,6 +123,16 @@ fn clone_error(e: &RStructorError) -> RStructorError {
         RStructorError::ValidationError(s) => RStructorError::ValidationError(s.clone()),
         RStructorError::SchemaError(s) => RStructorError::SchemaError(s.clone()),
         RStructorError::SerializationError(s) => RStructorError::SerializationError(s.clone()),
+        RStructorError::OutputDecodeError { path, message } => RStructorError::OutputDecodeError {
+            path: path.clone(),
+            message: message.clone(),
+        },
+        RStructorError::ToolArgumentDecodeError { path, message } => {
+            RStructorError::ToolArgumentDecodeError {
+                path: path.clone(),
+                message: message.clone(),
+            }
+        }
         RStructorError::Timeout => RStructorError::Timeout,
         RStructorError::Unsupported(s) => RStructorError::Unsupported(s.clone()),
         // Sources below don't implement Clone; preserve the message instead.
@@ -561,18 +571,12 @@ impl MockClient {
     }
 }
 
-/// Mirror of the real `parse_and_validate_response`: deserialize then validate,
-/// mapping a JSON parse failure to a [`ValidationError`](RStructorError::ValidationError)
-/// (matching live providers so tests behave identically against either).
+/// Mirror of the real `parse_and_validate_response`: deserialize then validate.
 fn parse_and_validate<T>(raw: &str) -> Result<T>
 where
     T: Instructor + DeserializeOwned,
 {
-    let value: T = serde_json::from_str(raw).map_err(|e| {
-        RStructorError::ValidationError(format!(
-            "Failed to parse response as JSON: {e}\nPartial JSON: {raw}"
-        ))
-    })?;
+    let value: T = crate::decode::output_from_str(raw)?;
     value.validate()?;
     Ok(value)
 }
@@ -691,11 +695,7 @@ impl LLMClient for MockClient {
                 MockResponse::Error(e) => Err(e)?,
             };
             // Emit one Partial snapshot, then the validated Complete value.
-            let snapshot: Value = serde_json::from_str(&s).map_err(|e| {
-                RStructorError::ValidationError(format!(
-                    "Failed to parse response as JSON: {e}\nPartial JSON: {s}"
-                ))
-            })?;
+            let snapshot: Value = crate::decode::output_from_str(&s)?;
             yield StreamedObject::Partial(snapshot);
             let value: T = parse_and_validate::<T>(&s)?;
             yield StreamedObject::Complete(value);
@@ -723,11 +723,7 @@ impl LLMClient for MockClient {
                 MockResponse::Text(s) => s,
                 MockResponse::Error(e) => Err(e)?,
             };
-            let root: Value = serde_json::from_str(&s).map_err(|e| {
-                RStructorError::ValidationError(format!(
-                    "Failed to parse response as JSON: {e}\nPartial JSON: {s}"
-                ))
-            })?;
+            let root: Value = crate::decode::output_from_str(&s)?;
             // Accept either a bare top-level array or an `{ "items": [...] }` wrapper.
             let items: Vec<Value> = if let Some(arr) = root.as_array() {
                 arr.clone()
@@ -844,10 +840,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bad_json_is_validation_error() {
+    async fn bad_json_is_output_decode_error() {
         let client = MockClient::new().with_response("not json");
         let err = client.materialize::<Movie>("p").await.unwrap_err();
-        assert!(matches!(err, RStructorError::ValidationError(_)));
+        assert!(matches!(
+            err,
+            RStructorError::OutputDecodeError { path, .. } if path == "$"
+        ));
     }
 
     #[tokio::test]

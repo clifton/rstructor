@@ -980,8 +980,7 @@ impl LLMClient for GeminiClient {
             if let Some(ref info) = adjacently_tagged_info {
                 crate::backend::utils::transform_internally_to_adjacently_tagged(&mut value, info);
             }
-            let item: T = serde_json::from_value(value)
-                .map_err(|e| RStructorError::SerializationError(e.to_string()))?;
+            let item: T = crate::decode::output_from_value(value)?;
             item.validate()?;
             Ok(item)
         };

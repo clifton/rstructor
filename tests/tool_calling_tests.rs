@@ -4,7 +4,7 @@
 //! live provider APIs and are gated on each provider's feature.
 #![cfg(feature = "tools")]
 
-use rstructor::{DynTool, FnTool, Instructor, RequestExt, Toolbox};
+use rstructor::{DynTool, FnTool, Instructor, RStructorError, RequestExt, Toolbox};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -39,13 +39,43 @@ async fn fn_tool_invokes_with_deserialized_args() {
 }
 
 #[tokio::test]
-async fn unknown_args_error_is_surfaced() {
-    let tool = FnTool::new("add", "Add", |args: AddArgs| async move {
-        Ok(json!(args.a + args.b))
-    });
-    // Missing required field `b`.
-    let err = tool.invoke_json(json!({ "a": 1 })).await;
-    assert!(err.is_err());
+async fn nested_argument_error_reports_the_tool_phase_and_path() {
+    #[derive(Instructor, Serialize, Deserialize)]
+    struct RebalanceArgs {
+        order: RebalanceOrder,
+    }
+
+    #[derive(Instructor, Serialize, Deserialize)]
+    struct RebalanceOrder {
+        symbol: String,
+        quantity: i64,
+    }
+
+    let tool = FnTool::new(
+        "rebalance",
+        "Submit a rebalance order",
+        |args: RebalanceArgs| async move {
+            Ok(json!({
+                "symbol": args.order.symbol,
+                "quantity": args.order.quantity,
+            }))
+        },
+    );
+    let error = tool
+        .invoke_json(json!({
+            "order": {
+                "symbol": "AAPL",
+                "quantity": "ten thousand shares"
+            }
+        }))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        RStructorError::ToolArgumentDecodeError { path, message }
+            if path == "$.order.quantity" && message.contains("invalid type")
+    ));
 }
 
 // ---- Live agentic-loop tests (one per provider) ----

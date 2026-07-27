@@ -1,0 +1,13 @@
+{
+  "portfolio_id": "HF-ALPHA-001",
+  "positions": [
+    {
+      "symbol": "AAPL",
+      "quantity": 125000
+    },
+    {
+      "symbol": "ESU6",
+      "quantity": "short two hundred forty contracts"
+    }
+  ]
+}
