@@ -500,9 +500,10 @@ async fn extracts_a_movie() {
 Script multiple responses with `with_response`/`with_responses` (a FIFO queue), branch
 on the request with `with_responder`, simulate the validation re-ask loop with
 `with_retries`, attach token usage with `with_usage`, and assert on captured requests via
-`requests()` / `last_request()`. The `mock` feature pulls in no extra dependencies and
-works even in a schema-only build; streaming and tool-loop mocking light up when the
-`streaming` / `tools` features are also enabled. See `examples/mock_testing_example.rs`.
+`requests()` / `last_request()`. The `mock` feature pulls in only the lightweight
+path-aware decoder and works without the HTTP client; streaming and tool-loop mocking
+light up when the `streaming` / `tools` features are also enabled. See
+`examples/mock_testing_example.rs`.
 
 ## Feature Flags
 

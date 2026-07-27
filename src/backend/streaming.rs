@@ -757,8 +757,7 @@ where
 /// Default per-element finalizer for [`iter_stream`]: deserialize a streamed array
 /// element into `T` and run its validation.
 pub(crate) fn finalize_item<T: Instructor + DeserializeOwned>(value: Value) -> Result<T> {
-    let item: T = serde_json::from_value(value)
-        .map_err(|e| RStructorError::SerializationError(e.to_string()))?;
+    let item: T = crate::decode::output_from_value(value)?;
     item.validate()?;
     Ok(item)
 }
@@ -960,12 +959,15 @@ mod array_tests {
             "expected ValidationError, got {err:?}"
         );
 
-        // Wrong type for `title` fails deserialization → SerializationError.
+        // Wrong type for `title` reports the exact output path.
         let err = finalize_item::<Ticket>(json!({"title": 123, "priority": 1}))
             .expect_err("non-string title should fail deserialization");
         assert!(
-            matches!(err, RStructorError::SerializationError(_)),
-            "expected SerializationError, got {err:?}"
+            matches!(
+                err,
+                RStructorError::OutputDecodeError { ref path, .. } if path == "$.title"
+            ),
+            "expected path-aware OutputDecodeError, got {err:?}"
         );
 
         // Sanity: a valid element succeeds.

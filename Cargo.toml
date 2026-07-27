@@ -40,6 +40,7 @@ categories = [
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+serde_path_to_error = { version = "0.1.20", optional = true }
 async-trait = "0.1.89"
 tokio = { version = "1.52.1", features = [
   "rt",
@@ -77,7 +78,7 @@ logging = ["tracing-subscriber", "tracing-futures"]
 # Not meant to be enabled directly — enable a provider feature instead. Disabling
 # all providers yields a dependency-light, schema-only build (derive + schema, no
 # tokio/reqwest) suitable for generating JSON Schema without making API calls.
-_client = ["reqwest", "tokio", "base64"]
+_client = ["reqwest", "tokio", "base64", "dep:serde_path_to_error"]
 # Opt-in streaming: text (`generate_stream`), object snapshots
 # (`materialize_stream`), and list streaming (`materialize_iter`). Enable a
 # provider feature too for the HTTP stack.
@@ -85,10 +86,10 @@ streaming = ["_client", "reqwest/stream", "futures-util", "async-stream"]
 # Opt-in tool/function calling (`Tool`, `Toolbox`, `client.with_tools(..).run(..)`).
 # The agentic loop is implemented for all providers (OpenAI, Anthropic, Grok, Gemini).
 tools = ["_client"]
-# Opt-in in-memory mock client (`MockClient`) for offline unit testing. Pulls in no
-# extra dependencies and works in schema-only builds (no `_client`); the streaming
-# and tool overrides additionally require the `streaming` / `tools` features.
-mock = []
+# Opt-in in-memory mock client (`MockClient`) for offline unit testing. Pulls in
+# only the path-aware decoder and works without `_client`; the streaming and tool
+# overrides additionally require the `streaming` / `tools` features.
+mock = ["dep:serde_path_to_error"]
 
 [[example]]
 name = "streaming_example"

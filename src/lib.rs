@@ -46,6 +46,8 @@
 extern crate self as rstructor;
 
 mod backend;
+#[cfg(any(feature = "_client", feature = "mock"))]
+mod decode;
 pub mod error;
 #[cfg(feature = "logging")]
 pub mod logging;

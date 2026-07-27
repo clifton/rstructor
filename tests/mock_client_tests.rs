@@ -14,6 +14,18 @@ struct Movie {
     year: u16,
 }
 
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+struct Portfolio {
+    portfolio_id: String,
+    positions: Vec<Position>,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+struct Position {
+    symbol: String,
+    quantity: i64,
+}
+
 fn validate_movie(m: &Movie) -> rstructor::Result<()> {
     if m.year < 1888 {
         return Err(RStructorError::ValidationError(format!(
@@ -162,6 +174,25 @@ async fn nested_validation_recurses_through_the_mock() {
     assert!(matches!(err, RStructorError::ValidationError(_)));
 }
 
+#[tokio::test]
+async fn nested_decode_error_reports_fixture_path_without_echoing_payload() {
+    let raw = include_str!("fixtures/structured/portfolio_invalid_quantity.json");
+    let client = MockClient::new().with_response(raw);
+
+    let error = client
+        .materialize::<Portfolio>("reconcile positions")
+        .await
+        .unwrap_err();
+    match error {
+        RStructorError::OutputDecodeError { path, message } => {
+            assert_eq!(path, "$.positions[1].quantity");
+            assert!(message.contains("invalid type"));
+            assert!(!message.contains("HF-ALPHA-001"));
+        }
+        other => panic!("expected OutputDecodeError, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Streaming (requires `streaming`, which implies `_client`)
 // ---------------------------------------------------------------------------
@@ -210,6 +241,27 @@ mod streaming {
             }
         }
         assert!(matches!(last_err, Some(RStructorError::ValidationError(_))));
+    }
+
+    #[tokio::test]
+    async fn materialize_stream_decode_failure_reports_the_nested_path() {
+        let client = MockClient::new().with_response(include_str!(
+            "fixtures/structured/portfolio_invalid_quantity.json"
+        ));
+        let mut stream = client.materialize_stream::<Portfolio>("p");
+        let mut last_error = None;
+
+        while let Some(item) = stream.next().await {
+            if let Err(error) = item {
+                last_error = Some(error);
+            }
+        }
+
+        assert!(matches!(
+            last_error,
+            Some(RStructorError::OutputDecodeError { path, .. })
+                if path == "$.positions[1].quantity"
+        ));
     }
 
     #[tokio::test]

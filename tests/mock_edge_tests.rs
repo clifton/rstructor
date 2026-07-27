@@ -197,6 +197,25 @@ fn mock_response_json_serialization_error_branch() {
     assert!(matches!(err, RStructorError::SerializationError(_)));
 }
 
+#[tokio::test]
+async fn path_aware_errors_are_preserved_when_mock_defaults_are_cloned() {
+    for error in [
+        RStructorError::OutputDecodeError {
+            path: "$.positions[1].quantity".to_string(),
+            message: "invalid type".to_string(),
+        },
+        RStructorError::ToolArgumentDecodeError {
+            path: "$.order.quantity".to_string(),
+            message: "invalid type".to_string(),
+        },
+    ] {
+        let client = MockClient::new().with_default_response(MockResponse::error(error));
+        let first = client.generate("p").await.unwrap_err();
+        let second = client.generate("p").await.unwrap_err();
+        assert_eq!(first, second);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // generate_with_metadata: usage attachment + error arm
 // ---------------------------------------------------------------------------
@@ -269,21 +288,18 @@ mod streaming {
         }
     }
 
-    /// `materialize_iter` on malformed JSON yields a `ValidationError` reporting a
-    /// parse failure.
+    /// `materialize_iter` on malformed JSON reports a root output-decode failure.
     #[tokio::test]
-    async fn materialize_iter_malformed_json_is_validation_error() {
+    async fn materialize_iter_malformed_json_is_output_decode_error() {
         let client = MockClient::new().with_response("not json");
         let mut stream = client.materialize_iter::<Movie>("p");
         let item = stream.next().await.expect("an error item is yielded");
         match item {
-            Err(RStructorError::ValidationError(msg)) => {
-                assert!(
-                    msg.contains("Failed to parse response as JSON"),
-                    "expected a parse-failure message, got: {msg}"
-                );
+            Err(RStructorError::OutputDecodeError { path, message }) => {
+                assert_eq!(path, "$");
+                assert!(message.contains("expected ident"));
             }
-            other => panic!("expected ValidationError, got {other:?}"),
+            other => panic!("expected OutputDecodeError, got {other:?}"),
         }
     }
 

@@ -1042,20 +1042,13 @@ where
     T: Instructor + DeserializeOwned,
 {
     // Parse the JSON content into our target type
-    let result: T = match serde_json::from_str(raw_response) {
+    let result: T = match crate::decode::output_from_str(raw_response) {
         Ok(parsed) => parsed,
-        Err(e) => {
-            let error_msg = format!(
-                "Failed to parse response as JSON: {}\nPartial JSON: {}",
-                e, raw_response
-            );
-            error!(
-                error = %e,
-                content = %raw_response,
-                "JSON parsing error"
-            );
+        Err(error) => {
+            let error_msg = error.to_string();
+            error!(error = %error, "Structured output decoding failed");
             return Err((
-                RStructorError::ValidationError(error_msg.clone()),
+                error,
                 Some(ValidationFailureContext::new(
                     error_msg,
                     raw_response.to_string(),

@@ -18,6 +18,18 @@ struct Movie {
     year: u16,
 }
 
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+struct Portfolio {
+    portfolio_id: String,
+    positions: Vec<Position>,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+struct Position {
+    symbol: String,
+    quantity: i64,
+}
+
 fn validate_movie(m: &Movie) -> rstructor::Result<()> {
     if m.year < 1888 {
         return Err(RStructorError::ValidationError(
@@ -94,6 +106,41 @@ async fn reask_loop_recovers_from_validation_failure() {
 
     let movie: Movie = client(&server).materialize("a film").await.unwrap();
     assert_eq!(movie.year, 1927);
+    bad.assert_async().await;
+    good.assert_async().await;
+}
+
+#[tokio::test]
+async fn reask_feedback_includes_the_nested_decode_path() {
+    let mut server = mockito::Server::new_async().await;
+    let invalid = include_str!("fixtures/structured/portfolio_invalid_quantity.json");
+    let valid = include_str!("fixtures/structured/portfolio_valid.json");
+
+    let bad = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion(invalid))
+        .expect(1)
+        .create_async()
+        .await;
+    let good = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::Regex(
+            r"\$\.positions\[1\]\.quantity".to_string(),
+        ))
+        .with_status(200)
+        .with_body(chat_completion(valid))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let portfolio: Portfolio = client(&server)
+        .materialize("reconcile the portfolio positions")
+        .await
+        .unwrap();
+
+    assert_eq!(portfolio.portfolio_id, "HF-ALPHA-001");
+    assert_eq!(portfolio.positions[1].quantity, -240);
     bad.assert_async().await;
     good.assert_async().await;
 }

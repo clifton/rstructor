@@ -308,6 +308,24 @@ pub enum RStructorError {
     #[error("Serialization error: {0}")]
     SerializationError(String),
 
+    /// Structured model output could not be decoded into the requested Rust type.
+    #[error("Failed to decode structured output at {path}: {message}")]
+    OutputDecodeError {
+        /// JSONPath-style location of the first value that failed to decode.
+        path: String,
+        /// Serde's explanation of the type or JSON syntax mismatch.
+        message: String,
+    },
+
+    /// Tool-call arguments could not be decoded into the tool's argument type.
+    #[error("Failed to decode tool arguments at {path}: {message}")]
+    ToolArgumentDecodeError {
+        /// JSONPath-style location of the first argument that failed to decode.
+        path: String,
+        /// Serde's explanation of the type or JSON syntax mismatch.
+        message: String,
+    },
+
     /// Operation timed out
     #[error("Timeout error")]
     Timeout,
@@ -432,6 +450,26 @@ impl PartialEq for RStructorError {
             (Self::ValidationError(a), Self::ValidationError(b)) => a == b,
             (Self::SchemaError(a), Self::SchemaError(b)) => a == b,
             (Self::SerializationError(a), Self::SerializationError(b)) => a == b,
+            (
+                Self::OutputDecodeError {
+                    path: path_a,
+                    message: message_a,
+                },
+                Self::OutputDecodeError {
+                    path: path_b,
+                    message: message_b,
+                },
+            ) => path_a == path_b && message_a == message_b,
+            (
+                Self::ToolArgumentDecodeError {
+                    path: path_a,
+                    message: message_a,
+                },
+                Self::ToolArgumentDecodeError {
+                    path: path_b,
+                    message: message_b,
+                },
+            ) => path_a == path_b && message_a == message_b,
             (Self::Unsupported(a), Self::Unsupported(b)) => a == b,
             (Self::Timeout, Self::Timeout) => true,
             // HttpError and JsonError don't implement PartialEq, so we always return false
