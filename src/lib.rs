@@ -55,7 +55,7 @@ pub mod model;
 pub mod schema;
 
 // Re-exports for convenience
-pub use error::{ApiErrorKind, RStructorError, Result};
+pub use error::{ApiErrorKind, RStructorError, Result, StreamErrorKind};
 pub use model::Instructor;
 pub use schema::{CustomTypeSchema, Schema, SchemaBuilder, SchemaType};
 

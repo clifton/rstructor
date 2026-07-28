@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod error_tests {
-    use rstructor::{ApiErrorKind, RStructorError, Result};
+    use rstructor::{ApiErrorKind, RStructorError, Result, StreamErrorKind};
     use serde_json::json;
     use std::time::Duration;
 
@@ -303,6 +303,13 @@ mod error_tests {
             }
             .is_retryable()
         );
+        assert!(
+            !RStructorError::StreamingError {
+                kind: StreamErrorKind::IncompleteEventStream,
+                message: "missing [DONE]".into(),
+            }
+            .is_retryable()
+        );
     }
 
     #[test]
@@ -389,6 +396,33 @@ mod error_tests {
             RStructorError::ToolArgumentDecodeError {
                 path: "$.order.quantity".to_string(),
                 message: "invalid type: string, expected i64".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_stream_error_display_equality_and_index_context() {
+        let error = RStructorError::StreamingError {
+            kind: StreamErrorKind::InvalidArrayElement { index: 7 },
+            message: "element was not valid JSON".into(),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "Streaming error (invalid streamed array element at index 7): element was not valid JSON"
+        );
+        assert_eq!(
+            error,
+            RStructorError::StreamingError {
+                kind: StreamErrorKind::InvalidArrayElement { index: 7 },
+                message: "element was not valid JSON".into(),
+            }
+        );
+        assert_ne!(
+            error,
+            RStructorError::StreamingError {
+                kind: StreamErrorKind::InvalidArrayElement { index: 8 },
+                message: "element was not valid JSON".into(),
             }
         );
     }

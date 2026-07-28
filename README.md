@@ -479,6 +479,35 @@ while let Some(item) = stream.next().await {
 }
 ```
 
+Streaming uses strict integrity checks by default. A stream can yield validated
+items and later report malformed provider data or a truncated response, so the
+full collection is authoritative only after the stream drains to `None` without
+an error. OpenAI/Grok must send `[DONE]`, Anthropic must send `message_stop`, and
+Gemini must provide a non-empty `finishReason`.
+
+For irreversible side effects, stage items until clean completion and handle the
+machine-readable error kind:
+
+```rust
+use rstructor::{RStructorError, StreamErrorKind};
+
+let mut staged = Vec::new();
+while let Some(item) = stream.next().await {
+    match item {
+        Ok(invention) => staged.push(invention),
+        Err(RStructorError::StreamingError {
+            kind: StreamErrorKind::IncompleteEventStream,
+            ..
+        }) => {
+            staged.clear(); // do not commit a possibly truncated collection
+            return Err("provider stream ended without its terminal event".into());
+        }
+        Err(error) => return Err(error.into()),
+    }
+}
+commit_inventions(staged).await?;
+```
+
 `generate_stream` streams raw text deltas:
 
 ```rust

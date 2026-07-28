@@ -363,6 +363,10 @@ pub trait LLMClient {
     /// back to a single chunk from [`generate`](Self::generate); the built-in
     /// providers override it with true server-sent-events streaming.
     ///
+    /// A provider or integrity error can follow earlier text chunks. The response
+    /// is authoritative only after the stream has been drained to `None` without
+    /// an error.
+    ///
     /// Requires the `streaming` feature.
     #[cfg(feature = "streaming")]
     fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
@@ -386,6 +390,9 @@ pub trait LLMClient {
     ///
     /// Note: unlike [`materialize`](Self::materialize), streaming is single-shot —
     /// a validation failure ends the stream with an error rather than re-asking.
+    /// Partial snapshots can precede a provider or integrity error;
+    /// [`StreamedObject::Complete`](crate::StreamedObject::Complete) is emitted
+    /// only after the provider's terminal event and complete JSON are verified.
     ///
     /// Requires the `streaming` feature.
     #[cfg(feature = "streaming")]
@@ -410,6 +417,10 @@ pub trait LLMClient {
     /// without buffering the whole response. The model is asked for a JSON object
     /// with an `items` array of `T`; elements are parsed and validated one at a
     /// time.
+    ///
+    /// Validated items can precede a later provider or integrity error. Treat the
+    /// collection as authoritative only after draining the stream to `None`
+    /// without an error. Malformed elements are never silently skipped.
     ///
     /// The default implementation has no streaming fallback (it errors); the
     /// built-in providers override it. Requires the `streaming` feature.

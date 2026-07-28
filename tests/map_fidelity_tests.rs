@@ -498,7 +498,8 @@ async fn gemini_object_stream_sends_and_decodes_a_native_typed_map() {
                 "candidates": [{
                     "content": {
                         "parts": [{ "text": response }]
-                    }
+                    },
+                    "finishReason": "STOP"
                 }]
             })
         ))
@@ -567,7 +568,8 @@ async fn gemini_item_stream_sends_and_decodes_native_typed_maps() {
                 "candidates": [{
                     "content": {
                         "parts": [{ "text": stream_payload }]
-                    }
+                    },
+                    "finishReason": "STOP"
                 }]
             })
         ))

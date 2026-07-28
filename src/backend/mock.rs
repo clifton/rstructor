@@ -144,6 +144,10 @@ fn clone_error(e: &RStructorError) -> RStructorError {
                 message: message.clone(),
             }
         }
+        RStructorError::StreamingError { kind, message } => RStructorError::StreamingError {
+            kind: *kind,
+            message: message.clone(),
+        },
         RStructorError::Timeout => RStructorError::Timeout,
         RStructorError::Unsupported(s) => RStructorError::Unsupported(s.clone()),
         // Sources below don't implement Clone; preserve the message instead.
