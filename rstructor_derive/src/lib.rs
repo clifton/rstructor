@@ -12,6 +12,7 @@ mod type_utils;
 
 use container_attrs::ContainerAttributes;
 use proc_macro::TokenStream;
+use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
 /// Derive macro for implementing Instructor and SchemaType
@@ -140,6 +141,17 @@ use syn::{Data, DeriveInput, Fields, parse_macro_input};
 /// - `description`: A description of the struct or enum
 /// - `title`: A custom title for the JSON Schema (defaults to the type name)
 /// - `examples`: Example instances of the struct or enum
+/// - `validate`: A quoted Rust path to a custom validation function
+///
+/// ### Field and Variant Attributes
+///
+/// Fields accept `description`, `example`, and `examples`. Enum variants accept
+/// `description`. Field optionality is inferred from `Option<T>`; there is no
+/// `optional` attribute.
+///
+/// The `llm` namespace is checked strictly. Unknown attributes, malformed
+/// values, invalid validation paths, and unsupported tuple/unit structs produce
+/// errors at the relevant source span instead of being ignored.
 ///
 /// ### Serde Integration
 ///
@@ -148,22 +160,35 @@ use syn::{Data, DeriveInput, Fields, parse_macro_input};
 ///   - Example: With `#[serde(rename_all = "camelCase")]`, a field `user_id` becomes `userId` in the schema
 #[proc_macro_derive(Instructor, attributes(llm))]
 pub fn derive_instructor(input: TokenStream) -> TokenStream {
-    // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
+    expand(input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
 
-    // First, extract container-level attributes
-    let container_attrs = extract_container_attributes(&input.attrs);
+fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    validate_derive_input(&input)?;
+
+    let name = &input.ident;
+    let container_attrs = extract_container_attributes(&input.attrs)?;
 
     // Generate the schema implementation
     let schema_impl = match &input.data {
-        Data::Struct(data_struct) => {
-            generators::generate_struct_schema(name, data_struct, &container_attrs, &input.generics)
-        }
+        Data::Struct(data_struct) => generators::generate_struct_schema(
+            name,
+            data_struct,
+            &container_attrs,
+            &input.generics,
+        )?,
         Data::Enum(data_enum) => {
-            generators::generate_enum_schema(name, data_enum, &container_attrs, &input.generics)
+            generators::generate_enum_schema(name, data_enum, &container_attrs, &input.generics)?
         }
-        _ => panic!("Instructor can only be derived for structs and enums"),
+        Data::Union(_) => {
+            return Err(syn::Error::new_spanned(
+                &input,
+                "Instructor can only be derived for structs with named fields and enums",
+            ));
+        }
     };
 
     // Generate the Instructor trait implementation.
@@ -173,9 +198,7 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
     // `Vec`, `Box`, and string-keyed maps), then runs this type's own
     // `#[llm(validate = "...")]` function, if any.
     let field_validation = generate_field_validation(&input.data);
-    let container_validate = if let Some(validate_fn) = &container_attrs.validate {
-        let validate_path: syn::Path =
-            syn::parse_str(validate_fn).expect("validate attribute must be a valid function path");
+    let container_validate = if let Some(validate_path) = &container_attrs.validate {
         quote::quote! { #validate_path(self)?; }
     } else {
         quote::quote! {}
@@ -212,7 +235,66 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
         #instructor_impl
     };
 
-    combined.into()
+    Ok(combined)
+}
+
+fn validate_derive_input(input: &DeriveInput) -> syn::Result<()> {
+    let mut errors = None;
+
+    if let Err(error) = extract_container_attributes(&input.attrs) {
+        combine_error(&mut errors, error);
+    }
+
+    match &input.data {
+        Data::Struct(data) => {
+            if !matches!(data.fields, Fields::Named(_)) {
+                let span = match &data.fields {
+                    Fields::Unit => input.ident.span(),
+                    fields => fields.span(),
+                };
+                combine_error(
+                    &mut errors,
+                    syn::Error::new(span, "Instructor requires a struct with named fields"),
+                );
+            }
+            for field in &data.fields {
+                if let Err(error) = parsers::field_parser::parse_field_attributes(field) {
+                    combine_error(&mut errors, error);
+                }
+            }
+        }
+        Data::Enum(data) => {
+            for variant in &data.variants {
+                if let Err(error) = parsers::variant_parser::parse_variant_attributes(variant) {
+                    combine_error(&mut errors, error);
+                }
+                for field in &variant.fields {
+                    if let Err(error) = parsers::field_parser::parse_field_attributes(field) {
+                        combine_error(&mut errors, error);
+                    }
+                }
+            }
+        }
+        Data::Union(_) => combine_error(
+            &mut errors,
+            syn::Error::new_spanned(
+                input,
+                "Instructor can only be derived for structs with named fields and enums",
+            ),
+        ),
+    }
+
+    match errors {
+        Some(errors) => Err(errors),
+        None => Ok(()),
+    }
+}
+
+fn combine_error(errors: &mut Option<syn::Error>, error: syn::Error) {
+    match errors {
+        Some(errors) => errors.combine(error),
+        None => *errors = Some(error),
+    }
 }
 
 /// Generate statements that recursively validate every field of a struct or the
@@ -224,27 +306,28 @@ pub fn derive_instructor(input: TokenStream) -> TokenStream {
 /// fields cost nothing while nested `Instructor` values are validated.
 fn generate_field_validation(data: &Data) -> proc_macro2::TokenStream {
     match data {
-        Data::Struct(data_struct) => match &data_struct.fields {
-            Fields::Named(named) => {
-                let probes = named.named.iter().map(|f| {
-                    let ident = f.ident.as_ref().unwrap();
+        Data::Struct(data_struct) => {
+            match &data_struct.fields {
+                Fields::Named(named) => {
+                    let probes = named.named.iter().filter_map(|f| f.ident.as_ref()).map(|ident| {
                     quote::quote! {
                         ::rstructor::model::__private::Probe(&self.#ident).rstructor_probe()?;
                     }
                 });
-                quote::quote! { #(#probes)* }
+                    quote::quote! { #(#probes)* }
+                }
+                Fields::Unnamed(unnamed) => {
+                    let probes = unnamed.unnamed.iter().enumerate().map(|(i, _)| {
+                        let index = syn::Index::from(i);
+                        quote::quote! {
+                            ::rstructor::model::__private::Probe(&self.#index).rstructor_probe()?;
+                        }
+                    });
+                    quote::quote! { #(#probes)* }
+                }
+                Fields::Unit => quote::quote! {},
             }
-            Fields::Unnamed(unnamed) => {
-                let probes = unnamed.unnamed.iter().enumerate().map(|(i, _)| {
-                    let index = syn::Index::from(i);
-                    quote::quote! {
-                        ::rstructor::model::__private::Probe(&self.#index).rstructor_probe()?;
-                    }
-                });
-                quote::quote! { #(#probes)* }
-            }
-            Fields::Unit => quote::quote! {},
-        },
+        }
         Data::Enum(data_enum) => {
             let arms = data_enum.variants.iter().map(|variant| {
                 let vname = &variant.ident;
@@ -253,7 +336,7 @@ fn generate_field_validation(data: &Data) -> proc_macro2::TokenStream {
                         let binds: Vec<_> = named
                             .named
                             .iter()
-                            .map(|f| f.ident.clone().unwrap())
+                            .filter_map(|f| f.ident.clone())
                             .collect();
                         quote::quote! {
                             Self::#vname { #(#binds),* } => {
@@ -284,22 +367,15 @@ fn generate_field_validation(data: &Data) -> proc_macro2::TokenStream {
     }
 }
 
-use quote::ToTokens;
-
-fn extract_container_attributes(attrs: &[syn::Attribute]) -> ContainerAttributes {
+fn extract_container_attributes(attrs: &[syn::Attribute]) -> syn::Result<ContainerAttributes> {
     let mut description = None;
     let mut title = None;
     let mut examples = Vec::new();
-    let mut serde_rename_all = None;
     let mut validate = None;
-    let mut serde_tag = None;
-    let mut serde_content = None;
-    let mut serde_untagged = false;
+    let mut errors = None;
 
-    // First, check for llm-specific attributes
-    for attr in attrs {
-        if attr.path().is_ident("llm") {
-            let _ = attr.parse_nested_meta(|meta| {
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("llm")) {
+        if let Err(error) = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("description") {
                     let value = meta.value()?;
                     let content: syn::LitStr = value.parse()?;
@@ -311,71 +387,41 @@ fn extract_container_attributes(attrs: &[syn::Attribute]) -> ContainerAttributes
                 } else if meta.path.is_ident("validate") {
                     let value = meta.value()?;
                     let content: syn::LitStr = value.parse()?;
-                    validate = Some(content.value());
+                    validate = Some(content.parse::<syn::Path>().map_err(|error| {
+                        syn::Error::new(
+                            content.span(),
+                            format!("invalid validation function path: {error}"),
+                        )
+                    })?);
                 } else if meta.path.is_ident("examples") {
-                    // Handle array syntax like examples = ["one", "two"]
-                    let value = meta.value()?;
-
-                    // Try to parse as array expression
-                    if let Ok(syn::Expr::Array(array)) = value.parse::<syn::Expr>() {
-                        // For each element in the array, convert to TokenStream
-                        for elem in array.elems.iter() {
-                            // For string literals, wrap them in serde_json::Value::String constructors
-                            if let syn::Expr::Lit(lit_expr) = elem {
-                                if let syn::Lit::Str(lit_str) = &lit_expr.lit {
-                                    let str_val = lit_str.value();
-                                    let json_str = quote::quote! {
-                                        ::serde_json::Value::String(#str_val.to_string())
-                                    };
-                                    examples.push(json_str);
-                                } else {
-                                    // For other literals, pass them through
-                                    examples.push(elem.to_token_stream());
-                                }
-                            } else {
-                                // For non-literals (like objects), pass them through
-                                examples.push(elem.to_token_stream());
-                            }
-                        }
-                    }
+                    let expressions =
+                        parsers::array_parser::parse_expression_list(&meta, "examples")?;
+                    examples.extend(parsers::array_parser::expression_tokens(&expressions));
+                } else {
+                    return Err(meta.error(
+                        "unsupported container `llm` attribute; expected one of: `description`, `title`, `examples`, `validate`",
+                    ));
                 }
                 Ok(())
-            });
+            })
+        {
+            combine_error(&mut errors, error);
         }
     }
 
-    // Then, check for serde attributes
-    for attr in attrs {
-        if attr.path().is_ident("serde") {
-            let _ = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("rename_all") {
-                    let value = meta.value()?;
-                    let content: syn::LitStr = value.parse()?;
-                    serde_rename_all = Some(content.value());
-                } else if meta.path.is_ident("tag") {
-                    let value = meta.value()?;
-                    let content: syn::LitStr = value.parse()?;
-                    serde_tag = Some(content.value());
-                } else if meta.path.is_ident("content") {
-                    let value = meta.value()?;
-                    let content: syn::LitStr = value.parse()?;
-                    serde_content = Some(content.value());
-                } else if meta.path.is_ident("untagged") {
-                    serde_untagged = true;
-                }
-                Ok(())
-            });
-        }
+    if let Some(errors) = errors {
+        return Err(errors);
     }
 
-    ContainerAttributes::builder()
+    let serde = parsers::serde_parser::parse_serde_attributes(attrs);
+    Ok(ContainerAttributes::builder()
         .description(description)
         .title(title)
         .examples(examples)
-        .serde_rename_all(serde_rename_all)
+        .serde_rename_all(serde.rename_all)
         .validate(validate)
-        .serde_tag(serde_tag)
-        .serde_content(serde_content)
-        .serde_untagged(serde_untagged)
-        .build()
+        .serde_tag(serde.tag)
+        .serde_content(serde.content)
+        .serde_untagged(serde.untagged)
+        .build())
 }

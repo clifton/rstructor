@@ -1,99 +1,104 @@
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
-use syn::{Expr, ExprArray, Lit, Token, bracketed, parse::Parse};
+use syn::meta::ParseNestedMeta;
+use syn::punctuated::Punctuated;
+use syn::{Expr, ExprArray, Lit, Token, parenthesized};
 
-/// Utility struct to parse array literal expressions
-/// Handles array literals like [1, 2, 3] or ["a", "b", "c"]
-pub struct ArrayAttr {
-    pub expr_array: ExprArray,
-}
-
-impl Parse for ArrayAttr {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let content;
-        bracketed!(content in input);
-        let mut elements = Vec::new();
-
-        // Parse comma-separated expressions inside brackets
-        while !content.is_empty() {
-            let elem: Expr = content.parse()?;
-            elements.push(elem);
-
-            if content.is_empty() {
-                break;
-            }
-
-            content.parse::<Token![,]>()?;
-        }
-
-        Ok(ArrayAttr {
-            expr_array: ExprArray {
-                attrs: Vec::new(),
-                bracket_token: syn::token::Bracket::default(),
-                elems: elements.into_iter().collect(),
-            },
-        })
+/// Parse a multi-value attribute in either native supported form:
+/// `examples = [one, two]` or `examples(one, two)`.
+pub fn parse_expression_list(
+    meta: &ParseNestedMeta<'_>,
+    attribute_name: &str,
+) -> syn::Result<Vec<Expr>> {
+    if meta.input.peek(Token![=]) {
+        let value = meta.value()?;
+        let expression: Expr = value.parse()?;
+        let Expr::Array(array) = expression else {
+            return Err(syn::Error::new_spanned(
+                expression,
+                format!("`{attribute_name}` must be an array expression"),
+            ));
+        };
+        return Ok(array.elems.into_iter().collect());
     }
+
+    if meta.input.peek(syn::token::Paren) {
+        let content;
+        parenthesized!(content in meta.input);
+        return Ok(Punctuated::<Expr, Token![,]>::parse_terminated(&content)?
+            .into_iter()
+            .collect());
+    }
+
+    Err(meta.error(format!("`{attribute_name}` must use `= [...]` or `(...)`")))
 }
 
-/// Parse an array literal from an attribute value
-/// Returns a vector of TokenStreams representing JSON values for each array element
-pub fn parse_array_literal(value: &syn::parse::ParseBuffer) -> Option<Vec<TokenStream>> {
-    // Try to parse as a bracketed array
-    if let Ok(array_attr) = value.parse::<ArrayAttr>() {
-        // Process each element of the array
-        let mut tokens = Vec::new();
+/// Convert an already-parsed Rust array expression into generated
+/// `serde_json::Value` expressions.
+pub fn array_expression_tokens(array: &ExprArray) -> Vec<TokenStream> {
+    expression_tokens(array.elems.iter())
+}
 
-        for elem in &array_attr.expr_array.elems {
-            match elem {
-                Expr::Lit(lit) => {
-                    match &lit.lit {
-                        Lit::Str(lit_str) => {
-                            let s = lit_str.value();
-                            tokens.push(quote! {
-                                ::serde_json::Value::String(#s.to_string())
-                            });
-                        }
-                        Lit::Int(lit_int) => {
-                            tokens.push(quote! {
-                                ::serde_json::Value::Number(::serde_json::Number::from(#lit_int))
-                            });
-                        }
-                        Lit::Float(lit_float) => {
-                            let s = lit_float.to_string();
-                            tokens.push(quote! {
-                                ::serde_json::json!(#s.parse::<f64>().unwrap())
-                            });
-                        }
-                        Lit::Bool(lit_bool) => {
-                            let b = lit_bool.value;
-                            tokens.push(quote! {
-                                ::serde_json::Value::Bool(#b)
-                            });
-                        }
-                        _ => {
-                            // For other literals, convert to string
-                            let elem_tokens = elem.to_token_stream();
-                            tokens.push(quote! {
-                                ::serde_json::Value::String(#elem_tokens.to_string())
-                            });
-                        }
-                    }
-                }
-                _ => {
-                    // For non-literals, convert to string
-                    let elem_tokens = elem.to_token_stream();
+/// Convert parsed Rust expressions into generated `serde_json::Value`
+/// expressions.
+pub fn expression_tokens<'a>(expressions: impl IntoIterator<Item = &'a Expr>) -> Vec<TokenStream> {
+    let mut tokens = Vec::new();
+
+    for elem in expressions {
+        match elem {
+            Expr::Macro(expr_macro)
+                if expr_macro
+                    .mac
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "json") =>
+            {
+                let elem_tokens = elem.to_token_stream();
+                tokens.push(quote! {
+                    #elem_tokens
+                });
+            }
+            Expr::Lit(lit) => match &lit.lit {
+                Lit::Str(lit_str) => {
+                    let s = lit_str.value();
                     tokens.push(quote! {
-                        ::serde_json::Value::String(format!("{}", #elem_tokens))
+                        ::serde_json::Value::String(#s.to_string())
                     });
                 }
+                Lit::Int(lit_int) => {
+                    tokens.push(quote! {
+                        ::serde_json::Value::Number(::serde_json::Number::from(#lit_int))
+                    });
+                }
+                Lit::Float(lit_float) => {
+                    tokens.push(quote! {
+                        ::serde_json::json!(#lit_float)
+                    });
+                }
+                Lit::Bool(lit_bool) => {
+                    let b = lit_bool.value;
+                    tokens.push(quote! {
+                        ::serde_json::Value::Bool(#b)
+                    });
+                }
+                _ => {
+                    let elem_tokens = elem.to_token_stream();
+                    tokens.push(quote! {
+                        ::serde_json::Value::String(#elem_tokens.to_string())
+                    });
+                }
+            },
+            _ => {
+                let elem_tokens = elem.to_token_stream();
+                tokens.push(quote! {
+                    ::serde_json::Value::String(format!("{}", #elem_tokens))
+                });
             }
         }
-
-        Some(tokens)
-    } else {
-        None
     }
+
+    tokens
 }
 
 #[cfg(test)]
@@ -102,20 +107,11 @@ mod tests {
     use quote::quote;
     use syn::parse_str;
 
-    // Test the ArrayAttr structure directly
     #[test]
-    fn test_array_attr_parse() {
-        // Create a string array
+    fn test_array_expression_tokens() {
         let input = "[\"apple\", \"banana\", \"cherry\"]";
         let array_expr: syn::ExprArray = parse_str(input).unwrap();
-
-        // Create an ArrayAttr
-        let array_attr = ArrayAttr {
-            expr_array: array_expr,
-        };
-
-        // Check the array elements
-        assert_eq!(array_attr.expr_array.elems.len(), 3);
+        assert_eq!(array_expression_tokens(&array_expr).len(), 3);
     }
 
     #[test]
@@ -152,5 +148,36 @@ mod tests {
 
         // The tokenized string should include quotes
         assert!(token_string.contains("apple"));
+    }
+
+    #[test]
+    fn preserves_json_macro_array_elements_as_values() {
+        let array_expr: syn::ExprArray =
+            parse_str(r#"[::serde_json::json!({"symbol": "AAPL", "weight": 0.5})]"#).unwrap();
+
+        let tokens = array_expression_tokens(&array_expr);
+        assert_eq!(tokens.len(), 1);
+
+        let token_string = tokens[0].to_string();
+        assert!(token_string.contains("serde_json"));
+        assert!(token_string.contains("json"));
+        assert!(!token_string.contains("Value :: String"));
+    }
+
+    #[test]
+    fn parses_both_multi_value_attribute_forms() {
+        let array_form: syn::Attribute = syn::parse_quote!(#[llm(examples = ["SPY", "QQQ"])]);
+        let parenthesized_form: syn::Attribute = syn::parse_quote!(#[llm(examples("SPY", "QQQ"))]);
+
+        for attribute in [array_form, parenthesized_form] {
+            let mut values = None;
+            attribute
+                .parse_nested_meta(|meta| {
+                    values = Some(parse_expression_list(&meta, "examples")?);
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(values.unwrap().len(), 2);
+        }
     }
 }
