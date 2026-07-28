@@ -1,0 +1,35 @@
+error: expected string literal
+ --> tests/ui/fail/malformed_values.rs:4:21
+  |
+4 | #[llm(description = 42)]
+  |                     ^^
+
+error: expected `=`
+ --> tests/ui/fail/malformed_values.rs:5:12
+  |
+5 | #[llm(title)]
+  |            ^
+
+error: invalid `example` value: expected an integer literal
+  --> tests/ui/fail/malformed_values.rs:12:21
+   |
+12 |     #[llm(example = false)]
+   |                     ^^^^^
+
+error: invalid `example` value: expected an integer literal
+  --> tests/ui/fail/malformed_values.rs:15:21
+   |
+15 |     #[llm(example = "42")]
+   |                     ^^^^
+
+error: invalid `example` value: expected a numeric literal
+  --> tests/ui/fail/malformed_values.rs:18:21
+   |
+18 |     #[llm(example = "3.5")]
+   |                     ^^^^^
+
+error: invalid `example` value: expected a boolean literal
+  --> tests/ui/fail/malformed_values.rs:21:21
+   |
+21 |     #[llm(example = "true")]
+   |                     ^^^^^^

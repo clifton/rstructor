@@ -1,0 +1,5 @@
+error: invalid validation function path: unexpected end of input, expected identifier
+ --> tests/ui/fail/invalid_validation_path.rs:4:18
+  |
+4 | #[llm(validate = "risk::")]
+  |                  ^^^^^^^^

@@ -189,6 +189,44 @@ let client = OpenAIClient::from_env()?.max_retries(5);
 let client = OpenAIClient::from_env()?.no_retries();
 ```
 
+### Derive attributes
+
+The `llm` attribute accepts a small, checked API:
+
+- Structs and enums: `description`, `title`, `examples`, `validate`
+- Fields: `description`, `example`, `examples`
+- Enum variants: `description`
+
+Examples use native Rust expressions. Use `serde_json::json!` for object values
+instead of embedding serialized JSON strings. Multi-value examples accept both
+`examples = [one, two]` and `examples(one, two)`.
+
+Optionality comes from the Rust type itself:
+
+```rust
+#[derive(Instructor, Serialize, Deserialize)]
+#[llm(
+    description = "A portfolio allocation",
+    examples = [::serde_json::json!({
+        "name": "Long quality",
+        "benchmark": null
+    })]
+)]
+struct Allocation {
+    #[llm(description = "Strategy name", example = "Long quality")]
+    name: String,
+
+    // No `#[llm(optional)]` marker is needed.
+    #[llm(description = "Optional benchmark ticker")]
+    benchmark: Option<String>,
+}
+```
+
+Unknown `llm` keys, malformed values, invalid validation paths, and unsupported
+tuple or unit structs are compile errors at the relevant attribute or item.
+Serde attributes outside the schema subset remain owned by Serde and are not
+rejected by `Instructor`.
+
 ## Complex Types
 
 ### Dynamic Maps

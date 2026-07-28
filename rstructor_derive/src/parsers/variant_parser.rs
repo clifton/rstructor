@@ -1,5 +1,7 @@
 use syn::Variant;
 
+use crate::parsers::serde_parser::parse_serde_attributes;
+
 /// Represents parsed variant attributes
 pub struct VariantAttributes {
     pub description: Option<String>,
@@ -8,39 +10,30 @@ pub struct VariantAttributes {
 }
 
 /// Parse a single enum variant's llm and serde attributes
-pub fn parse_variant_attributes(variant: &Variant) -> VariantAttributes {
+pub fn parse_variant_attributes(variant: &Variant) -> syn::Result<VariantAttributes> {
     let mut description = None;
-    let mut serde_rename = None;
 
-    // Extract attributes
-    for attr in &variant.attrs {
-        // Parse serde attributes for rename
-        if attr.path().is_ident("serde") {
-            let _ = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("rename") {
-                    let value = meta.value()?;
-                    let content: syn::LitStr = value.parse()?;
-                    serde_rename = Some(content.value());
-                }
-                Ok(())
-            });
-        }
-
-        if attr.path().is_ident("llm") {
-            // Parse attribute arguments
-            let _result = attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("description") {
-                    let value = meta.value()?;
-                    let content: syn::LitStr = value.parse()?;
-                    description = Some(content.value());
-                }
-                Ok(())
-            });
-        }
+    for attr in variant
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("llm"))
+    {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("description") {
+                let value = meta.value()?;
+                let content: syn::LitStr = value.parse()?;
+                description = Some(content.value());
+            } else {
+                return Err(
+                    meta.error("unsupported variant `llm` attribute; expected `description`")
+                );
+            }
+            Ok(())
+        })?;
     }
 
-    VariantAttributes {
+    Ok(VariantAttributes {
         description,
-        serde_rename,
-    }
+        serde_rename: parse_serde_attributes(&variant.attrs).rename,
+    })
 }

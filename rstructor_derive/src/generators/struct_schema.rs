@@ -17,7 +17,7 @@ pub fn generate_struct_schema(
     data_struct: &DataStruct,
     container_attrs: &ContainerAttributes,
     generics: &syn::Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     let mut property_setters = Vec::new();
     let mut required_setters = Vec::new();
     let mut has_self_reference = false;
@@ -35,9 +35,15 @@ pub fn generate_struct_schema(
 
             for field in &fields.named {
                 // Parse field attributes first to check for serde rename
-                let attrs = parse_field_attributes(field);
+                let attrs = parse_field_attributes(field)?;
 
-                let original_field_name = field.ident.as_ref().unwrap().to_string();
+                let original_field_name = field
+                    .ident
+                    .as_ref()
+                    .ok_or_else(|| {
+                        syn::Error::new_spanned(field, "Instructor requires named struct fields")
+                    })?
+                    .to_string();
                 // Priority: 1) field-level #[serde(rename)], 2) container #[serde(rename_all)], 3) original name
                 let field_name = if let Some(ref rename) = attrs.serde_rename {
                     rename.clone()
@@ -383,7 +389,16 @@ pub fn generate_struct_schema(
                 }
             }
         }
-        _ => panic!("Instructor can only be derived for structs with named fields"),
+        _ => {
+            let span = match &data_struct.fields {
+                Fields::Unit => name.span(),
+                fields => syn::spanned::Spanned::span(fields),
+            };
+            return Err(syn::Error::new(
+                span,
+                "Instructor requires a struct with named fields",
+            ));
+        }
     }
 
     // Handle container attributes
@@ -434,7 +449,7 @@ pub fn generate_struct_schema(
 
     // Generate implementation with $defs support for recursive types
     if has_self_reference {
-        quote! {
+        Ok(quote! {
             impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
                 fn schema() -> ::rstructor::schema::Schema {
                     // Create base schema object (properties will be added to $defs)
@@ -471,9 +486,9 @@ pub fn generate_struct_schema(
                     Some(stringify!(#name).to_string())
                 }
             }
-        }
+        })
     } else {
-        quote! {
+        Ok(quote! {
             impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
                 fn schema() -> ::rstructor::schema::Schema {
                     // Create base schema object
@@ -501,7 +516,7 @@ pub fn generate_struct_schema(
                     Some(stringify!(#name).to_string())
                 }
             }
-        }
+        })
     }
 }
 

@@ -124,14 +124,14 @@ struct PatientData {
 
     #[llm(description = "List of possible diagnoses with probabilities", 
           example = [
-              {
+              ::serde_json::json!({
                   "disease_name": "Myocardial infarction",
                   "probability": 0.85
-              },
-              {
+              }),
+              ::serde_json::json!({
                   "disease_name": "Angina pectoris",
                   "probability": 0.35
-              }
+              })
           ])]
     differential_diagnosis: Vec<DifferentialDiagnosis>,
 }

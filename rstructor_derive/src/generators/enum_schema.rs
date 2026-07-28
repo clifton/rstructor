@@ -18,7 +18,7 @@ pub fn generate_enum_schema(
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
     generics: &syn::Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     // Check if it's a simple enum (no data)
     let all_simple = data_enum.variants.iter().all(|v| v.fields.is_empty());
     let has_tag = container_attrs.serde_tag.is_some();
@@ -49,24 +49,24 @@ fn generate_simple_enum_schema(
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
     generics: &syn::Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     // Generate implementation for simple enum with serde rename support
     let variant_values: Vec<_> = data_enum
         .variants
         .iter()
         .map(|v| {
-            let attrs = parse_variant_attributes(v);
+            let attrs = parse_variant_attributes(v)?;
             let original_name = v.ident.to_string();
             // Priority: 1) variant #[serde(rename)], 2) container #[serde(rename_all)], 3) original name
-            if let Some(ref rename) = attrs.serde_rename {
+            Ok(if let Some(ref rename) = attrs.serde_rename {
                 rename.clone()
             } else if let Some(ref rename_all) = container_attrs.serde_rename_all {
                 apply_rename_all(&original_name, rename_all)
             } else {
                 original_name
-            }
+            })
         })
-        .collect();
+        .collect::<syn::Result<_>>()?;
 
     // Handle container attributes
     let mut container_setters = Vec::new();
@@ -108,7 +108,7 @@ fn generate_simple_enum_schema(
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
 
-    quote! {
+    Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 // Create array of enum values
@@ -132,7 +132,7 @@ fn generate_simple_enum_schema(
                 Some(stringify!(#name).to_string())
             }
         }
-    }
+    })
 }
 
 /// Generate schema for a complex enum (with associated data)
@@ -141,7 +141,7 @@ fn generate_complex_enum_schema(
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
     generics: &syn::Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     // Dispatch to appropriate generator based on serde tagging mode
     if container_attrs.serde_untagged {
         return generate_untagged_enum_schema(name, data_enum, container_attrs, generics);
@@ -179,14 +179,14 @@ fn generate_externally_tagged_enum_schema(
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
     generics: &syn::Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     // Create variants for oneOf schema
     let mut variant_schemas = Vec::new();
 
     // Process each variant
     for variant in &data_enum.variants {
         // Get description and rename from variant attributes
-        let attrs = parse_variant_attributes(variant);
+        let attrs = parse_variant_attributes(variant)?;
 
         let original_variant_name = variant.ident.to_string();
         // Priority: 1) variant #[serde(rename)], 2) container #[serde(rename_all)], 3) original name
@@ -223,7 +223,12 @@ fn generate_externally_tagged_enum_schema(
 
                 if has_single_field {
                     // Handle single unnamed field specially (more natural JSON)
-                    let field = fields.unnamed.first().unwrap();
+                    let field = fields.unnamed.first().ok_or_else(|| {
+                        syn::Error::new_spanned(
+                            fields,
+                            "expected one field in a single-field enum variant",
+                        )
+                    })?;
 
                     // Extract field schema based on its type
                     let field_schema = generate_field_schema(&field.ty, &None);
@@ -303,7 +308,7 @@ fn generate_externally_tagged_enum_schema(
                 for field in &fields.named {
                     if let Some(field_ident) = &field.ident {
                         let original_field_name = field_ident.to_string();
-                        let field_attrs = parse_field_attributes(field);
+                        let field_attrs = parse_field_attributes(field)?;
 
                         // Apply serde rename if present
                         let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
@@ -420,7 +425,7 @@ fn generate_externally_tagged_enum_schema(
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
 
-    quote! {
+    Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 // Create oneOf schema for enum variants
@@ -443,7 +448,7 @@ fn generate_externally_tagged_enum_schema(
                 Some(stringify!(#name).to_string())
             }
         }
-    }
+    })
 }
 
 /// Generate schema for a field based on its type
@@ -728,11 +733,11 @@ fn generate_internally_tagged_enum_schema(
     container_attrs: &ContainerAttributes,
     generics: &syn::Generics,
     tag_name: &str,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     let mut variant_schemas = Vec::new();
 
     for variant in &data_enum.variants {
-        let attrs = parse_variant_attributes(variant);
+        let attrs = parse_variant_attributes(variant)?;
         let original_variant_name = variant.ident.to_string();
         let variant_name = if let Some(ref rename) = attrs.serde_rename {
             rename.clone()
@@ -783,7 +788,7 @@ fn generate_internally_tagged_enum_schema(
                 for field in &fields.named {
                     if let Some(field_ident) = &field.ident {
                         let original_field_name = field_ident.to_string();
-                        let field_attrs = parse_field_attributes(field);
+                        let field_attrs = parse_field_attributes(field)?;
 
                         let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
                             rename.clone()
@@ -851,7 +856,12 @@ fn generate_internally_tagged_enum_schema(
                 if fields.unnamed.len() == 1 {
                     // Newtype variant (e.g. Present(InnerStruct)):
                     // serde flattens the inner struct's fields alongside the tag.
-                    let field = fields.unnamed.first().unwrap();
+                    let field = fields.unnamed.first().ok_or_else(|| {
+                        syn::Error::new_spanned(
+                            fields,
+                            "expected one field in a single-field enum variant",
+                        )
+                    })?;
                     let inner_ty = &field.ty;
 
                     // Unwrap Box<T> if present — Box<T> doesn't implement SchemaType
@@ -953,7 +963,7 @@ fn generate_internally_tagged_enum_schema(
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
 
-    quote! {
+    Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 let variant_schemas = vec![
@@ -974,7 +984,7 @@ fn generate_internally_tagged_enum_schema(
                 Some(stringify!(#name).to_string())
             }
         }
-    }
+    })
 }
 
 /// Generate schema for adjacently tagged enums
@@ -986,11 +996,11 @@ fn generate_adjacently_tagged_enum_schema(
     generics: &syn::Generics,
     tag_name: &str,
     content_name: &str,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     let mut variant_schemas = Vec::new();
 
     for variant in &data_enum.variants {
-        let attrs = parse_variant_attributes(variant);
+        let attrs = parse_variant_attributes(variant)?;
         let original_variant_name = variant.ident.to_string();
         let variant_name = if let Some(ref rename) = attrs.serde_rename {
             rename.clone()
@@ -1039,7 +1049,12 @@ fn generate_adjacently_tagged_enum_schema(
 
                 if fields.unnamed.len() == 1 {
                     // Single field: {"tag": "Variant", "content": value}
-                    let field = fields.unnamed.first().unwrap();
+                    let field = fields.unnamed.first().ok_or_else(|| {
+                        syn::Error::new_spanned(
+                            fields,
+                            "expected one field in a single-field enum variant",
+                        )
+                    })?;
                     let field_schema = generate_field_schema(&field.ty, &None);
 
                     // Create an explicit description for single unnamed field
@@ -1137,7 +1152,7 @@ fn generate_adjacently_tagged_enum_schema(
                 for field in &fields.named {
                     if let Some(field_ident) = &field.ident {
                         let original_field_name = field_ident.to_string();
-                        let field_attrs = parse_field_attributes(field);
+                        let field_attrs = parse_field_attributes(field)?;
 
                         let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
                             rename.clone()
@@ -1248,7 +1263,7 @@ fn generate_adjacently_tagged_enum_schema(
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
 
-    quote! {
+    Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 let variant_schemas = vec![
@@ -1269,7 +1284,7 @@ fn generate_adjacently_tagged_enum_schema(
                 Some(stringify!(#name).to_string())
             }
         }
-    }
+    })
 }
 
 /// Generate schema for untagged enums
@@ -1279,11 +1294,11 @@ fn generate_untagged_enum_schema(
     data_enum: &DataEnum,
     container_attrs: &ContainerAttributes,
     generics: &syn::Generics,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     let mut variant_schemas = Vec::new();
 
     for variant in &data_enum.variants {
-        let attrs = parse_variant_attributes(variant);
+        let attrs = parse_variant_attributes(variant)?;
         let variant_name = variant.ident.to_string();
         let description = attrs
             .description
@@ -1304,7 +1319,12 @@ fn generate_untagged_enum_schema(
             Fields::Unnamed(fields) => {
                 if fields.unnamed.len() == 1 {
                     // Single field - just the value
-                    let field = fields.unnamed.first().unwrap();
+                    let field = fields.unnamed.first().ok_or_else(|| {
+                        syn::Error::new_spanned(
+                            fields,
+                            "expected one field in a single-field enum variant",
+                        )
+                    })?;
                     let field_schema = generate_field_schema(&field.ty, &Some(description.clone()));
                     variant_schemas.push(quote! { #field_schema });
                 } else {
@@ -1342,7 +1362,7 @@ fn generate_untagged_enum_schema(
                 for field in &fields.named {
                     if let Some(field_ident) = &field.ident {
                         let original_field_name = field_ident.to_string();
-                        let field_attrs = parse_field_attributes(field);
+                        let field_attrs = parse_field_attributes(field)?;
 
                         let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
                             rename.clone()
@@ -1409,7 +1429,7 @@ fn generate_untagged_enum_schema(
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
 
-    quote! {
+    Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 let variant_schemas = vec![
@@ -1430,7 +1450,7 @@ fn generate_untagged_enum_schema(
                 Some(stringify!(#name).to_string())
             }
         }
-    }
+    })
 }
 
 /// Generate container attribute setters (shared helper)

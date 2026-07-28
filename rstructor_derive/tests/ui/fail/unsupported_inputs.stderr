@@ -1,0 +1,20 @@
+error: Instructor requires a struct with named fields
+ --> tests/ui/fail/unsupported_inputs.rs:4:19
+  |
+4 | struct TupleStruct(String);
+  |                   ^^^^^^^^
+
+error: Instructor requires a struct with named fields
+ --> tests/ui/fail/unsupported_inputs.rs:7:8
+  |
+7 | struct UnitStruct;
+  |        ^^^^^^^^^^
+
+error: Instructor can only be derived for structs with named fields and enums
+  --> tests/ui/fail/unsupported_inputs.rs:10:1
+   |
+10 | / union UnsupportedUnion {
+11 | |     integer: i64,
+12 | |     float: f64,
+13 | | }
+   | |_^

@@ -6,7 +6,7 @@ struct Person {
     #[llm(description = "Full name of the person")]
     name: String,
 
-    #[llm(description = "Role of the person in the production", optional)]
+    #[llm(description = "Role of the person in the production")]
     role: Option<String>,
 }
 

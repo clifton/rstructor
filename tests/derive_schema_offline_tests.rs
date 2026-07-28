@@ -651,7 +651,7 @@ fn rename_all_matches_serde_serialization() {
 }
 
 // ============================================================================
-// example / examples string-coercion + empty-array edges
+// example / examples typed-value + empty-array edges
 // ============================================================================
 
 // Native-literal examples (the supported, working form): an integer/float/bool
@@ -688,36 +688,11 @@ fn literal_examples_render_as_typed_values() {
     assert_eq!(str_example, &serde_json::Value::String("hello".to_string()));
 }
 
-#[derive(Instructor, Serialize, Deserialize, Debug)]
-struct CoercionHolder {
-    #[llm(description = "an int from a string", example = "42")]
-    int_field: i32,
-    #[llm(description = "a float from a string", example = "3.5")]
-    float_field: f64,
-    #[llm(description = "a bool from a string", example = "true")]
-    bool_field: bool,
-}
-
 // CONTRACT: `#[llm(example = ...)]` takes a NATIVE typed literal matching the
 // field — `example = 42` for an i32, `example = true` for a bool, `example =
 // "text"` for a String (all covered by the test above). A *string-form* example
-// on a numeric/bool field (`example = "42"`) is a type mismatch and is
-// intentionally NOT coerced: no `example` key is emitted, and the field is
-// otherwise unaffected. (Auto-coercing string-form literals to the field type
-// could be a future enhancement; the native typed form is the supported path.)
-#[test]
-fn string_form_example_on_numeric_field_is_omitted() {
-    let schema = CoercionHolder::schema().to_json();
-    assert!(
-        schema["properties"]["int_field"]["example"].is_null(),
-        "string-form example on an i32 should emit no example key"
-    );
-    assert!(schema["properties"]["float_field"]["example"].is_null());
-    assert!(schema["properties"]["bool_field"]["example"].is_null());
-    // The fields themselves are still present and correctly typed.
-    assert_eq!(schema["properties"]["int_field"]["type"], "integer");
-    assert_eq!(schema["properties"]["bool_field"]["type"], "boolean");
-}
+// on a numeric/bool field (`example = "42"`) is a type mismatch. Compile-fail
+// coverage for these cases lives in rstructor_derive/tests/ui/fail.
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
 struct EmptyArrayExampleHolder {

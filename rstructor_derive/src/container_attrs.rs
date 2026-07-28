@@ -1,5 +1,5 @@
 /// Container-level attributes for structs and enums
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ContainerAttributes {
     /// Description of the struct or enum
     pub description: Option<String>,
@@ -14,7 +14,7 @@ pub struct ContainerAttributes {
     pub serde_rename_all: Option<String>,
 
     /// Custom validation function path (e.g., "validate_product" or "my_module::validate")
-    pub validate: Option<String>,
+    pub validate: Option<syn::Path>,
 
     /// Serde tag field name for internally/adjacently tagged enums
     pub serde_tag: Option<String>,
@@ -33,7 +33,7 @@ pub struct ContainerAttributesBuilder {
     title: Option<String>,
     examples: Vec<proc_macro2::TokenStream>,
     serde_rename_all: Option<String>,
-    validate: Option<String>,
+    validate: Option<syn::Path>,
     serde_tag: Option<String>,
     serde_content: Option<String>,
     serde_untagged: bool,
@@ -60,7 +60,7 @@ impl ContainerAttributesBuilder {
         self
     }
 
-    pub fn validate(mut self, validate: Option<String>) -> Self {
+    pub fn validate(mut self, validate: Option<syn::Path>) -> Self {
         self.validate = validate;
         self
     }
