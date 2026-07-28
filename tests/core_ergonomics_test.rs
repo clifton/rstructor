@@ -189,7 +189,7 @@ mod builder {
 
         let client = MockClient::new().with_response("must not be consumed");
         let media = real_world_media();
-        let mut stream = client.with_media(&media).generate_stream("analyze");
+        let mut stream = client.with_media(&media[..1]).generate_stream("analyze");
 
         assert_streaming_media_error(
             stream
