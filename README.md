@@ -521,6 +521,27 @@ There is also `materialize_stream`, which streams a single object as progressive
 
 All are available on every provider (OpenAI, Anthropic, Grok, Gemini). See `examples/streaming_example.rs`.
 
+Streaming terminals are currently text-only. A fluent request with attached
+media returns one `Unsupported` stream error instead of silently dropping the
+attachments:
+
+```rust
+use futures_util::StreamExt;
+use rstructor::{MediaFile, RequestExt, RStructorError};
+
+let media = [MediaFile::new("https://example.com/chart.png", "image/png")];
+let mut stream = client.with_media(&media).generate_stream("Analyze this chart");
+
+assert!(matches!(
+    stream.next().await,
+    Some(Err(RStructorError::Unsupported(_)))
+));
+assert!(stream.next().await.is_none());
+```
+
+Use `generate_with_media` or `materialize_with_media` when attachments are
+required.
+
 ## Tool Calling
 
 Enable the `tools` feature to let the model call your typed Rust functions and feed the results back, looping until it produces a final answer. Tool argument types derive `Instructor`, so their JSON Schema is generated automatically.

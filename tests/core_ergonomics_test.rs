@@ -92,8 +92,36 @@ async fn media_default_errors_instead_of_silently_dropping() {
 /// hand-rolling an echo client. Requires the `mock` feature (CI runs all features).
 #[cfg(feature = "mock")]
 mod builder {
-    use super::{Dummy, MediaFile};
+    use super::{Dummy, MediaFile, RStructorError};
+    #[cfg(feature = "streaming")]
+    use rstructor::StreamedObject;
     use rstructor::{MockClient, RequestExt, RequestKind};
+
+    #[cfg(feature = "streaming")]
+    fn assert_streaming_media_error(error: RStructorError) {
+        let RStructorError::Unsupported(message) = error else {
+            panic!("expected Unsupported, got {error:?}");
+        };
+        assert_eq!(
+            message,
+            "streaming requests with media are not supported; remove the media attachment or use a non-streaming request terminal"
+        );
+        assert!(!message.contains("confidential"));
+        assert!(!message.contains("iVBOR"));
+    }
+
+    #[cfg(feature = "streaming")]
+    fn real_world_media() -> Vec<MediaFile> {
+        vec![
+            MediaFile::new(
+                "https://files.example.com/confidential-risk-chart.png",
+                "image/png",
+            ),
+            // Sanitized bytes from the header of a real PNG. The error must not
+            // expose their base64 representation.
+            MediaFile::from_bytes(b"\x89PNG\r\n\x1a\n", "image/png"),
+        ]
+    }
 
     #[tokio::test]
     async fn generate_has_no_system_by_default() {
@@ -152,6 +180,128 @@ mod builder {
             .await;
         // The streaming terminal also prepends the system context before dispatch.
         assert_eq!(client.last_request().unwrap().prompt, "CTX\n\nhi");
+    }
+
+    #[cfg(feature = "streaming")]
+    #[tokio::test]
+    async fn generate_stream_rejects_media_without_calling_client() {
+        use futures_util::StreamExt;
+
+        let client = MockClient::new().with_response("must not be consumed");
+        let media = real_world_media();
+        let mut stream = client.with_media(&media[..1]).generate_stream("analyze");
+
+        assert_streaming_media_error(
+            stream
+                .next()
+                .await
+                .expect("one error must be yielded")
+                .unwrap_err(),
+        );
+        assert!(stream.next().await.is_none());
+        assert_eq!(client.request_count(), 0);
+        assert!(!client.responses_exhausted());
+    }
+
+    #[cfg(feature = "streaming")]
+    #[tokio::test]
+    async fn materialize_stream_rejects_media_without_calling_client() {
+        use futures_util::StreamExt;
+
+        let client = MockClient::new().with_response(r#"{"value":"must not be consumed"}"#);
+        let media = real_world_media();
+        let mut stream = client
+            .with_media(&media)
+            .materialize_stream::<Dummy>("analyze");
+
+        assert_streaming_media_error(
+            stream
+                .next()
+                .await
+                .expect("one error must be yielded")
+                .unwrap_err(),
+        );
+        assert!(stream.next().await.is_none());
+        assert_eq!(client.request_count(), 0);
+        assert!(!client.responses_exhausted());
+    }
+
+    #[cfg(feature = "streaming")]
+    #[tokio::test]
+    async fn materialize_iter_rejects_media_without_calling_client() {
+        use futures_util::StreamExt;
+
+        let client =
+            MockClient::new().with_response(r#"{"items":[{"value":"must not be consumed"}]}"#);
+        let media = real_world_media();
+        let mut stream = client
+            .with_media(&media)
+            .materialize_iter::<Dummy>("analyze");
+
+        assert_streaming_media_error(
+            stream
+                .next()
+                .await
+                .expect("one error must be yielded")
+                .unwrap_err(),
+        );
+        assert!(stream.next().await.is_none());
+        assert_eq!(client.request_count(), 0);
+        assert!(!client.responses_exhausted());
+    }
+
+    #[cfg(feature = "streaming")]
+    #[tokio::test]
+    async fn empty_media_streams_delegate_with_system_context() {
+        use futures_util::StreamExt;
+
+        let text_client = MockClient::new().with_response("VaR is $2.1mm");
+        let text: Vec<_> = text_client
+            .with_system("Use the risk policy.")
+            .media(Vec::new())
+            .generate_stream("Summarize VaR")
+            .collect()
+            .await;
+        assert_eq!(
+            text.into_iter()
+                .collect::<rstructor::Result<Vec<_>>>()
+                .unwrap(),
+            vec!["VaR is $2.1mm"]
+        );
+        let request = text_client.last_request().unwrap();
+        assert_eq!(request.kind, RequestKind::GenerateStream);
+        assert_eq!(request.prompt, "Use the risk policy.\n\nSummarize VaR");
+
+        let object_client = MockClient::new().with_response(r#"{"value":"$2.1mm"}"#);
+        let objects: Vec<_> = object_client
+            .with_system("Use the risk policy.")
+            .media(Vec::new())
+            .materialize_stream::<Dummy>("Summarize VaR")
+            .collect()
+            .await;
+        assert!(matches!(
+            objects.last(),
+            Some(Ok(StreamedObject::Complete(Dummy { value }))) if value == "$2.1mm"
+        ));
+        let request = object_client.last_request().unwrap();
+        assert_eq!(request.kind, RequestKind::MaterializeStream);
+        assert_eq!(request.prompt, "Use the risk policy.\n\nSummarize VaR");
+
+        let item_client = MockClient::new().with_response(r#"{"items":[{"value":"$2.1mm"}]}"#);
+        let items: Vec<_> = item_client
+            .with_system("Use the risk policy.")
+            .media(Vec::new())
+            .materialize_iter::<Dummy>("Summarize VaR")
+            .collect()
+            .await;
+        assert_eq!(items.len(), 1);
+        assert!(matches!(
+            items.first(),
+            Some(Ok(Dummy { value })) if value == "$2.1mm"
+        ));
+        let request = item_client.last_request().unwrap();
+        assert_eq!(request.kind, RequestKind::MaterializeIter);
+        assert_eq!(request.prompt, "Use the risk policy.\n\nSummarize VaR");
     }
 }
 

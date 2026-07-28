@@ -4,6 +4,9 @@
 //! `with_tools`, then choose a terminal: `materialize` (structured), `generate`
 //! (text), `run` (text, using tools if attached), or — with the `streaming`
 //! feature — `materialize_iter` / `materialize_stream` / `generate_stream`.
+//! Media-bearing requests must use a non-streaming terminal; streaming terminals
+//! yield [`RStructorError::Unsupported`](crate::RStructorError::Unsupported)
+//! instead of silently discarding attachments.
 //!
 //! ```no_run
 //! # use rstructor::{OpenAIClient, RequestExt, Instructor};
@@ -21,8 +24,14 @@
 use serde::de::DeserializeOwned;
 
 use crate::backend::{LLMClient, MediaFile};
+#[cfg(feature = "streaming")]
+use crate::error::RStructorError;
 use crate::error::Result;
 use crate::model::Instructor;
+
+#[cfg(feature = "streaming")]
+const STREAMING_MEDIA_UNSUPPORTED: &str = "streaming requests with media are not supported; \
+    remove the media attachment or use a non-streaming request terminal";
 
 /// A fluent request being built against a client. Created via [`RequestExt`].
 pub struct Request<'a, C: ?Sized> {
@@ -58,7 +67,8 @@ impl<'a, C: ?Sized> Request<'a, C> {
     }
 
     /// Attach media (images, or PDFs where the provider supports them) to the
-    /// request. Used by `materialize`, `generate`, and `run`.
+    /// request. Used by `materialize`, `generate`, and `run`. Streaming
+    /// terminals reject attached media because their client APIs are text-only.
     #[must_use]
     pub fn media(mut self, media: impl Into<Vec<MediaFile>>) -> Self {
         self.media = media.into();
@@ -123,11 +133,18 @@ impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
     /// Stream a **list** of structured `T`, yielding each item as soon as it is
     /// fully generated and validated, with any attached system context prepended.
     ///
-    /// Attached media is ignored — the streaming APIs are text-only.
+    /// If media is attached, the stream yields one
+    /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) and
+    /// ends without calling the client. Streaming APIs are currently text-only.
     pub fn materialize_iter<T>(self, prompt: &str) -> crate::backend::streaming::ItemStream<'a, T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
+        if !self.media.is_empty() {
+            return crate::backend::streaming::error_stream(RStructorError::Unsupported(
+                STREAMING_MEDIA_UNSUPPORTED.to_string(),
+            ));
+        }
         use futures_util::StreamExt;
         let combined = self.combined(prompt);
         let client = self.client;
@@ -140,7 +157,16 @@ impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
     }
 
     /// Stream raw text deltas, with any attached system context prepended.
+    ///
+    /// If media is attached, the stream yields one
+    /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) and
+    /// ends without calling the client. Streaming APIs are currently text-only.
     pub fn generate_stream(self, prompt: &str) -> crate::backend::streaming::TextStream<'a> {
+        if !self.media.is_empty() {
+            return crate::backend::streaming::error_stream(RStructorError::Unsupported(
+                STREAMING_MEDIA_UNSUPPORTED.to_string(),
+            ));
+        }
         use futures_util::StreamExt;
         let combined = self.combined(prompt);
         let client = self.client;
@@ -153,7 +179,11 @@ impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
     }
 
     /// Stream a single structured object as its JSON fills in, with any attached
-    /// system context prepended. Attached media is ignored.
+    /// system context prepended.
+    ///
+    /// If media is attached, the stream yields one
+    /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) and
+    /// ends without calling the client. Streaming APIs are currently text-only.
     pub fn materialize_stream<T>(
         self,
         prompt: &str,
@@ -161,6 +191,11 @@ impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
+        if !self.media.is_empty() {
+            return crate::backend::streaming::error_stream(RStructorError::Unsupported(
+                STREAMING_MEDIA_UNSUPPORTED.to_string(),
+            ));
+        }
         use futures_util::StreamExt;
         let combined = self.combined(prompt);
         let client = self.client;

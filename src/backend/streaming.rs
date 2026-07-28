@@ -38,9 +38,9 @@ pub type ObjectStream<'a, T> = Pin<Box<dyn Stream<Item = Result<StreamedObject<T
 
 /// Build a stream that yields one locally detected error and performs no I/O.
 ///
-/// Provider methods use this when synchronous request construction discovers an
-/// incompatible schema but their public streaming API cannot return `Result`
-/// directly.
+/// Provider and request-builder methods use this when synchronous request
+/// construction discovers an incompatible schema or unsupported input, but
+/// their public streaming API cannot return `Result` directly.
 pub(crate) fn error_stream<'a, T>(
     error: RStructorError,
 ) -> Pin<Box<dyn Stream<Item = Result<T>> + Send + 'a>>
