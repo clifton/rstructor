@@ -19,8 +19,16 @@ pub fn generate_enum_schema(
     container_attrs: &ContainerAttributes,
     generics: &syn::Generics,
 ) -> syn::Result<TokenStream> {
-    // Check if it's a simple enum (no data)
-    let all_simple = data_enum.variants.iter().all(|v| v.fields.is_empty());
+    // Check whether every deserializable variant has no data. A skipped
+    // data-carrying variant does not affect the accepted wire shape.
+    let mut all_simple = true;
+    for variant in &data_enum.variants {
+        let attrs = parse_variant_attributes(variant)?;
+        if !attrs.serde_skip_deserializing && !variant.fields.is_empty() {
+            all_simple = false;
+            break;
+        }
+    }
     let has_tag = container_attrs.serde_tag.is_some();
 
     if all_simple && !has_tag {
@@ -43,6 +51,33 @@ fn schema_bounded_generics(generics: &syn::Generics) -> syn::Generics {
     )
 }
 
+fn deserialization_name(
+    original: &str,
+    explicit_rename: Option<&str>,
+    rename_all: Option<&str>,
+) -> String {
+    if let Some(rename) = explicit_rename {
+        rename.to_string()
+    } else if let Some(rule) = rename_all {
+        apply_rename_all(original, rule)
+    } else {
+        original.to_string()
+    }
+}
+
+fn deserialization_field_name(
+    original: &str,
+    explicit_rename: Option<&str>,
+    variant_rename_all: Option<&str>,
+    container_rename_all_fields: Option<&str>,
+) -> String {
+    deserialization_name(
+        original,
+        explicit_rename,
+        variant_rename_all.or(container_rename_all_fields),
+    )
+}
+
 /// Generate schema for a simple enum (no associated data)
 fn generate_simple_enum_schema(
     name: &Ident,
@@ -51,22 +86,18 @@ fn generate_simple_enum_schema(
     generics: &syn::Generics,
 ) -> syn::Result<TokenStream> {
     // Generate implementation for simple enum with serde rename support
-    let variant_values: Vec<_> = data_enum
-        .variants
-        .iter()
-        .map(|v| {
-            let attrs = parse_variant_attributes(v)?;
-            let original_name = v.ident.to_string();
-            // Priority: 1) variant #[serde(rename)], 2) container #[serde(rename_all)], 3) original name
-            Ok(if let Some(ref rename) = attrs.serde_rename {
-                rename.clone()
-            } else if let Some(ref rename_all) = container_attrs.serde_rename_all {
-                apply_rename_all(&original_name, rename_all)
-            } else {
-                original_name
-            })
-        })
-        .collect::<syn::Result<_>>()?;
+    let mut variant_values = Vec::new();
+    for variant in &data_enum.variants {
+        let attrs = parse_variant_attributes(variant)?;
+        if attrs.serde_skip_deserializing {
+            continue;
+        }
+        variant_values.push(deserialization_name(
+            &variant.ident.to_string(),
+            attrs.serde_rename.as_deref(),
+            container_attrs.serde_rename_all.as_deref(),
+        ));
+    }
 
     // Handle container attributes
     let mut container_setters = Vec::new();
@@ -112,7 +143,7 @@ fn generate_simple_enum_schema(
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
                 // Create array of enum values
-                let enum_values = vec![
+                let enum_values: Vec<::serde_json::Value> = vec![
                     #(::serde_json::Value::String(#variant_values.to_string())),*
                 ];
 
@@ -187,16 +218,16 @@ fn generate_externally_tagged_enum_schema(
     for variant in &data_enum.variants {
         // Get description and rename from variant attributes
         let attrs = parse_variant_attributes(variant)?;
+        if attrs.serde_skip_deserializing {
+            continue;
+        }
 
         let original_variant_name = variant.ident.to_string();
-        // Priority: 1) variant #[serde(rename)], 2) container #[serde(rename_all)], 3) original name
-        let variant_name = if let Some(ref rename) = attrs.serde_rename {
-            rename.clone()
-        } else if let Some(ref rename_all) = container_attrs.serde_rename_all {
-            apply_rename_all(&original_variant_name, rename_all)
-        } else {
-            original_variant_name.clone()
-        };
+        let variant_name = deserialization_name(
+            &original_variant_name,
+            attrs.serde_rename.as_deref(),
+            container_attrs.serde_rename_all.as_deref(),
+        );
 
         let description = attrs
             .description
@@ -229,6 +260,18 @@ fn generate_externally_tagged_enum_schema(
                             "expected one field in a single-field enum variant",
                         )
                     })?;
+                    if parse_field_attributes(field)?.serde_skip_deserializing {
+                        let variant_name_str = variant_name.clone();
+                        let description_str = description.clone();
+                        variant_schemas.push(quote! {
+                            ::serde_json::json!({
+                                "type": "string",
+                                "enum": [#variant_name_str],
+                                "description": #description_str
+                            })
+                        });
+                        continue;
+                    }
 
                     // Extract field schema based on its type
                     let field_schema = generate_field_schema(&field.ty, &None);
@@ -260,13 +303,16 @@ fn generate_externally_tagged_enum_schema(
                     let mut field_schemas = Vec::new();
 
                     for field in fields.unnamed.iter() {
+                        if parse_field_attributes(field)?.serde_skip_deserializing {
+                            continue;
+                        }
                         let field_schema = generate_field_schema(&field.ty, &None);
                         field_schemas.push(field_schema);
                     }
 
                     let variant_name_str = variant_name.clone();
                     let description_str = description.clone();
-                    let field_count = fields.unnamed.len();
+                    let field_count = field_schemas.len();
                     variant_schemas.push(quote! {
                         // Tuple variant with multiple fields - { "variant": [values...] }
                         {
@@ -309,13 +355,16 @@ fn generate_externally_tagged_enum_schema(
                     if let Some(field_ident) = &field.ident {
                         let original_field_name = field_ident.to_string();
                         let field_attrs = parse_field_attributes(field)?;
+                        if field_attrs.serde_skip_deserializing {
+                            continue;
+                        }
 
-                        // Apply serde rename if present
-                        let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
-                            rename.clone()
-                        } else {
-                            original_field_name.clone()
-                        };
+                        let field_name_str = deserialization_field_name(
+                            &original_field_name,
+                            field_attrs.serde_rename.as_deref(),
+                            attrs.serde_rename_all.as_deref(),
+                            container_attrs.serde_rename_all_fields.as_deref(),
+                        );
 
                         let field_desc = field_attrs
                             .description
@@ -738,14 +787,15 @@ fn generate_internally_tagged_enum_schema(
 
     for variant in &data_enum.variants {
         let attrs = parse_variant_attributes(variant)?;
+        if attrs.serde_skip_deserializing {
+            continue;
+        }
         let original_variant_name = variant.ident.to_string();
-        let variant_name = if let Some(ref rename) = attrs.serde_rename {
-            rename.clone()
-        } else if let Some(ref rename_all) = container_attrs.serde_rename_all {
-            apply_rename_all(&original_variant_name, rename_all)
-        } else {
-            original_variant_name.clone()
-        };
+        let variant_name = deserialization_name(
+            &original_variant_name,
+            attrs.serde_rename.as_deref(),
+            container_attrs.serde_rename_all.as_deref(),
+        );
 
         let description = attrs
             .description
@@ -789,12 +839,16 @@ fn generate_internally_tagged_enum_schema(
                     if let Some(field_ident) = &field.ident {
                         let original_field_name = field_ident.to_string();
                         let field_attrs = parse_field_attributes(field)?;
+                        if field_attrs.serde_skip_deserializing {
+                            continue;
+                        }
 
-                        let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
-                            rename.clone()
-                        } else {
-                            original_field_name.clone()
-                        };
+                        let field_name_str = deserialization_field_name(
+                            &original_field_name,
+                            field_attrs.serde_rename.as_deref(),
+                            attrs.serde_rename_all.as_deref(),
+                            container_attrs.serde_rename_all_fields.as_deref(),
+                        );
 
                         let field_desc = field_attrs
                             .description
@@ -853,15 +907,21 @@ fn generate_internally_tagged_enum_schema(
                 let description_str = description.clone();
                 let tag_name_str = tag_name.to_string();
 
-                if fields.unnamed.len() == 1 {
-                    // Newtype variant (e.g. Present(InnerStruct)):
-                    // serde flattens the inner struct's fields alongside the tag.
+                let deserializable_newtype = if fields.unnamed.len() == 1 {
                     let field = fields.unnamed.first().ok_or_else(|| {
                         syn::Error::new_spanned(
                             fields,
                             "expected one field in a single-field enum variant",
                         )
                     })?;
+                    (!parse_field_attributes(field)?.serde_skip_deserializing).then_some(field)
+                } else {
+                    None
+                };
+
+                if let Some(field) = deserializable_newtype {
+                    // Newtype variant (e.g. Present(InnerStruct)):
+                    // serde flattens the inner struct's fields alongside the tag.
                     let inner_ty = &field.ty;
 
                     // Unwrap Box<T> if present — Box<T> doesn't implement SchemaType
@@ -1001,14 +1061,15 @@ fn generate_adjacently_tagged_enum_schema(
 
     for variant in &data_enum.variants {
         let attrs = parse_variant_attributes(variant)?;
+        if attrs.serde_skip_deserializing {
+            continue;
+        }
         let original_variant_name = variant.ident.to_string();
-        let variant_name = if let Some(ref rename) = attrs.serde_rename {
-            rename.clone()
-        } else if let Some(ref rename_all) = container_attrs.serde_rename_all {
-            apply_rename_all(&original_variant_name, rename_all)
-        } else {
-            original_variant_name.clone()
-        };
+        let variant_name = deserialization_name(
+            &original_variant_name,
+            attrs.serde_rename.as_deref(),
+            container_attrs.serde_rename_all.as_deref(),
+        );
 
         let description = attrs
             .description
@@ -1055,6 +1116,35 @@ fn generate_adjacently_tagged_enum_schema(
                             "expected one field in a single-field enum variant",
                         )
                     })?;
+                    if parse_field_attributes(field)?.serde_skip_deserializing {
+                        variant_schemas.push(quote! {
+                            {
+                                let mut schema_obj = ::serde_json::Map::new();
+                                schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
+
+                                let mut properties = ::serde_json::Map::new();
+                                properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
+                                    "type": "string",
+                                    "enum": [#variant_name_str]
+                                }));
+                                properties.insert(#content_name_str.to_string(), ::serde_json::json!({
+                                    "type": "null"
+                                }));
+                                schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
+
+                                let required = vec![
+                                    ::serde_json::Value::String(#tag_name_str.to_string()),
+                                    ::serde_json::Value::String(#content_name_str.to_string())
+                                ];
+                                schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
+                                schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
+                                schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
+
+                                ::serde_json::Value::Object(schema_obj)
+                            }
+                        });
+                        continue;
+                    }
                     let field_schema = generate_field_schema(&field.ty, &None);
 
                     // Create an explicit description for single unnamed field
@@ -1091,10 +1181,13 @@ fn generate_adjacently_tagged_enum_schema(
                     // Multiple fields: {"tag": "Variant", "content": [values...]}
                     let mut field_schemas = Vec::new();
                     for field in fields.unnamed.iter() {
+                        if parse_field_attributes(field)?.serde_skip_deserializing {
+                            continue;
+                        }
                         let field_schema = generate_field_schema(&field.ty, &None);
                         field_schemas.push(field_schema);
                     }
-                    let field_count = fields.unnamed.len();
+                    let field_count = field_schemas.len();
 
                     // Create an explicit description for multiple unnamed fields
                     let explicit_description = format!(
@@ -1153,12 +1246,16 @@ fn generate_adjacently_tagged_enum_schema(
                     if let Some(field_ident) = &field.ident {
                         let original_field_name = field_ident.to_string();
                         let field_attrs = parse_field_attributes(field)?;
+                        if field_attrs.serde_skip_deserializing {
+                            continue;
+                        }
 
-                        let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
-                            rename.clone()
-                        } else {
-                            original_field_name.clone()
-                        };
+                        let field_name_str = deserialization_field_name(
+                            &original_field_name,
+                            field_attrs.serde_rename.as_deref(),
+                            attrs.serde_rename_all.as_deref(),
+                            container_attrs.serde_rename_all_fields.as_deref(),
+                        );
 
                         field_names.push(field_name_str.clone());
 
@@ -1299,6 +1396,9 @@ fn generate_untagged_enum_schema(
 
     for variant in &data_enum.variants {
         let attrs = parse_variant_attributes(variant)?;
+        if attrs.serde_skip_deserializing {
+            continue;
+        }
         let variant_name = variant.ident.to_string();
         let description = attrs
             .description
@@ -1325,16 +1425,29 @@ fn generate_untagged_enum_schema(
                             "expected one field in a single-field enum variant",
                         )
                     })?;
+                    if parse_field_attributes(field)?.serde_skip_deserializing {
+                        let description_str = description.clone();
+                        variant_schemas.push(quote! {
+                            ::serde_json::json!({
+                                "type": "null",
+                                "description": #description_str
+                            })
+                        });
+                        continue;
+                    }
                     let field_schema = generate_field_schema(&field.ty, &Some(description.clone()));
                     variant_schemas.push(quote! { #field_schema });
                 } else {
                     // Multiple fields - array
                     let mut field_schemas = Vec::new();
                     for field in fields.unnamed.iter() {
+                        if parse_field_attributes(field)?.serde_skip_deserializing {
+                            continue;
+                        }
                         let field_schema = generate_field_schema(&field.ty, &None);
                         field_schemas.push(field_schema);
                     }
-                    let field_count = fields.unnamed.len();
+                    let field_count = field_schemas.len();
                     let description_str = description.clone();
                     variant_schemas.push(quote! {
                         {
@@ -1363,12 +1476,16 @@ fn generate_untagged_enum_schema(
                     if let Some(field_ident) = &field.ident {
                         let original_field_name = field_ident.to_string();
                         let field_attrs = parse_field_attributes(field)?;
+                        if field_attrs.serde_skip_deserializing {
+                            continue;
+                        }
 
-                        let field_name_str = if let Some(ref rename) = field_attrs.serde_rename {
-                            rename.clone()
-                        } else {
-                            original_field_name.clone()
-                        };
+                        let field_name_str = deserialization_field_name(
+                            &original_field_name,
+                            field_attrs.serde_rename.as_deref(),
+                            attrs.serde_rename_all.as_deref(),
+                            container_attrs.serde_rename_all_fields.as_deref(),
+                        );
 
                         let field_desc = field_attrs
                             .description

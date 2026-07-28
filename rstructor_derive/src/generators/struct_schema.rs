@@ -25,17 +25,15 @@ pub fn generate_struct_schema(
 
     match &data_struct.fields {
         Fields::Named(fields) => {
-            // First pass: check for self-references
-            for field in &fields.named {
-                if is_self_reference(&field.ty, &struct_name_str) {
-                    has_self_reference = true;
-                    break;
-                }
-            }
-
             for field in &fields.named {
                 // Parse field attributes first to check for serde rename
                 let attrs = parse_field_attributes(field)?;
+                if attrs.serde_skip_deserializing {
+                    continue;
+                }
+                if is_self_reference(&field.ty, &struct_name_str) {
+                    has_self_reference = true;
+                }
 
                 let original_field_name = field
                     .ident

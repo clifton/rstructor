@@ -327,26 +327,33 @@ enum PaymentMethod {
 }
 ```
 
-### Serde Rename Support
+### Serde Deserialization Support
 
-rstructor respects `#[serde(rename)]` and `#[serde(rename_all)]` attributes:
+rstructor interprets supported Serde metadata from the deserialization side of
+the wire contract. It respects `rename`, `rename_all`, `rename_all_fields`,
+`skip`, and `skip_deserializing`. When Serde has separate directions, the
+deserialize-side name is used:
 
 ```rust
 #[derive(Instructor, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UserProfile {
-    first_name: String,      // becomes "firstName" in schema
-    last_name: String,       // becomes "lastName" in schema
-    email_address: String,   // becomes "emailAddress" in schema
-}
+#[serde(rename_all(serialize = "snake_case", deserialize = "camelCase"))]
+struct BrokerOrder {
+    // Omitted from the input schema; Serde supplies String::default().
+    #[serde(skip_deserializing)]
+    server_timestamp: String,
 
-#[derive(Instructor, Serialize, Deserialize)]
-struct CommitMessage {
-    #[serde(rename = "type")]  // use "type" as JSON key
-    commit_type: String,
-    description: String,
-}
+    // Included because it is accepted during deserialization.
+    #[serde(skip_serializing)]
+    client_order_id: String,
 
+    #[serde(rename(serialize = "symbol", deserialize = "ticker"))]
+    instrument: String,
+}
+```
+
+For symmetric names, the usual shorthand remains unchanged:
+
+```rust
 #[derive(Instructor, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum CommitType {
