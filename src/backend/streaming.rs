@@ -502,18 +502,20 @@ pub(crate) fn gemini_stream_event(event: &Value) -> Result<ProviderStreamEvent> 
 
     let mut text = String::new();
     if let Some(content) = candidate.get("content") {
-        let parts = content
-            .get("parts")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
-                invalid_provider_event("Gemini candidate content was missing array `parts`")
+        let content = content.as_object().ok_or_else(|| {
+            invalid_provider_event("Gemini candidate `content` was not an object")
+        })?;
+        if let Some(parts) = content.get("parts") {
+            let parts = parts.as_array().ok_or_else(|| {
+                invalid_provider_event("Gemini candidate content `parts` was not an array")
             })?;
-        for part in parts {
-            if let Some(value) = part.get("text") {
-                let value = value.as_str().ok_or_else(|| {
-                    invalid_provider_event("Gemini content part `text` was not a string")
-                })?;
-                text.push_str(value);
+            for part in parts {
+                if let Some(value) = part.get("text") {
+                    let value = value.as_str().ok_or_else(|| {
+                        invalid_provider_event("Gemini content part `text` was not a string")
+                    })?;
+                    text.push_str(value);
+                }
             }
         }
     }
@@ -739,6 +741,16 @@ mod tests {
                 terminal: true,
             }
         );
+        assert_eq!(
+            gemini_stream_event(
+                &json!({"candidates":[{"content":{"role":"model"},"finishReason":"STOP"}]})
+            )
+            .unwrap(),
+            ProviderStreamEvent {
+                text: None,
+                terminal: true,
+            }
+        );
     }
 
     #[test]
@@ -779,6 +791,20 @@ mod tests {
         ));
         assert!(matches!(
             gemini_stream_event(&json!({"candidates":[{"finishReason":42}]})),
+            Err(RStructorError::StreamingError {
+                kind: StreamErrorKind::InvalidProviderEvent,
+                ..
+            })
+        ));
+        assert!(matches!(
+            gemini_stream_event(&json!({"candidates":[{"content":{"parts":42}}]})),
+            Err(RStructorError::StreamingError {
+                kind: StreamErrorKind::InvalidProviderEvent,
+                ..
+            })
+        ));
+        assert!(matches!(
+            gemini_stream_event(&json!({"candidates":[{"content":"invalid"}]})),
             Err(RStructorError::StreamingError {
                 kind: StreamErrorKind::InvalidProviderEvent,
                 ..

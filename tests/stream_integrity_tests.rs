@@ -181,6 +181,30 @@ async fn gemini_final_text_and_finish_reason_complete_together() {
 
 #[cfg(feature = "gemini")]
 #[tokio::test]
+async fn gemini_finish_only_content_may_omit_parts() {
+    let fixture = include_str!("fixtures/streaming/gemini_finish_only_content.sse");
+    let (server, response) = serve_gemini_fixture(fixture).await;
+    let client = rstructor::GeminiClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .model("test-model");
+    let chunks = client
+        .generate_stream("summarize value at risk")
+        .collect::<Vec<_>>()
+        .await;
+
+    assert_eq!(
+        chunks
+            .into_iter()
+            .collect::<rstructor::Result<Vec<_>>>()
+            .unwrap(),
+        vec!["VaR: $2.1mm"]
+    );
+    response.assert_async().await;
+}
+
+#[cfg(feature = "gemini")]
+#[tokio::test]
 async fn gemini_requires_a_nonempty_finish_reason() {
     let fixture = include_str!("fixtures/streaming/gemini_text_missing_finish.sse");
     let (server, response) = serve_gemini_fixture(fixture).await;
