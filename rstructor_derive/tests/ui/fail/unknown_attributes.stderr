@@ -1,0 +1,23 @@
+error: unsupported container `llm` attribute; expected one of: `description`, `title`, `examples`, `validate`
+ --> tests/ui/fail/unknown_attributes.rs:4:7
+  |
+4 | #[llm(descripton = "misspelled")]
+  |       ^^^^^^^^^^
+
+error: unsupported field `llm` attribute; expected one of: `description`, `example`, `examples`
+ --> tests/ui/fail/unknown_attributes.rs:6:11
+  |
+6 |     #[llm(exampel = 42)]
+  |           ^^^^^^^
+
+error: unsupported field `llm` attribute; expected one of: `description`, `example`, `examples`
+ --> tests/ui/fail/unknown_attributes.rs:9:11
+  |
+9 |     #[llm(optional)]
+  |           ^^^^^^^^
+
+error: unsupported variant `llm` attribute; expected `description`
+  --> tests/ui/fail/unknown_attributes.rs:15:11
+   |
+15 |     #[llm(label = "wrong namespace key")]
+   |           ^^^^^

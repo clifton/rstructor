@@ -1,0 +1,11 @@
+error: `examples` must be an array expression
+ --> tests/ui/fail/malformed_examples.rs:4:18
+  |
+4 | #[llm(examples = "not an array")]
+  |                  ^^^^^^^^^^^^^^
+
+error: `examples` must be an array expression
+  --> tests/ui/fail/malformed_examples.rs:11:22
+   |
+11 |     #[llm(examples = 42)]
+   |                      ^^
