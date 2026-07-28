@@ -47,10 +47,12 @@ pub trait DynTool: Send + Sync {
     fn name(&self) -> String;
     /// The tool description.
     fn description(&self) -> String;
-    /// The JSON Schema for the tool's arguments (strict form: `additionalProperties:
-    /// false`), as used by OpenAI/Grok/Anthropic.
+    /// The canonical JSON Schema for the tool's arguments.
+    ///
+    /// Provider-specific compatibility checks and transformations are applied
+    /// when the toolbox is rendered for a request.
     fn parameters_schema(&self) -> Value;
-    /// The argument schema with Gemini-unsupported keywords stripped.
+    /// The argument schema prepared for Gemini's JSON Schema transport.
     fn parameters_schema_gemini(&self) -> Value;
     /// Invoke the tool with raw JSON arguments (deserialized into `Args`).
     async fn invoke_json(&self, args: Value) -> Result<Value>;
@@ -67,7 +69,7 @@ impl<T: Tool> DynTool for T {
     }
 
     fn parameters_schema(&self) -> Value {
-        crate::backend::utils::prepare_strict_schema(&<T::Args as SchemaType>::schema())
+        <T::Args as SchemaType>::schema().to_json()
     }
 
     fn parameters_schema_gemini(&self) -> Value {
@@ -193,33 +195,50 @@ impl Toolbox {
 
     /// Render the tools as OpenAI-compatible `tools` JSON.
     #[cfg(any(feature = "openai", feature = "grok"))]
-    fn openai_tools_json(&self) -> Vec<Value> {
+    fn openai_tools_json(
+        &self,
+        provider: crate::backend::StrictSchemaProvider,
+    ) -> Result<Vec<Value>> {
         self.tools
             .iter()
             .map(|t| {
-                serde_json::json!({
+                let name = t.name();
+                let schema = crate::schema::Schema::new(t.parameters_schema());
+                let parameters = crate::backend::compile_strict_schema(
+                    &schema,
+                    provider,
+                    format!("tool `{name}` arguments"),
+                )?;
+                Ok(serde_json::json!({
                     "type": "function",
                     "function": {
-                        "name": t.name(),
+                        "name": name,
                         "description": t.description(),
-                        "parameters": t.parameters_schema(),
+                        "parameters": parameters,
                     }
-                })
+                }))
             })
             .collect()
     }
 
     /// Render the tools as Anthropic `tools` JSON.
     #[cfg(feature = "anthropic")]
-    fn anthropic_tools_json(&self) -> Vec<Value> {
+    fn anthropic_tools_json(&self) -> Result<Vec<Value>> {
         self.tools
             .iter()
             .map(|t| {
-                serde_json::json!({
-                    "name": t.name(),
+                let name = t.name();
+                let schema = crate::schema::Schema::new(t.parameters_schema());
+                let input_schema = crate::backend::compile_strict_schema(
+                    &schema,
+                    crate::backend::StrictSchemaProvider::Anthropic,
+                    format!("tool `{name}` arguments"),
+                )?;
+                Ok(serde_json::json!({
+                    "name": name,
                     "description": t.description(),
-                    "input_schema": t.parameters_schema(),
-                })
+                    "input_schema": input_schema,
+                }))
             })
             .collect()
     }
@@ -237,7 +256,7 @@ impl Toolbox {
                 serde_json::json!({
                     "name": t.name(),
                     "description": t.description(),
-                    "parameters": t.parameters_schema_gemini(),
+                    "parametersJsonSchema": t.parameters_schema_gemini(),
                 })
             })
             .collect();
@@ -271,7 +290,16 @@ pub(crate) async fn run_openai_compatible_tools(
     use serde_json::json;
     use tracing::{debug, warn};
 
-    let tools_json = toolbox.openai_tools_json();
+    let schema_provider = match provider {
+        "OpenAI" => crate::backend::StrictSchemaProvider::OpenAI,
+        "Grok" => crate::backend::StrictSchemaProvider::Grok,
+        other => {
+            return Err(RStructorError::SchemaError(format!(
+                "unsupported OpenAI-compatible tool schema provider: {other}"
+            )));
+        }
+    };
+    let tools_json = toolbox.openai_tools_json(schema_provider)?;
     let mut messages: Vec<Value> = Vec::new();
     if let Some(system) = system {
         messages.push(json!({ "role": "system", "content": system }));
@@ -414,7 +442,7 @@ pub(crate) async fn run_anthropic_tools(
     use serde_json::json;
     use tracing::debug;
 
-    let tools_json = toolbox.anthropic_tools_json();
+    let tools_json = toolbox.anthropic_tools_json()?;
     let url = format!("{base_url}/messages");
     // Encode any attached media with the same content builder as materialize, so
     // images/PDFs are carried (or rejected with a clear error) per provider rules.
@@ -635,6 +663,7 @@ mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
+    use std::collections::HashMap;
 
     /// Argument type for the test tool; its schema is derived via `Instructor`.
     #[derive(crate::Instructor, Serialize, Deserialize)]
@@ -657,6 +686,25 @@ mod tests {
         FnTool::new("echo", "Echo the first addend", |args: AddArgs| {
             std::future::ready(Ok(json!({ "value": args.a })))
         })
+    }
+
+    #[derive(crate::Instructor, Serialize, Deserialize)]
+    struct ScenarioPriceArgs {
+        scenario_prices: HashMap<String, f64>,
+    }
+
+    fn scenario_price_tool()
+    -> FnTool<ScenarioPriceArgs, impl Fn(ScenarioPriceArgs) -> std::future::Ready<Result<Value>>>
+    {
+        FnTool::new(
+            "scenario_price",
+            "Apply per-symbol scenario prices",
+            |args: ScenarioPriceArgs| {
+                std::future::ready(Ok(json!({
+                    "symbol_count": args.scenario_prices.len()
+                })))
+            },
+        )
     }
 
     // ---- Toolbox add()/len()/is_empty() ----
@@ -740,7 +788,9 @@ mod tests {
     #[test]
     fn openai_tools_json_render_shape() {
         let toolbox = Toolbox::new().with(add_tool());
-        let rendered = toolbox.openai_tools_json();
+        let rendered = toolbox
+            .openai_tools_json(crate::backend::StrictSchemaProvider::OpenAI)
+            .unwrap();
         assert_eq!(rendered.len(), 1);
 
         let entry = &rendered[0];
@@ -772,7 +822,7 @@ mod tests {
     #[test]
     fn anthropic_tools_json_uses_input_schema() {
         let toolbox = Toolbox::new().with(add_tool());
-        let rendered = toolbox.anthropic_tools_json();
+        let rendered = toolbox.anthropic_tools_json().unwrap();
         assert_eq!(rendered.len(), 1);
 
         let entry = &rendered[0];
@@ -792,6 +842,56 @@ mod tests {
         let input_schema = &entry["input_schema"];
         assert_eq!(input_schema["type"], "object");
         assert_eq!(input_schema["additionalProperties"], json!(false));
+    }
+
+    #[test]
+    fn dyn_tool_exposes_canonical_typed_map_schema() {
+        let tool = scenario_price_tool();
+        let schema = tool.parameters_schema();
+        let map = &schema["properties"]["scenario_prices"];
+
+        assert_eq!(map["type"], "object");
+        assert_eq!(map["additionalProperties"]["type"], "number");
+    }
+
+    #[cfg(any(feature = "openai", feature = "grok"))]
+    #[test]
+    fn strict_openai_compatible_tool_rejects_dynamic_map_with_tool_context() {
+        let toolbox = Toolbox::new().with(scenario_price_tool());
+        let error = toolbox
+            .openai_tools_json(crate::backend::StrictSchemaProvider::Grok)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            RStructorError::SchemaCompatibilityError {
+                provider,
+                context,
+                path,
+                ..
+            } if provider.as_ref() == "Grok"
+                && context.as_ref() == "tool `scenario_price` arguments"
+                && path.as_ref() == "$.properties.scenario_prices"
+        ));
+    }
+
+    #[cfg(feature = "anthropic")]
+    #[test]
+    fn strict_anthropic_tool_rejects_dynamic_map() {
+        let toolbox = Toolbox::new().with(scenario_price_tool());
+        let error = toolbox.anthropic_tools_json().unwrap_err();
+
+        assert!(matches!(
+            error,
+            RStructorError::SchemaCompatibilityError {
+                provider,
+                context,
+                path,
+                ..
+            } if provider.as_ref() == "Anthropic"
+                && context.as_ref() == "tool `scenario_price` arguments"
+                && path.as_ref() == "$.properties.scenario_prices"
+        ));
     }
 
     // ---- gemini_tools_json functionDeclarations wrapper + empty early-return ----
@@ -819,16 +919,31 @@ mod tests {
         let decl = &declarations[0];
         assert_eq!(decl["name"], "add");
         assert_eq!(decl["description"], "Add two integers");
-        assert_eq!(decl["parameters"]["type"], "object");
+        assert_eq!(decl["parametersJsonSchema"]["type"], "object");
+        assert!(decl.get("parameters").is_none());
 
         // Gemini schema strips examples/title.
         assert!(
-            decl["parameters"].get("examples").is_none(),
+            decl["parametersJsonSchema"].get("examples").is_none(),
             "examples should be stripped from Gemini schema"
         );
         assert!(
-            decl["parameters"].get("title").is_none(),
+            decl["parametersJsonSchema"].get("title").is_none(),
             "title should be stripped from Gemini schema"
         );
+    }
+
+    #[cfg(feature = "gemini")]
+    #[test]
+    fn gemini_tool_preserves_typed_dynamic_map() {
+        let toolbox = Toolbox::new().with(scenario_price_tool());
+        let rendered = toolbox.gemini_tools_json();
+        let declaration = &rendered[0]["functionDeclarations"][0];
+        let map = &declaration["parametersJsonSchema"]["properties"]["scenario_prices"];
+
+        assert_eq!(map["type"], "object");
+        assert_eq!(map["additionalProperties"]["type"], "number");
+        assert!(map.get("properties").is_none());
+        assert!(declaration.get("parameters").is_none());
     }
 }

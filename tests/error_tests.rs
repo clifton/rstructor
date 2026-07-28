@@ -279,6 +279,15 @@ mod error_tests {
         // Other errors are not retryable
         assert!(!RStructorError::ValidationError("test".into()).is_retryable());
         assert!(!RStructorError::SchemaError("test".into()).is_retryable());
+        assert!(
+            !RStructorError::SchemaCompatibilityError {
+                provider: "OpenAI".into(),
+                context: "structured output".into(),
+                path: "$.properties.positions".into(),
+                message: "dynamic maps are unsupported".into(),
+            }
+            .is_retryable()
+        );
         assert!(!RStructorError::SerializationError("test".into()).is_retryable());
         assert!(
             !RStructorError::OutputDecodeError {
@@ -316,6 +325,30 @@ mod error_tests {
         let err = RStructorError::SchemaError("Invalid schema".to_string());
         let err_string = format!("{}", err);
         assert_eq!(err_string, "Schema error: Invalid schema");
+    }
+
+    #[test]
+    fn test_schema_compatibility_error_display_and_equality() {
+        let error = RStructorError::SchemaCompatibilityError {
+            provider: "OpenAI".into(),
+            context: "structured output".into(),
+            path: "$.properties.positions".into(),
+            message: "dynamic object keys are unsupported".into(),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "OpenAI cannot represent structured output at $.properties.positions: dynamic object keys are unsupported"
+        );
+        assert_eq!(
+            error,
+            RStructorError::SchemaCompatibilityError {
+                provider: "OpenAI".into(),
+                context: "structured output".into(),
+                path: "$.properties.positions".into(),
+                message: "dynamic object keys are unsupported".into(),
+            }
+        );
     }
 
     #[test]

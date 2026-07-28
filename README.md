@@ -191,6 +191,72 @@ let client = OpenAIClient::from_env()?.no_retries();
 
 ## Complex Types
 
+### Dynamic Maps
+
+Use `HashMap<String, V>` when keys are runtime data such as ticker symbols,
+account IDs, or category names. The map values remain fully typed:
+
+```rust
+use std::collections::HashMap;
+
+use rstructor::{GeminiClient, Instructor, LLMClient};
+use serde::{Deserialize, Serialize};
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Position {
+    asset_class: String,
+    quantity: i64,
+    mark_price: f64,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+struct Portfolio {
+    portfolio_id: String,
+    positions: HashMap<String, Position>,
+}
+
+let client = GeminiClient::from_env()?;
+let portfolio: Portfolio = client
+    .materialize(
+        "AAPL: 125,000 equity shares at 213.76; \
+         ESU6: short 240 futures at 6378.25",
+    )
+    .await?;
+
+assert_eq!(portfolio.positions["AAPL"].quantity, 125_000);
+assert_eq!(portfolio.positions["ESU6"].quantity, -240);
+```
+
+Gemini accepts native typed dynamic-map schemas. OpenAI, Anthropic, and Grok
+strict structured-output dialects cannot currently represent arbitrary keys
+without weakening or changing the Rust contract. Those clients return a
+non-retryable `SchemaCompatibilityError` before making an HTTP request instead
+of silently constraining the map to `{}`:
+
+```rust
+use rstructor::{OpenAIClient, RStructorError};
+
+let result = OpenAIClient::from_env()?
+    .materialize::<Portfolio>("Extract the positions")
+    .await;
+
+match result {
+    Err(RStructorError::SchemaCompatibilityError {
+        provider,
+        path,
+        ..
+    }) => {
+        assert_eq!(provider.as_ref(), "OpenAI");
+        assert_eq!(path.as_ref(), "$.properties.positions");
+    }
+    other => panic!("expected a map compatibility error, got {other:?}"),
+}
+```
+
+Use a struct instead when the keys are a fixed part of the contract. Dynamic-map
+fallback encodings are deliberately not selected automatically because doing so
+would change the provider wire schema and structured-output guarantee.
+
 ### Nested Structures
 
 ```rust

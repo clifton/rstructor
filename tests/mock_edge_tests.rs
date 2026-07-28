@@ -208,6 +208,12 @@ async fn path_aware_errors_are_preserved_when_mock_defaults_are_cloned() {
             path: "$.order.quantity".to_string(),
             message: "invalid type".to_string(),
         },
+        RStructorError::SchemaCompatibilityError {
+            provider: "OpenAI".into(),
+            context: "structured output".into(),
+            path: "$.properties.positions".into(),
+            message: "dynamic maps are unsupported".into(),
+        },
     ] {
         let client = MockClient::new().with_default_response(MockResponse::error(error));
         let first = client.generate("p").await.unwrap_err();

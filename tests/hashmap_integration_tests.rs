@@ -39,7 +39,6 @@ mod hashmap_tests {
         let prompt = "Organize these items into categories: apple, hammer, banana, screwdriver, drill. Use category names like 'fruit', 'tools' as the keys.";
         let result: rstructor::Result<Inventory> = client.materialize(prompt).await;
 
-        // This is expected to fail or produce interesting schema errors if HashMap isn't handled
         assert!(
             result.is_ok(),
             "HashMap<String, Vec<String>> failed: {:?}",
@@ -47,7 +46,6 @@ mod hashmap_tests {
         );
         let inv = result.unwrap();
         // Check that we got some categories with items
-        // Note: Gemini may use different key names due to schema limitations
         assert!(
             !inv.categories.is_empty(),
             "Expected categories to have entries, got empty map"
@@ -78,7 +76,6 @@ mod hashmap_tests {
         );
         let map = result.unwrap();
         // Check that we got user data entries with correct structure
-        // Note: Gemini may use different key names due to schema limitations
         assert!(
             !map.user_data.is_empty(),
             "Expected user_data to have entries, got empty map"
