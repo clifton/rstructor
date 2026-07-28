@@ -1,0 +1,5 @@
+data: {"id":"chatcmpl-risk-001","object":"chat.completion.chunk","created":1785254400,"model":"gpt-5-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Gross exposure: "},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-risk-001","object":"chat.completion.chunk","created":1785254400,"model":"gpt-5-mini","choices":[{"index":0,"delta":{"content":"1.42x"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-risk-001","object":"chat.completion.chunk","choices":[

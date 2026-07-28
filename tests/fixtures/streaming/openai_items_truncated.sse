@@ -1,0 +1,5 @@
+data: {"id":"chatcmpl-risk-004","object":"chat.completion.chunk","created":1785254400,"model":"gpt-5-mini","choices":[{"index":0,"delta":{"content":"{\"items\":[{\"symbol\":\"AAPL\",\"quantity\":125000},"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-risk-004","object":"chat.completion.chunk","created":1785254400,"model":"gpt-5-mini","choices":[{"index":0,"delta":{"content":"{\"symbol\":\"ESU6\",\"quantity\":-240"},"finish_reason":"stop"}]}
+
+data: [DONE]

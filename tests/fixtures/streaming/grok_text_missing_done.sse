@@ -1,0 +1,1 @@
+data: {"id":"7f0e9c9a-risk","object":"chat.completion.chunk","created":1785254400,"model":"grok-4-1-fast-reasoning","choices":[{"index":0,"delta":{"role":"assistant","content":"Beta: 0.84"},"finish_reason":"stop"}]}

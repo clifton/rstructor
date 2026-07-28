@@ -8,7 +8,9 @@
 
 #![cfg(feature = "mock")]
 
-use rstructor::{Instructor, LLMClient, MockClient, MockResponse, RStructorError, RequestKind};
+use rstructor::{
+    Instructor, LLMClient, MockClient, MockResponse, RStructorError, RequestKind, StreamErrorKind,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
@@ -213,6 +215,10 @@ async fn path_aware_errors_are_preserved_when_mock_defaults_are_cloned() {
             context: "structured output".into(),
             path: "$.properties.positions".into(),
             message: "dynamic maps are unsupported".into(),
+        },
+        RStructorError::StreamingError {
+            kind: StreamErrorKind::IncompleteArray { next_index: 2 },
+            message: "stream ended early".into(),
         },
     ] {
         let client = MockClient::new().with_default_response(MockResponse::error(error));

@@ -814,7 +814,8 @@ impl LLMClient for OpenAIClient {
         let body = self.stream_body(prompt, None);
         crate::backend::streaming::sse_text_stream(
             self.send_stream(body),
-            crate::backend::streaming::openai_delta,
+            crate::backend::streaming::openai_stream_event,
+            crate::backend::streaming::TerminalMarker::DoneSentinel,
         )
     }
 
@@ -845,7 +846,8 @@ impl LLMClient for OpenAIClient {
         let body = self.stream_body(prompt, Some(response_format));
         crate::backend::streaming::object_stream(
             self.send_stream(body),
-            crate::backend::streaming::openai_delta,
+            crate::backend::streaming::openai_stream_event,
+            crate::backend::streaming::TerminalMarker::DoneSentinel,
         )
     }
 
@@ -875,7 +877,8 @@ impl LLMClient for OpenAIClient {
         let body = self.stream_body(prompt, Some(response_format));
         crate::backend::streaming::iter_stream(
             self.send_stream(body),
-            crate::backend::streaming::openai_delta,
+            crate::backend::streaming::openai_stream_event,
+            crate::backend::streaming::TerminalMarker::DoneSentinel,
             crate::backend::streaming::finalize_item::<T>,
         )
     }

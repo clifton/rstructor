@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fmt, time::Duration};
 use thiserror::Error;
 
 /// Classification of API errors for better handling and retry logic.
@@ -116,6 +116,69 @@ pub enum ApiErrorKind {
         /// Description of what was expected vs received
         details: String,
     },
+}
+
+/// Machine-readable classification for integrity failures in a streamed response.
+///
+/// Streaming methods can yield successful items before discovering that the
+/// provider's remaining response is malformed or truncated. Callers should stop
+/// consuming the stream when a [`RStructorError::StreamingError`] is yielded and
+/// decide whether to retain or roll back any earlier items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StreamErrorKind {
+    /// An SSE event contained bytes that were not valid UTF-8.
+    InvalidEventEncoding,
+    /// An SSE `data:` payload was not valid JSON.
+    InvalidEventJson,
+    /// A recognized provider event had an invalid shape.
+    InvalidProviderEvent,
+    /// The provider sent an explicit error inside an otherwise successful stream.
+    ProviderStreamError,
+    /// HTTP EOF arrived before the provider's required terminal event.
+    IncompleteEventStream,
+    /// A streamed array element was not valid JSON.
+    InvalidArrayElement {
+        /// Zero-based index of the malformed element.
+        index: usize,
+    },
+    /// The structured response never contained the expected array.
+    MissingArray,
+    /// The response ended before the streamed array was closed.
+    IncompleteArray {
+        /// Zero-based index of the element that would have been yielded next.
+        next_index: usize,
+    },
+    /// The JSON surrounding a complete streamed array was malformed.
+    InvalidArrayEnvelope,
+    /// The array closed, but its surrounding JSON object did not.
+    IncompleteArrayEnvelope,
+}
+
+impl fmt::Display for StreamErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEventEncoding => f.write_str("invalid SSE event encoding"),
+            Self::InvalidEventJson => f.write_str("invalid SSE event JSON"),
+            Self::InvalidProviderEvent => f.write_str("invalid provider stream event"),
+            Self::ProviderStreamError => f.write_str("provider stream error"),
+            Self::IncompleteEventStream => {
+                f.write_str("incomplete stream without a provider terminal event")
+            }
+            Self::InvalidArrayElement { index } => {
+                write!(f, "invalid streamed array element at index {index}")
+            }
+            Self::MissingArray => f.write_str("missing streamed array"),
+            Self::IncompleteArray { next_index } => {
+                write!(
+                    f,
+                    "incomplete streamed array before element index {next_index}"
+                )
+            }
+            Self::InvalidArrayEnvelope => f.write_str("invalid streamed array envelope"),
+            Self::IncompleteArrayEnvelope => f.write_str("incomplete streamed array envelope"),
+        }
+    }
 }
 
 impl ApiErrorKind {
@@ -372,6 +435,19 @@ pub enum RStructorError {
         message: String,
     },
 
+    /// A streamed response was malformed or ended before its framing completed.
+    ///
+    /// This error is deliberately non-retryable: a stream may already have
+    /// yielded text or validated objects, so automatically replaying it could
+    /// duplicate caller-visible side effects.
+    #[error("Streaming error ({kind}): {message}")]
+    StreamingError {
+        /// Machine-readable failure category.
+        kind: StreamErrorKind,
+        /// Safe diagnostic context. Provider response contents are not included.
+        message: Box<str>,
+    },
+
     /// Operation timed out
     #[error("Timeout error")]
     Timeout,
@@ -535,6 +611,16 @@ impl PartialEq for RStructorError {
                     message: message_b,
                 },
             ) => path_a == path_b && message_a == message_b,
+            (
+                Self::StreamingError {
+                    kind: kind_a,
+                    message: message_a,
+                },
+                Self::StreamingError {
+                    kind: kind_b,
+                    message: message_b,
+                },
+            ) => kind_a == kind_b && message_a == message_b,
             (Self::Unsupported(a), Self::Unsupported(b)) => a == b,
             (Self::Timeout, Self::Timeout) => true,
             // HttpError and JsonError don't implement PartialEq, so we always return false

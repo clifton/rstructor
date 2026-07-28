@@ -920,7 +920,8 @@ impl LLMClient for GeminiClient {
         let body = self.stream_body(prompt, None);
         crate::backend::streaming::sse_text_stream(
             self.send_stream(body),
-            crate::backend::streaming::gemini_delta,
+            crate::backend::streaming::gemini_stream_event,
+            crate::backend::streaming::TerminalMarker::GeminiFinishReason,
         )
     }
 
@@ -954,7 +955,8 @@ impl LLMClient for GeminiClient {
 
         crate::backend::streaming::object_stream_with(
             self.send_stream(body),
-            crate::backend::streaming::gemini_delta,
+            crate::backend::streaming::gemini_stream_event,
+            crate::backend::streaming::TerminalMarker::GeminiFinishReason,
             finalize,
         )
     }
@@ -988,7 +990,8 @@ impl LLMClient for GeminiClient {
 
         crate::backend::streaming::iter_stream(
             self.send_stream(body),
-            crate::backend::streaming::gemini_delta,
+            crate::backend::streaming::gemini_stream_event,
+            crate::backend::streaming::TerminalMarker::GeminiFinishReason,
             finalize,
         )
     }

@@ -30,16 +30,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stream =
         client.materialize_iter::<Invention>("List 8 important inventions of the 20th century.");
 
-    let mut n = 0;
+    let mut inventions = Vec::new();
     while let Some(item) = stream.next().await {
+        // An integrity error can follow already-validated items if the provider
+        // truncates the response. Only commit irreversible side effects after
+        // this loop drains cleanly.
         let invention = item?; // each item is fully parsed and validated
-        n += 1;
         println!(
-            "  {n}. {} ({}) — {}",
-            invention.name, invention.year, invention.inventor
+            "  tentative {}. {} ({}) — {}",
+            inventions.len() + 1,
+            invention.name,
+            invention.year,
+            invention.inventor
         );
+        inventions.push(invention);
     }
 
-    println!("\nStreamed {n} items.");
+    println!(
+        "\nStream completed cleanly; {} items are authoritative.",
+        inventions.len()
+    );
     Ok(())
 }

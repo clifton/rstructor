@@ -1,0 +1,1 @@
+data: {"candidates":[{"content":{"parts":[{"text":"VaR: "},{"text":"$2.1mm"}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":6,"totalTokenCount":14},"modelVersion":"gemini-2.5-flash"}

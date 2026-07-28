@@ -1,0 +1,5 @@
+event: message_start
+data: {"type":"message_start","message":{"id":"msg_risk_003","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null}}
+
+event: error
+data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}

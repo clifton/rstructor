@@ -872,7 +872,8 @@ impl LLMClient for AnthropicClient {
         let body = self.stream_body(prompt, None);
         crate::backend::streaming::sse_text_stream(
             self.send_stream(body),
-            crate::backend::streaming::anthropic_delta,
+            crate::backend::streaming::anthropic_stream_event,
+            crate::backend::streaming::TerminalMarker::AnthropicMessageStop,
         )
     }
 
@@ -900,7 +901,8 @@ impl LLMClient for AnthropicClient {
         let body = self.stream_body(prompt, Some(output_format));
         crate::backend::streaming::object_stream(
             self.send_stream(body),
-            crate::backend::streaming::anthropic_delta,
+            crate::backend::streaming::anthropic_stream_event,
+            crate::backend::streaming::TerminalMarker::AnthropicMessageStop,
         )
     }
 
@@ -926,7 +928,8 @@ impl LLMClient for AnthropicClient {
         let body = self.stream_body(prompt, Some(output_format));
         crate::backend::streaming::iter_stream(
             self.send_stream(body),
-            crate::backend::streaming::anthropic_delta,
+            crate::backend::streaming::anthropic_stream_event,
+            crate::backend::streaming::TerminalMarker::AnthropicMessageStop,
             crate::backend::streaming::finalize_item::<T>,
         )
     }
