@@ -313,6 +313,49 @@ struct Recipe {
 }
 ```
 
+Derived schemas also support direct and mutual recursion. Recursive definitions
+are hoisted to the document root, and concrete Rust type identity keeps
+same-named types from different modules or generic instantiations distinct:
+
+```rust
+#[derive(Instructor, Serialize, Deserialize)]
+struct Fund {
+    lei: String,
+    prime_broker: Option<Box<PrimeBroker>>,
+}
+
+#[derive(Instructor, Serialize, Deserialize)]
+struct PrimeBroker {
+    lei: String,
+    sponsored_funds: Vec<Fund>,
+}
+
+let schema = Fund::schema().to_json();
+assert!(schema["$defs"].is_object());
+```
+
+OpenAI, Anthropic, and Grok preserve those recursive references in their
+structured-output schemas. Gemini cannot currently represent an unbounded
+recursive schema. Its client returns a local, non-retryable compatibility error
+instead of silently replacing the deepest recursive branch with `{}`:
+
+```rust
+use rstructor::{GeminiClient, LLMClient, RStructorError};
+
+let result = GeminiClient::from_env()?
+    .materialize::<Fund>("Extract the fund and prime-broker hierarchy")
+    .await;
+
+assert!(matches!(
+    result,
+    Err(RStructorError::SchemaCompatibilityError { provider, .. })
+        if provider.as_ref() == "Gemini"
+));
+```
+
+Run the complete example with
+`cargo run --example recursive_schema_graph`.
+
 ### Enums with Data
 
 ```rust
