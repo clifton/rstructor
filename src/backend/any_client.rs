@@ -169,7 +169,7 @@ fn provider_feature_disabled(provider: &str, feature: &str) -> RStructorError {
 /// # fn ex() -> Result<(), Box<dyn std::error::Error>> {
 /// use rstructor::{AnyClient, OpenAIClient, OpenAIModel};
 ///
-/// let configured = OpenAIClient::from_env()?.model(OpenAIModel::Gpt56);
+/// let configured = OpenAIClient::from_env()?.model(OpenAIModel::Gpt56Sol);
 /// let client: AnyClient = configured.into();
 /// # let _ = client;
 /// # Ok(())

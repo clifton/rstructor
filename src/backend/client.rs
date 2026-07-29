@@ -114,7 +114,7 @@ impl MediaFile {
 /// and raw text completions.
 ///
 /// The library includes implementations for popular LLM providers:
-/// - `OpenAIClient` for OpenAI's GPT models (gpt-3.5-turbo, gpt-4, etc.)
+/// - `OpenAIClient` for OpenAI's GPT models (GPT-5.6 and earlier families)
 /// - `AnthropicClient` for Anthropic's Claude models
 /// - `GrokClient` for xAI's Grok models
 /// - `GeminiClient` for Google's Gemini models
@@ -153,7 +153,7 @@ impl MediaFile {
 ///
 /// // Create a client
 /// let client = OpenAIClient::new("your-openai-api-key")?
-///     .model(OpenAIModel::Gpt56)
+///     .model(OpenAIModel::Gpt56Sol)
 ///     .temperature(0.0)
 ///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///
@@ -186,7 +186,7 @@ impl MediaFile {
 ///
 /// // Create a client
 /// let client = AnthropicClient::new("your-anthropic-api-key")?
-///     .model(AnthropicModel::ClaudeSonnet5)
+///     .model(AnthropicModel::ClaudeOpus5)
 ///     .timeout(Duration::from_secs(30));  // Optional: set 30 second timeout
 ///
 /// // Materialize a structured response

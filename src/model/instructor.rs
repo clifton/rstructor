@@ -88,7 +88,7 @@ use crate::schema::SchemaType;
 ///
 /// // Create a client
 /// let client = OpenAIClient::new("your-api-key")?
-///     .model(OpenAIModel::Gpt56);
+///     .model(OpenAIModel::Gpt56Sol);
 ///
 /// // Get structured data with automatic validation
 /// let product = client.materialize::<ProductInfo>("Describe a laptop").await?;

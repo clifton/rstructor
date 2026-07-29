@@ -364,7 +364,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Examples of valid values are `openai/gpt-5.6-sol`,
-`anthropic/claude-sonnet-5`, `ollama/llama3.3`, and
+`anthropic/claude-opus-5`, `ollama/llama3.3`, and
 `openrouter/moonshotai/kimi-k3`. Hosted routes read their provider-specific key;
 Ollama and LM Studio are keyless.
 

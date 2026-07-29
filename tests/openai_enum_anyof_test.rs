@@ -65,7 +65,7 @@ mod openai_enum_anyof_tests {
 
         let client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
-            .model(OpenAIModel::Gpt56)
+            .model(OpenAIModel::Gpt56Sol)
             .temperature(0.0);
 
         let result = client

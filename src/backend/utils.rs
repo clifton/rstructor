@@ -1185,13 +1185,13 @@ fn extract_model_from_error(error_text: &str) -> Option<String> {
 fn suggest_model(error_text: &str) -> Option<String> {
     // Common model name patterns and their suggestions
     if error_text.contains("gpt") {
-        Some("gpt-5.6".to_string())
+        Some("gpt-5.6-sol".to_string())
     } else if error_text.contains("claude") || error_text.contains("sonnet") {
-        Some("claude-sonnet-5".to_string())
+        Some("claude-opus-5".to_string())
     } else if error_text.contains("grok") {
         Some("grok-4.5".to_string())
     } else if error_text.contains("gemini") {
-        Some("gemini-3.5-flash".to_string())
+        Some("gemini-3.6-flash".to_string())
     } else {
         None
     }
@@ -2974,7 +2974,7 @@ mod tests {
             ApiErrorKind::InvalidModel { model, suggestion } => {
                 assert_eq!(model, "override-model");
                 // "gpt" appears in the (lowercased) error text -> gpt suggestion.
-                assert_eq!(suggestion, Some("gpt-5.6".to_string()));
+                assert_eq!(suggestion, Some("gpt-5.6-sol".to_string()));
             }
             other => panic!("expected InvalidModel, got {:?}", other),
         }
@@ -2991,7 +2991,7 @@ mod tests {
         match kind {
             ApiErrorKind::InvalidModel { model, suggestion } => {
                 assert_eq!(model, "gemini-2.0-flash");
-                assert_eq!(suggestion, Some("gemini-3.5-flash".to_string()));
+                assert_eq!(suggestion, Some("gemini-3.6-flash".to_string()));
             }
             other => panic!("expected InvalidModel, got {:?}", other),
         }
@@ -3039,20 +3039,23 @@ mod tests {
     fn suggest_model_matches_provider_keywords() {
         assert_eq!(
             suggest_model("sonnet is down"),
-            Some("claude-sonnet-5".to_string())
+            Some("claude-opus-5".to_string())
         );
         assert_eq!(
             suggest_model("claude unavailable"),
-            Some("claude-sonnet-5".to_string())
+            Some("claude-opus-5".to_string())
         );
-        assert_eq!(suggest_model("gpt is gone"), Some("gpt-5.6".to_string()));
+        assert_eq!(
+            suggest_model("gpt is gone"),
+            Some("gpt-5.6-sol".to_string())
+        );
         assert_eq!(
             suggest_model("grok unavailable"),
             Some("grok-4.5".to_string())
         );
         assert_eq!(
             suggest_model("gemini missing"),
-            Some("gemini-3.5-flash".to_string())
+            Some("gemini-3.6-flash".to_string())
         );
         assert_eq!(suggest_model("totally unknown provider"), None);
     }

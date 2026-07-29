@@ -76,7 +76,7 @@ mod llm_integration_tests {
 
         let client = OpenAIClient::new(api_key)
             .expect("Failed to create OpenAI client")
-            .model(OpenAIModel::Gpt56)
+            .model(OpenAIModel::Gpt56Sol)
             .temperature(0.0);
 
         let prompt = "Provide information about the movie Inception";
@@ -104,7 +104,7 @@ mod llm_integration_tests {
 
         let client = AnthropicClient::new(api_key)
             .expect("Failed to create Anthropic client")
-            .model(AnthropicModel::ClaudeSonnet5);
+            .model(AnthropicModel::ClaudeOpus5);
 
         let prompt = "Provide information about the movie Inception";
         let movie_result = client.materialize::<Movie>(prompt).await;
@@ -155,7 +155,7 @@ mod llm_integration_tests {
         // Read from GEMINI_API_KEY env var
         let client = GeminiClient::from_env()
             .expect("GEMINI_API_KEY must be set for this test")
-            .model(GeminiModel::Gemini31ProPreview)
+            .model(GeminiModel::Gemini36Flash)
             .temperature(0.0);
 
         let prompt = "Provide information about the movie Inception";

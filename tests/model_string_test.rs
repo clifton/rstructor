@@ -46,6 +46,9 @@ mod tests {
     #[test]
     fn test_anthropic_model_from_string() {
         // Test known model
+        let model = AnthropicModel::from_string("claude-opus-5");
+        assert_eq!(model, AnthropicModel::ClaudeOpus5);
+
         let model = AnthropicModel::from_string("claude-sonnet-5");
         assert_eq!(model, AnthropicModel::ClaudeSonnet5);
 
@@ -110,6 +113,12 @@ mod tests {
     #[test]
     fn test_gemini_model_from_string() {
         // Test known model
+        let model = GeminiModel::from_string("gemini-3.6-flash");
+        assert_eq!(model, GeminiModel::Gemini36Flash);
+
+        let model = GeminiModel::from_string("gemini-3.5-flash-lite");
+        assert_eq!(model, GeminiModel::Gemini35FlashLite);
+
         let model = GeminiModel::from_string("gemini-3.1-pro-preview");
         assert_eq!(model, GeminiModel::Gemini31ProPreview);
 

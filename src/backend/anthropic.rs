@@ -43,11 +43,13 @@ define_model_enum! {
     /// let model = AnthropicModel::from_string("claude-custom");
     /// ```
     pub enum AnthropicModel {
-        /// Claude Fable 5 (latest highest-capability generally available model)
-        ClaudeFable5 => "claude-fable-5",
+        /// Claude Opus 5 (latest recommended model for agentic coding and enterprise work)
+        ClaudeOpus5 => "claude-opus-5",
         /// Claude Sonnet 5 (latest balanced model)
         ClaudeSonnet5 => "claude-sonnet-5",
-        /// Claude Opus 4.8 (recommended for complex agentic and enterprise work)
+        /// Claude Fable 5 (highest-capability generally available model)
+        ClaudeFable5 => "claude-fable-5",
+        /// Claude Opus 4.8 (previous recommended model for complex work)
         ClaudeOpus48 => "claude-opus-4-8",
         /// Claude Opus 4.7 (previous most capable model)
         ClaudeOpus47 => "claude-opus-4-7",
@@ -127,7 +129,11 @@ struct CompletionRequest {
 fn effective_temperature(model: &str, configured: f32, thinking_enabled: bool) -> f32 {
     let requires_default_sampling = matches!(
         model,
-        "claude-fable-5" | "claude-sonnet-5" | "claude-opus-4-8" | "claude-opus-4-7"
+        "claude-opus-5"
+            | "claude-sonnet-5"
+            | "claude-fable-5"
+            | "claude-opus-4-8"
+            | "claude-opus-4-7"
     );
     if thinking_enabled || requires_default_sampling {
         1.0
@@ -202,7 +208,7 @@ impl AnthropicClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::ClaudeSonnet5))]
+    #[instrument(name = "anthropic_client_new", skip(api_key), fields(model = ?AnthropicModel::ClaudeOpus5))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -216,7 +222,7 @@ impl AnthropicClient {
 
         let config = AnthropicConfig {
             api_key,
-            model: AnthropicModel::ClaudeSonnet5, // Default to Claude Sonnet 5 (latest balanced model)
+            model: AnthropicModel::ClaudeOpus5, // Default to Claude Opus 5 (latest recommended model)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
@@ -247,7 +253,7 @@ impl AnthropicClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "anthropic_client_from_env", fields(model = ?AnthropicModel::ClaudeSonnet5))]
+    #[instrument(name = "anthropic_client_from_env", fields(model = ?AnthropicModel::ClaudeOpus5))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("ANTHROPIC_API_KEY").map_err(|_| {
             RStructorError::api_error("Anthropic", ApiErrorKind::AuthenticationFailed)
@@ -258,7 +264,7 @@ impl AnthropicClient {
 
         let config = AnthropicConfig {
             api_key,
-            model: AnthropicModel::ClaudeSonnet5, // Default to Claude Sonnet 5 (latest balanced model)
+            model: AnthropicModel::ClaudeOpus5, // Default to Claude Opus 5 (latest recommended model)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
@@ -1117,8 +1123,9 @@ mod tests {
     #[test]
     fn latest_models_use_default_sampling_temperature() {
         for model in [
-            "claude-fable-5",
+            "claude-opus-5",
             "claude-sonnet-5",
+            "claude-fable-5",
             "claude-opus-4-8",
             "claude-opus-4-7",
         ] {
@@ -1149,9 +1156,9 @@ mod tests {
     }
 
     #[test]
-    fn default_config_uses_latest_balanced_model() {
+    fn default_config_uses_latest_recommended_model() {
         let client = super::AnthropicClient::new("test-key").unwrap();
-        assert_eq!(client.config.model, super::AnthropicModel::ClaudeSonnet5);
+        assert_eq!(client.config.model, super::AnthropicModel::ClaudeOpus5);
     }
 
     #[test]
