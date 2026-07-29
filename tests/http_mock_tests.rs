@@ -28,6 +28,36 @@ impl OpenAiEnvGuard {
     }
 }
 
+struct EnvVarGuard {
+    key: &'static str,
+    saved: Option<std::ffi::OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let saved = std::env::var_os(key);
+        // SAFETY: each compatible-provider key is mutated by only one test in
+        // this integration-test binary and restored by this guard.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, saved }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        // SAFETY: restores the key after the only test in this binary that
+        // mutates it.
+        unsafe {
+            match self.saved.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+}
+
 impl Drop for OpenAiEnvGuard {
     fn drop(&mut self) {
         // SAFETY: restores the key after the only test in this binary that
@@ -165,6 +195,98 @@ async fn routed_client_sends_the_full_custom_model_string() {
         .unwrap();
 
     assert_eq!(movie.title, "Provider Routing");
+    request.assert_async().await;
+}
+
+#[tokio::test]
+async fn ollama_client_sends_to_the_compatible_path_without_authorization() {
+    let mut server = mockito::Server::new_async().await;
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_header("authorization", mockito::Matcher::Missing)
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "model": "llama3.3",
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(chat_completion(
+            r#"{"title":"Local Inference","year":2026}"#,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let movie: Movie = OpenAIClient::ollama()
+        .unwrap()
+        .base_url(server.url())
+        .model("llama3.3")
+        .no_retries()
+        .materialize("Describe local inference")
+        .await
+        .unwrap();
+
+    assert_eq!(movie.title, "Local Inference");
+    request.assert_async().await;
+}
+
+#[tokio::test]
+async fn lm_studio_client_sends_to_the_compatible_path_without_authorization() {
+    let mut server = mockito::Server::new_async().await;
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_header("authorization", mockito::Matcher::Missing)
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "model": "lmstudio-community/local-model",
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(chat_completion(r#"{"title":"Local Studio","year":2026}"#))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let movie: Movie = OpenAIClient::lm_studio()
+        .unwrap()
+        .base_url(server.url())
+        .model("lmstudio-community/local-model")
+        .no_retries()
+        .materialize("Describe local inference")
+        .await
+        .unwrap();
+
+    assert_eq!(movie.title, "Local Studio");
+    request.assert_async().await;
+}
+
+#[tokio::test]
+async fn aggregator_client_sends_its_environment_key_as_bearer_auth() {
+    let _env = EnvVarGuard::set("OPENROUTER_API_KEY", "openrouter-test-key");
+    let mut server = mockito::Server::new_async().await;
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_header("authorization", "Bearer openrouter-test-key")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "model": "moonshotai/kimi-k3",
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(chat_completion(
+            r#"{"title":"Aggregated Inference","year":2026}"#,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let movie: Movie = OpenAIClient::openrouter()
+        .unwrap()
+        .base_url(server.url())
+        .model("moonshotai/kimi-k3")
+        .no_retries()
+        .materialize("Describe aggregated inference")
+        .await
+        .unwrap();
+
+    assert_eq!(movie.title, "Aggregated Inference");
     request.assert_async().await;
 }
 
@@ -1326,6 +1448,35 @@ async fn gpt56_tool_request_disables_reasoning() {
     let body = body.as_ref().expect("request body should be captured");
     assert_eq!(body["reasoning_effort"], json!("none"));
     assert_eq!(body["temperature"], json!(1.0));
+}
+
+#[cfg(feature = "tools")]
+#[tokio::test]
+async fn ollama_tool_request_sends_no_authorization_header() {
+    use rstructor::{RequestExt, Toolbox};
+
+    let mut server = mockito::Server::new_async().await;
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_header("authorization", mockito::Matcher::Missing)
+        .with_status(200)
+        .with_body(chat_completion("local tools are ready"))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let toolbox = Toolbox::new();
+    let answer = OpenAIClient::ollama()
+        .unwrap()
+        .base_url(server.url())
+        .model("llama3.3")
+        .with_tools(&toolbox)
+        .run("say hello")
+        .await
+        .unwrap();
+
+    assert_eq!(answer, "local tools are ready");
+    request.assert_async().await;
 }
 
 /// Full OpenAI tool round-trip: the first response asks for a tool call, the loop

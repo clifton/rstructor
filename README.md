@@ -132,11 +132,45 @@ let client = GrokClient::from_env()?.model("grok-4.5");
 // Gemini (reads GEMINI_API_KEY)
 let client = GeminiClient::from_env()?.model("gemini-3.5-flash");
 
-// Custom endpoint (local LLMs, proxies)
-let client = OpenAIClient::new("key")?
-    .base_url("http://localhost:1234/v1")
-    .model("llama-3.1-70b");
+// Local Ollama (no API key)
+let client = OpenAIClient::ollama()?.model("llama3.3");
 ```
+
+### Local models & aggregators
+
+Ollama and LM Studio use the OpenAI-compatible client without an API key or
+`Authorization` header:
+
+```rust
+use rstructor::{LLMClient, OpenAIClient};
+
+let local = rstructor::client("ollama/llama3.3")?;
+let movie: Movie = local.materialize("Describe Inception").await?;
+
+// The named constructor is equivalent and supports all normal builders.
+let local = OpenAIClient::lm_studio()?.model("your-loaded-model");
+```
+
+Hosted aggregators read their own keys instead of `OPENAI_API_KEY`. Model IDs
+may contain `/`; only the first slash separates the route prefix from the model:
+
+```rust
+use rstructor::LLMClient;
+
+// Reads OPENROUTER_API_KEY.
+let router = rstructor::client("openrouter/moonshotai/kimi-k3")?;
+let movie: Movie = router.materialize("Describe Inception").await?;
+
+// GROQ_API_KEY and MOONSHOT_API_KEY work the same way.
+let groq = rstructor::client("groq/openai/gpt-oss-120b")?;
+let moonshot = rstructor::client("moonshot/kimi-k3")?;
+```
+
+The named constructors are `OpenAIClient::ollama()`, `lm_studio()`,
+`openrouter()`, `groq()`, and `moonshot()`. They all require the `openai` Cargo
+feature. Strict `response_format` / JSON Schema support varies between compatible
+servers; rstructor keeps the same schema request and validation/re-ask retry
+loop, without endpoint-specific schema-dialect rewriting.
 
 ### Selecting a provider at runtime
 

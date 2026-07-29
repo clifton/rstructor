@@ -4,6 +4,10 @@ use std::time::Duration;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
+use crate::backend::routing::{
+    GROQ_BASE_URL, KeyPolicy, LM_STUDIO_BASE_URL, MOONSHOT_BASE_URL, OLLAMA_BASE_URL,
+    OPENROUTER_BASE_URL,
+};
 use crate::backend::{
     ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeAttemptError,
     MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
@@ -136,6 +140,44 @@ pub struct OpenAIClient {
 // OpenAI-compatible chat completion request/response types are in openai_compatible.rs.
 
 impl OpenAIClient {
+    fn with_api_key(api_key: String) -> Self {
+        let config = OpenAIConfig {
+            api_key,
+            model: Model::Gpt56, // Default to GPT-5.6 (latest flagship alias)
+            temperature: 0.0,
+            max_tokens: None,
+            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
+            max_retries: Some(3),                   // Default: 3 retries with error feedback
+            base_url: None,                         // Default: use official OpenAI API
+            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.6 defaults to medium reasoning
+        };
+
+        Self {
+            config,
+            client: build_http_client(DEFAULT_REQUEST_TIMEOUT),
+        }
+    }
+
+    fn api_key_from_env(provider: &'static str, variable: &'static str) -> Result<String> {
+        std::env::var(variable)
+            .ok()
+            .filter(|api_key| !api_key.is_empty())
+            .ok_or_else(|| RStructorError::api_error(provider, ApiErrorKind::AuthenticationFailed))
+    }
+
+    /// Create an OpenAI-compatible client with an endpoint-specific key policy.
+    pub(crate) fn openai_compatible(base_url: &'static str, key_policy: KeyPolicy) -> Result<Self> {
+        let api_key = match key_policy {
+            KeyPolicy::ProviderDefault => Self::api_key_from_env("OpenAI", "OPENAI_API_KEY")?,
+            KeyPolicy::Keyless => String::new(),
+            KeyPolicy::Environment { provider, variable } => {
+                Self::api_key_from_env(provider, variable)?
+            }
+        };
+
+        Ok(Self::with_api_key(api_key).base_url(base_url))
+    }
+
     /// Create a new OpenAI client with the provided API key.
     ///
     /// # Arguments
@@ -163,22 +205,8 @@ impl OpenAIClient {
         info!("Creating new OpenAI client");
         trace!("API key length: {}", api_key.len());
 
-        let config = OpenAIConfig {
-            api_key,
-            model: Model::Gpt56, // Default to GPT-5.6 (latest flagship alias)
-            temperature: 0.0,
-            max_tokens: None,
-            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
-            max_retries: Some(3),                   // Default: 3 retries with error feedback
-            base_url: None,                         // Default: use official OpenAI API
-            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.6 defaults to medium reasoning
-        };
-
         debug!("OpenAI client created with default configuration");
-        Ok(Self {
-            config,
-            client: build_http_client(DEFAULT_REQUEST_TIMEOUT),
-        })
+        Ok(Self::with_api_key(api_key))
     }
 
     /// Create a new OpenAI client by reading the API key from the `OPENAI_API_KEY` environment variable.
@@ -204,22 +232,123 @@ impl OpenAIClient {
         info!("Creating new OpenAI client from environment variable");
         trace!("API key length: {}", api_key.len());
 
-        let config = OpenAIConfig {
-            api_key,
-            model: Model::Gpt56, // Default to GPT-5.6 (latest flagship alias)
-            temperature: 0.0,
-            max_tokens: None,
-            timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
-            max_retries: Some(3),                   // Default: 3 retries with error feedback
-            base_url: None,                         // Default: use official OpenAI API
-            thinking_level: Some(ThinkingLevel::Medium), // GPT-5.6 defaults to medium reasoning
-        };
-
         debug!("OpenAI client created with default configuration");
-        Ok(Self {
-            config,
-            client: build_http_client(DEFAULT_REQUEST_TIMEOUT),
-        })
+        Ok(Self::with_api_key(api_key))
+    }
+
+    /// Connect to a local [Ollama](https://docs.ollama.com/api/openai-compatibility)
+    /// server at `http://localhost:11434/v1`.
+    ///
+    /// Local Ollama requests are keyless and send no `Authorization` header.
+    /// Select a pulled model with [`model`](Self::model).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rstructor::OpenAIClient;
+    ///
+    /// let client = OpenAIClient::ollama()?.model("llama3.3");
+    /// # let _ = client;
+    /// # Ok::<(), rstructor::RStructorError>(())
+    /// ```
+    pub fn ollama() -> Result<Self> {
+        Self::openai_compatible(OLLAMA_BASE_URL, KeyPolicy::Keyless)
+    }
+
+    /// Connect to a local [LM Studio](https://lmstudio.ai/docs/developer/openai-compat)
+    /// server at `http://localhost:1234/v1`.
+    ///
+    /// LM Studio does not require authentication by default, so this constructor
+    /// sends no `Authorization` header. Select a loaded model with
+    /// [`model`](Self::model).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rstructor::OpenAIClient;
+    ///
+    /// let client = OpenAIClient::lm_studio()?.model("your-loaded-model");
+    /// # let _ = client;
+    /// # Ok::<(), rstructor::RStructorError>(())
+    /// ```
+    pub fn lm_studio() -> Result<Self> {
+        Self::openai_compatible(LM_STUDIO_BASE_URL, KeyPolicy::Keyless)
+    }
+
+    /// Connect to [OpenRouter](https://openrouter.ai/docs/quickstart).
+    ///
+    /// Reads `OPENROUTER_API_KEY` and uses `https://openrouter.ai/api/v1`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use rstructor::OpenAIClient;
+    ///
+    /// # fn example() -> rstructor::Result<()> {
+    /// let client = OpenAIClient::openrouter()?.model("moonshotai/kimi-k3");
+    /// # let _ = client;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn openrouter() -> Result<Self> {
+        Self::openai_compatible(
+            OPENROUTER_BASE_URL,
+            KeyPolicy::Environment {
+                provider: "OpenRouter",
+                variable: "OPENROUTER_API_KEY",
+            },
+        )
+    }
+
+    /// Connect to [Groq](https://console.groq.com/docs/openai).
+    ///
+    /// Reads `GROQ_API_KEY` and uses `https://api.groq.com/openai/v1`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use rstructor::OpenAIClient;
+    ///
+    /// # fn example() -> rstructor::Result<()> {
+    /// let client = OpenAIClient::groq()?.model("openai/gpt-oss-120b");
+    /// # let _ = client;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn groq() -> Result<Self> {
+        Self::openai_compatible(
+            GROQ_BASE_URL,
+            KeyPolicy::Environment {
+                provider: "Groq",
+                variable: "GROQ_API_KEY",
+            },
+        )
+    }
+
+    /// Connect to the international
+    /// [Moonshot/Kimi API](https://platform.kimi.ai/docs/api/overview).
+    ///
+    /// Reads `MOONSHOT_API_KEY` and uses `https://api.moonshot.ai/v1`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use rstructor::OpenAIClient;
+    ///
+    /// # fn example() -> rstructor::Result<()> {
+    /// let client = OpenAIClient::moonshot()?.model("kimi-k3");
+    /// # let _ = client;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn moonshot() -> Result<Self> {
+        Self::openai_compatible(
+            MOONSHOT_BASE_URL,
+            KeyPolicy::Environment {
+                provider: "Moonshot",
+                variable: "MOONSHOT_API_KEY",
+            },
+        )
     }
 
     // Builder methods are generated by the macro below
@@ -382,10 +511,7 @@ impl OpenAIClient {
             .unwrap_or("https://api.openai.com/v1");
         let url = format!("{}/chat/completions", base_url);
         debug!(url = %url, "Sending request to OpenAI API");
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
+        let response = optional_bearer_auth(self.client.post(&url), &self.config.api_key)
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
@@ -499,10 +625,7 @@ impl OpenAIClient {
             .unwrap_or("https://api.openai.com/v1");
         let url = format!("{}/chat/completions", base_url);
         debug!(url = %url, "Sending request to OpenAI API");
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
+        let response = optional_bearer_auth(self.client.post(&url), &self.config.api_key)
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
@@ -612,9 +735,7 @@ impl OpenAIClient {
             .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
         async move {
             let url = format!("{}/chat/completions", base_url);
-            let resp = client
-                .post(&url)
-                .header("Authorization", format!("Bearer {api_key}"))
+            let resp = optional_bearer_auth(client.post(&url), &api_key)
                 .header("Content-Type", "application/json")
                 .json(&body)
                 .send()
@@ -953,10 +1074,7 @@ impl LLMClient for OpenAIClient {
 
         debug!(url = %url, "Fetching available models from OpenAI");
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
+        let response = optional_bearer_auth(self.client.get(&url), &self.config.api_key)
             .header("Content-Type", "application/json")
             .send()
             .await
@@ -1000,6 +1118,17 @@ impl LLMClient for OpenAIClient {
     }
 }
 
+fn optional_bearer_auth(
+    request: reqwest::RequestBuilder,
+    api_key: &str,
+) -> reqwest::RequestBuilder {
+    if api_key.is_empty() {
+        request
+    } else {
+        request.bearer_auth(api_key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1023,6 +1152,20 @@ mod tests {
             .unwrap()
             .timeout(Duration::from_secs(10));
         assert_eq!(client.config.timeout, Some(Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn local_constructors_are_keyless_and_use_official_base_urls() {
+        let ollama = OpenAIClient::ollama().unwrap();
+        assert_eq!(ollama.config.base_url.as_deref(), Some(OLLAMA_BASE_URL));
+        assert!(ollama.config.api_key.is_empty());
+
+        let lm_studio = OpenAIClient::lm_studio().unwrap();
+        assert_eq!(
+            lm_studio.config.base_url.as_deref(),
+            Some(LM_STUDIO_BASE_URL)
+        );
+        assert!(lm_studio.config.api_key.is_empty());
     }
 
     #[cfg(feature = "tools")]

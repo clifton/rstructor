@@ -107,6 +107,10 @@ required-features = ["mock"]
 name = "retry_attempt_ledger"
 required-features = ["openai"]
 
+[[example]]
+name = "ollama_local_example"
+required-features = ["openai"]
+
 [dev-dependencies]
 # Used only by examples and tests (date/time fields, custom types); not part of
 # the public dependency closure.
