@@ -8,8 +8,8 @@
 #![cfg(feature = "openai")]
 
 use rstructor::{
-    AnyClient, ApiErrorKind, AttemptKind, AttemptOutcome, Instructor, LLMClient, OpenAIClient,
-    RStructorError,
+    AnyClient, ApiErrorKind, AttemptKind, AttemptOutcome, Instructor, LLMClient, MediaFile,
+    OpenAIClient, RStructorError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -88,6 +88,32 @@ struct Portfolio {
 struct Position {
     symbol: String,
     quantity: i64,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum RevenueTrend {
+    Rising,
+    Falling,
+    Flat,
+    Mixed,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+struct MonthlyRevenue {
+    month: String,
+    revenue_millions: f64,
+}
+
+#[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
+struct RevenueChart {
+    title: String,
+    monthly_revenue: Vec<MonthlyRevenue>,
+    peak_month: String,
+    peak_revenue_millions: f64,
+    total_revenue_millions: f64,
+    overall_trend: RevenueTrend,
+    notable_change: String,
 }
 
 fn validate_movie(m: &Movie) -> rstructor::Result<()> {
@@ -317,6 +343,56 @@ async fn aggregator_client_sends_its_environment_key_as_bearer_auth() {
         .unwrap();
 
     assert_eq!(movie.title, "Aggregated Inference");
+    request.assert_async().await;
+}
+
+#[tokio::test]
+async fn moonshot_kimi_k3_materializes_a_chart_from_an_inline_png() {
+    let _env = EnvVarGuard::set("MOONSHOT_API_KEY", "moonshot-test-key");
+    let mut server = mockito::Server::new_async().await;
+    let extracted_chart = include_str!("fixtures/structured/kimi_k3_revenue_chart.json");
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_header("authorization", "Bearer moonshot-test-key")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "model": "kimi-k3",
+            "temperature": 1.0,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "Extract the revenue chart." },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,iVBORw0KGgo=",
+                            "detail": "auto",
+                        },
+                    },
+                ],
+            }],
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(chat_completion(extracted_chart))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let media = [MediaFile::from_bytes(b"\x89PNG\r\n\x1a\n", "image/png")];
+    let chart: RevenueChart = OpenAIClient::moonshot()
+        .unwrap()
+        .base_url(server.url())
+        .model("kimi-k3")
+        .temperature(1.0)
+        .no_retries()
+        .materialize_with_media("Extract the revenue chart.", &media)
+        .await
+        .unwrap();
+
+    assert_eq!(chart.monthly_revenue.len(), 6);
+    assert_eq!(chart.peak_month, "Jun");
+    assert_eq!(chart.total_revenue_millions, 23.0);
+    assert_eq!(chart.overall_trend, RevenueTrend::Rising);
     request.assert_async().await;
 }
 

@@ -9,6 +9,7 @@ const GALLERY_EXAMPLES: &[(&str, &[&str])] = &[
     ("anthropic_multimodal_example", &["anthropic", "derive"]),
     ("gemini_multimodal_example", &["derive", "gemini"]),
     ("grok_multimodal_example", &["derive", "grok"]),
+    ("kimi_k3_multimodal_example", &["derive", "openai"]),
     ("axum_handler_example", &["derive", "mock"]),
     ("mock_testing_example", &["derive", "mock"]),
     ("ollama_local_example", &["derive", "openai"]),

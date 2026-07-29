@@ -142,6 +142,7 @@ complete copy-paste recipes.
 | Extract typed data from free text | [`structured_movie_info.rs`](examples/structured_movie_info.rs) | Turns one sentence into a validated Rust struct with field descriptions and business rules. |
 | Classify into an enum | [`news_article_categorizer.rs`](examples/news_article_categorizer.rs) | Selects a typed category while extracting sentiment, entities, and keywords. |
 | Extract from an image or PDF | [`openai_multimodal_example.rs`](examples/openai_multimodal_example.rs) ([Anthropic](examples/anthropic_multimodal_example.rs), [Gemini](examples/gemini_multimodal_example.rs), [Grok](examples/grok_multimodal_example.rs)) | Sends inline media with a prompt and materializes the answer into a struct. |
+| Read a chart with Kimi K3 | [`kimi_k3_multimodal_example.rs`](examples/kimi_k3_multimodal_example.rs) | Downloads a labeled revenue chart, sends it through Moonshot's OpenAI-compatible endpoint, and returns typed values plus calculated insights. |
 | Put extraction behind an axum handler | [`axum_handler_example.rs`](examples/axum_handler_example.rs) | Injects any `LLMClient` into typed JSON request and response handling, tested in-process. |
 | Test without network | [`mock_testing_example.rs`](examples/mock_testing_example.rs) | Scripts realistic responses through the real deserialization, validation, and re-ask path. |
 | Use a local model with Ollama | [`ollama_local_example.rs`](examples/ollama_local_example.rs) | Connects to the keyless local endpoint through the same structured-output API. |
@@ -193,16 +194,33 @@ Hosted aggregators read their own keys instead of `OPENAI_API_KEY`. Model IDs
 may contain `/`; only the first slash separates the route prefix from the model:
 
 ```rust
-use rstructor::LLMClient;
+use rstructor::{LLMClient, MediaFile, OpenAIClient};
+
+// Reads MOONSHOT_API_KEY. Kimi K3 fixes temperature at 1.0.
+let image = MediaFile::from_bytes(chart_bytes, "image/png");
+let kimi = OpenAIClient::moonshot()?
+    .model("kimi-k3")
+    .temperature(1.0);
+let report: RevenueChart = kimi
+    .materialize_with_media("Read every labeled bar and calculate the total.", &[image])
+    .await?;
 
 // Reads OPENROUTER_API_KEY.
 let router = rstructor::client("openrouter/moonshotai/kimi-k3")?;
 let movie: Movie = router.materialize("Describe Inception").await?;
 
-// GROQ_API_KEY and MOONSHOT_API_KEY work the same way.
+// GROQ_API_KEY works the same way.
 let groq = rstructor::client("groq/openai/gpt-oss-120b")?;
-let moonshot = rstructor::client("moonshot/kimi-k3")?;
 ```
+
+See the runnable
+[`kimi_k3_multimodal_example.rs`](examples/kimi_k3_multimodal_example.rs) for
+the complete chart schema and output. Moonshot documents
+[`kimi-k3`](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart) as a native
+vision model with strict JSON Schema output. Public image URLs are not supported,
+so attach base64 bytes as above (or use a Moonshot `ms://` file ID). Supported
+image types are JPEG, PNG, GIF, WebP, BMP, HEIC, and HEIF; SVG is rejected, and
+Moonshot recommends no more than 4096×2160 resolution.
 
 The named constructors are `OpenAIClient::ollama()`, `lm_studio()`,
 `openrouter()`, `groq()`, and `moonshot()`. They all require the `openai` Cargo
