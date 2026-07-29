@@ -13,6 +13,8 @@ mod openai_compatible;
 #[cfg(feature = "_client")]
 mod request;
 #[cfg(feature = "_client")]
+mod routing;
+#[cfg(feature = "_client")]
 mod schema_compatibility;
 #[cfg(feature = "streaming")]
 pub mod streaming;
@@ -43,6 +45,8 @@ pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
 pub use mock::{MockClient, MockRequestView, MockResponse, RecordedRequest, RequestKind};
 #[cfg(feature = "_client")]
 pub use request::{Request, RequestExt};
+#[cfg(feature = "_client")]
+pub use routing::{client, client_from_env, parse_client_spec};
 #[cfg(feature = "streaming")]
 pub use streaming::{ItemStream, ObjectStream, StreamedObject, TextStream};
 #[cfg(feature = "tools")]

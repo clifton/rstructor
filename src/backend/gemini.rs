@@ -297,11 +297,13 @@ impl GeminiClient {
         Ok(Self { config, client })
     }
 
-    /// Create a new Gemini client by reading the API key from the `GEMINI_API_KEY` environment variable.
+    /// Create a new Gemini client by reading an API key from the environment.
+    ///
+    /// `GEMINI_API_KEY` takes precedence over the `GOOGLE_API_KEY` alias.
     ///
     /// # Errors
     ///
-    /// Returns an error if `GEMINI_API_KEY` is not set.
+    /// Returns an error if neither `GEMINI_API_KEY` nor `GOOGLE_API_KEY` is set.
     ///
     /// # Examples
     ///
@@ -315,6 +317,7 @@ impl GeminiClient {
     #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini35Flash))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY")
+            .or_else(|_| std::env::var("GOOGLE_API_KEY"))
             .map_err(|_| RStructorError::api_error("Gemini", ApiErrorKind::AuthenticationFailed))?;
 
         let config = GeminiConfig {

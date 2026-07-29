@@ -78,7 +78,9 @@ pub use backend::LLMClient;
 pub use backend::ModelInfo;
 pub use backend::ThinkingLevel;
 #[cfg(feature = "_client")]
-pub use backend::{AnyClient, Provider, Request, RequestExt};
+pub use backend::{
+    AnyClient, Provider, Request, RequestExt, client, client_from_env, parse_client_spec,
+};
 pub use backend::{
     AttemptKind, AttemptOutcome, AttemptRecord, ChatMessage, ChatRole, GenerateResult,
     MaterializeFailure, MaterializeReport, MaterializeResult, MediaFile, RetryDisposition,

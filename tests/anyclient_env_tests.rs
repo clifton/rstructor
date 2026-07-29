@@ -4,35 +4,36 @@
 //! Environment variables are process-global, and tests within a single binary
 //! share that process. If these scenarios were split across multiple `#[test]`
 //! functions, the default parallel test runner would interleave their mutations
-//! of the same four keys and produce flaky, order-dependent failures. To keep the
+//! of the same five keys and produce flaky, order-dependent failures. To keep the
 //! behavior deterministic, **all** environment manipulation lives in this single
 //! test. The original values of every key are saved on entry and restored on exit
 //! (even on panic, via a drop guard).
 
 use rstructor::{AnyClient, ApiErrorKind, LLMClient, Provider, RStructorError};
 
-/// The four provider API-key environment variables, in detection-precedence order.
-const ENV_KEYS: [&str; 4] = [
+/// Provider API-key environment variables, in detection-precedence order.
+const ENV_KEYS: [&str; 5] = [
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
-    "XAI_API_KEY",
     "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "XAI_API_KEY",
 ];
 
-/// Snapshot of the four keys captured at test start; restores them when dropped.
+/// Snapshot of the five keys captured at test start; restores them when dropped.
 ///
 /// Using a drop guard guarantees the original environment is reinstated even if an
 /// assertion panics partway through, so a failure here cannot poison other test
 /// binaries or the developer's shell session.
 struct EnvGuard {
-    saved: Vec<(&'static str, Option<String>)>,
+    saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
 }
 
 impl EnvGuard {
     fn capture() -> Self {
         let saved = ENV_KEYS
             .iter()
-            .map(|&key| (key, std::env::var(key).ok()))
+            .map(|&key| (key, std::env::var_os(key)))
             .collect();
         EnvGuard { saved }
     }
@@ -69,62 +70,85 @@ fn set_only(present: &[&str]) {
     }
 }
 
+fn assert_detected(provider: Provider, context: &str) {
+    assert_eq!(
+        AnyClient::from_env().unwrap().provider(),
+        provider,
+        "AnyClient::from_env: {context}"
+    );
+    assert_eq!(
+        rstructor::client_from_env().unwrap().provider(),
+        provider,
+        "rstructor::client_from_env: {context}"
+    );
+}
+
 #[test]
 fn anyclient_from_env_detection_precedence_and_per_provider() {
     let _guard = EnvGuard::capture();
 
-    // --- from_env precedence: OpenAI > Anthropic > Grok > Gemini ---
+    // --- from_env precedence: OpenAI > Anthropic > Gemini/Google > Grok ---
 
     // OpenAI + Anthropic both set -> OpenAI wins (highest precedence).
     set_only(&["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]);
-    assert_eq!(
-        AnyClient::from_env().unwrap().provider(),
+    assert_detected(
         Provider::OpenAI,
-        "OpenAI must outrank Anthropic when both keys are present"
+        "OpenAI must outrank Anthropic when both keys are present",
     );
 
-    // All four set -> still OpenAI.
+    // All five set -> still OpenAI.
     set_only(&ENV_KEYS);
-    assert_eq!(
-        AnyClient::from_env().unwrap().provider(),
+    assert_detected(
         Provider::OpenAI,
-        "OpenAI must win when every key is present"
+        "OpenAI must win when every key is present",
     );
 
     // Remove OpenAI -> Anthropic wins over Grok and Gemini.
     set_only(&["ANTHROPIC_API_KEY", "XAI_API_KEY", "GEMINI_API_KEY"]);
-    assert_eq!(
-        AnyClient::from_env().unwrap().provider(),
+    assert_detected(
         Provider::Anthropic,
-        "Anthropic must outrank Grok and Gemini once OpenAI is absent"
+        "Anthropic must outrank Grok and Gemini once OpenAI is absent",
     );
 
-    // Only Grok + Gemini -> Grok wins.
+    // Only Grok + Gemini -> Gemini wins.
     set_only(&["XAI_API_KEY", "GEMINI_API_KEY"]);
-    assert_eq!(
-        AnyClient::from_env().unwrap().provider(),
-        Provider::Grok,
-        "Grok must outrank Gemini"
+    assert_detected(
+        Provider::Gemini,
+        "Gemini must outrank Grok when both keys are present",
+    );
+
+    // The GOOGLE_API_KEY alias has the same precedence as GEMINI_API_KEY.
+    set_only(&["XAI_API_KEY", "GOOGLE_API_KEY"]);
+    assert_detected(
+        Provider::Gemini,
+        "Google's Gemini key alias must outrank Grok",
     );
 
     // Only Grok (XAI) set -> Grok.
     set_only(&["XAI_API_KEY"]);
-    assert_eq!(AnyClient::from_env().unwrap().provider(), Provider::Grok);
+    assert_detected(Provider::Grok, "XAI_API_KEY selects Grok");
 
-    // Only Gemini set -> Gemini (lowest precedence, but the only one present).
+    // Either Gemini key works.
     set_only(&["GEMINI_API_KEY"]);
-    assert_eq!(AnyClient::from_env().unwrap().provider(), Provider::Gemini);
+    assert_detected(Provider::Gemini, "GEMINI_API_KEY selects Gemini");
+
+    set_only(&["GOOGLE_API_KEY"]);
+    assert_detected(Provider::Gemini, "GOOGLE_API_KEY selects Gemini");
 
     // Only Anthropic set -> Anthropic.
     set_only(&["ANTHROPIC_API_KEY"]);
-    assert_eq!(
-        AnyClient::from_env().unwrap().provider(),
-        Provider::Anthropic
-    );
+    assert_detected(Provider::Anthropic, "ANTHROPIC_API_KEY selects Anthropic");
 
     // Only OpenAI set -> OpenAI.
     set_only(&["OPENAI_API_KEY"]);
-    assert_eq!(AnyClient::from_env().unwrap().provider(), Provider::OpenAI);
+    assert_detected(Provider::OpenAI, "OPENAI_API_KEY selects OpenAI");
+
+    // GEMINI_API_KEY remains the preferred alias when both Gemini keys are set.
+    set_only(&["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
+    assert_detected(
+        Provider::Gemini,
+        "either Gemini key selects the same provider",
+    );
 
     // --- from_env_for: deterministic per-provider construction ---
     // With its key present each provider builds; once its key is removed it errors
@@ -165,6 +189,15 @@ fn anyclient_from_env_detection_precedence_and_per_provider() {
         }
     }
 
+    set_only(&["GOOGLE_API_KEY"]);
+    assert_eq!(
+        AnyClient::from_env_for(Provider::Gemini)
+            .unwrap()
+            .provider(),
+        Provider::Gemini,
+        "from_env_for(Gemini) must accept GOOGLE_API_KEY"
+    );
+
     // --- from_env with NO key set -> AuthenticationFailed, provider label "AnyClient" ---
 
     set_only(&[]);
@@ -190,6 +223,18 @@ fn anyclient_from_env_detection_precedence_and_per_provider() {
         }
         other => panic!("expected ApiError, got {other:?}"),
     }
+
+    let routed_err = match rstructor::client_from_env() {
+        Ok(_) => panic!("client_from_env must fail when no provider key is set"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            routed_err.api_error_kind(),
+            Some(ApiErrorKind::AuthenticationFailed)
+        ),
+        "top-level no-key client_from_env should yield AuthenticationFailed, got {routed_err:?}"
+    );
 
     // --- provider() reporting via From<ConcreteClient> ---
     // Build each concrete client (its key is present), convert with `.into()`, and

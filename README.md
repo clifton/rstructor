@@ -32,7 +32,7 @@ tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 Describe the shape you want as plain Rust types, then turn a line of free-form text into a fully-typed, validated value:
 
 ```rust
-use rstructor::{Instructor, LLMClient, OpenAIClient};
+use rstructor::{Instructor, LLMClient};
 use serde::{Deserialize, Serialize};
 
 #[derive(Instructor, Serialize, Deserialize, Debug)]
@@ -58,14 +58,10 @@ struct Ticket {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let client = OpenAIClient::from_env()?.temperature(0.0);
-
-    let ticket: Ticket = client
-        .materialize(
-            "Hey, the login page is throwing 500s for half our users since the deploy. \
-             Sarah (sarah@acme.io) is on it but we need this fixed before the demo at 3pm!",
-        )
-        .await?;
+    let text = "Hey, the login page is throwing 500s for half our users since the deploy. \
+                Sarah (sarah@acme.io) is on it but we need this fixed before the demo at 3pm!";
+    let ticket: Ticket = rstructor::client("openai/gpt-5.6-sol")?
+        .materialize(text).await?;
 
     println!("{ticket:#?}");
     // Ticket {
@@ -79,6 +75,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 Every field is *inferred*, not transcribed: the urgency is read from the tone and deadline, the email is plucked out of mid-sentence text, and the tags are synthesized — all parsed into the exact types you declared.
+
+If you want provider-specific configuration, use the explicit client form:
+
+```rust
+use rstructor::{LLMClient, OpenAIClient};
+
+let client = OpenAIClient::from_env()?.temperature(0.0);
+let ticket: Ticket = client.materialize(text).await?;
+```
 
 ## Request Builder
 
@@ -140,12 +145,19 @@ let client = OpenAIClient::new("key")?
 ```rust
 use rstructor::{AnyClient, Provider, LLMClient};
 
+// Parse a case-insensitive "provider/model" string.
+let client = rstructor::client("anthropic/claude-sonnet-5")?;
+let movie: Movie = client.materialize("Describe Inception").await?;
+
+// Or auto-detect in deterministic environment-key order:
+let client = rstructor::client_from_env()?;
+
 // Pick a provider dynamically, reading its key from the environment.
 let provider = Provider::Anthropic; // e.g. parsed from a config file
 let client = AnyClient::from_env_for(provider)?;
 let movie: Movie = client.materialize("Describe Inception").await?;
 
-// Or auto-detect from whichever API key is set:
+// The equivalent trait-level constructor is also available:
 let client = AnyClient::from_env()?;
 
 // Or wrap a pre-configured client:

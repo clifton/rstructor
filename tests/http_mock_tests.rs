@@ -14,6 +14,33 @@ use rstructor::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+struct OpenAiEnvGuard(Option<std::ffi::OsString>);
+
+impl OpenAiEnvGuard {
+    fn set_for_test() -> Self {
+        let saved = std::env::var_os("OPENAI_API_KEY");
+        // SAFETY: no other test in this integration-test binary reads or writes
+        // OPENAI_API_KEY.
+        unsafe {
+            std::env::set_var("OPENAI_API_KEY", "routed-client-test-key");
+        }
+        Self(saved)
+    }
+}
+
+impl Drop for OpenAiEnvGuard {
+    fn drop(&mut self) {
+        // SAFETY: restores the key after the only test in this binary that
+        // mutates it.
+        unsafe {
+            match self.0.take() {
+                Some(value) => std::env::set_var("OPENAI_API_KEY", value),
+                None => std::env::remove_var("OPENAI_API_KEY"),
+            }
+        }
+    }
+}
+
 #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
 #[llm(validate = "validate_movie")]
 struct Movie {
@@ -106,6 +133,39 @@ async fn materialize_parses_a_real_response() {
         }
     );
     m.assert_async().await;
+}
+
+#[tokio::test]
+async fn routed_client_sends_the_full_custom_model_string() {
+    let _env = OpenAiEnvGuard::set_for_test();
+    let mut server = mockito::Server::new_async().await;
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "model": "vendor/some-model",
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(chat_completion(
+            r#"{"title":"Provider Routing","year":2026}"#,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let routed = rstructor::client("openai/vendor/some-model").unwrap();
+    let client = match routed {
+        AnyClient::OpenAI(client) => client.base_url(server.url()).no_retries(),
+        _ => panic!("openai prefix should construct the OpenAI AnyClient variant"),
+    };
+
+    let movie: Movie = client
+        .materialize("Describe provider routing")
+        .await
+        .unwrap();
+
+    assert_eq!(movie.title, "Provider Routing");
+    request.assert_async().await;
 }
 
 #[tokio::test]
