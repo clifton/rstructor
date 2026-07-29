@@ -1,6 +1,12 @@
-use super::{Schema, SchemaType};
+use super::{__private::SchemaBuildContext, Schema, SchemaType};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+
+fn schema_from_context<T: SchemaType + ?Sized>() -> Schema {
+    let mut context = SchemaBuildContext::new();
+    let root = T::schema_in(&mut context);
+    Schema::new(context.finish(root))
+}
 
 // ============================================================================
 // Box<T> - Transparent wrapper, delegates to inner type
@@ -8,7 +14,11 @@ use std::collections::HashMap;
 
 impl<T: SchemaType> SchemaType for Box<T> {
     fn schema() -> Schema {
-        T::schema()
+        schema_from_context::<Self>()
+    }
+
+    fn schema_in(context: &mut SchemaBuildContext) -> Value {
+        T::schema_in(context)
     }
 
     fn schema_name() -> Option<String> {
@@ -37,11 +47,15 @@ impl SchemaType for Value {
 
 impl<V: SchemaType> SchemaType for HashMap<String, V> {
     fn schema() -> Schema {
-        let value_schema = V::schema().to_json();
-        Schema::new(json!({
+        schema_from_context::<Self>()
+    }
+
+    fn schema_in(context: &mut SchemaBuildContext) -> Value {
+        let value_schema = V::schema_in(context);
+        json!({
             "type": "object",
             "additionalProperties": value_schema
-        }))
+        })
     }
 
     fn schema_name() -> Option<String> {
@@ -53,11 +67,15 @@ impl<V: SchemaType> SchemaType for HashMap<String, V> {
 // Also implement for HashMap with other string-like keys that serialize to strings
 impl<V: SchemaType> SchemaType for std::collections::BTreeMap<String, V> {
     fn schema() -> Schema {
-        let value_schema = V::schema().to_json();
-        Schema::new(json!({
+        schema_from_context::<Self>()
+    }
+
+    fn schema_in(context: &mut SchemaBuildContext) -> Value {
+        let value_schema = V::schema_in(context);
+        json!({
             "type": "object",
             "additionalProperties": value_schema
-        }))
+        })
     }
 
     fn schema_name() -> Option<String> {
@@ -75,16 +93,20 @@ macro_rules! impl_tuple_schema {
     ($($idx:tt $T:ident),+) => {
         impl<$($T: SchemaType),+> SchemaType for ($($T,)+) {
             fn schema() -> Schema {
+                schema_from_context::<Self>()
+            }
+
+            fn schema_in(context: &mut SchemaBuildContext) -> Value {
                 let items = vec![
-                    $($T::schema().to_json()),+
+                    $($T::schema_in(context)),+
                 ];
                 let count = items.len();
-                Schema::new(json!({
+                json!({
                     "type": "array",
                     "prefixItems": items,
                     "minItems": count,
                     "maxItems": count
-                }))
+                })
             }
 
             fn schema_name() -> Option<String> {
@@ -191,11 +213,15 @@ impl_float_schema!(f32, f64);
 
 impl<T: SchemaType> SchemaType for Vec<T> {
     fn schema() -> Schema {
-        let item_schema = T::schema().to_json();
-        Schema::new(json!({
+        schema_from_context::<Self>()
+    }
+
+    fn schema_in(context: &mut SchemaBuildContext) -> Value {
+        let item_schema = T::schema_in(context);
+        json!({
             "type": "array",
             "items": item_schema
-        }))
+        })
     }
 
     fn schema_name() -> Option<String> {
@@ -210,9 +236,12 @@ impl<T: SchemaType> SchemaType for Vec<T> {
 
 impl<T: SchemaType> SchemaType for Option<T> {
     fn schema() -> Schema {
-        // For Option<T>, we just return the inner type's schema
-        // The "required" handling is done at the struct level
-        T::schema()
+        schema_from_context::<Self>()
+    }
+
+    fn schema_in(context: &mut SchemaBuildContext) -> Value {
+        // Requiredness is handled by the enclosing object schema.
+        T::schema_in(context)
     }
 
     fn schema_name() -> Option<String> {
@@ -227,12 +256,16 @@ impl<T: SchemaType> SchemaType for Option<T> {
 
 impl<T: SchemaType> SchemaType for std::collections::HashSet<T> {
     fn schema() -> Schema {
-        let item_schema = T::schema().to_json();
-        Schema::new(json!({
+        schema_from_context::<Self>()
+    }
+
+    fn schema_in(context: &mut SchemaBuildContext) -> Value {
+        let item_schema = T::schema_in(context);
+        json!({
             "type": "array",
             "items": item_schema,
             "uniqueItems": true
-        }))
+        })
     }
 
     fn schema_name() -> Option<String> {
@@ -243,12 +276,16 @@ impl<T: SchemaType> SchemaType for std::collections::HashSet<T> {
 
 impl<T: SchemaType> SchemaType for std::collections::BTreeSet<T> {
     fn schema() -> Schema {
-        let item_schema = T::schema().to_json();
-        Schema::new(json!({
+        schema_from_context::<Self>()
+    }
+
+    fn schema_in(context: &mut SchemaBuildContext) -> Value {
+        let item_schema = T::schema_in(context);
+        json!({
             "type": "array",
             "items": item_schema,
             "uniqueItems": true
-        }))
+        })
     }
 
     fn schema_name() -> Option<String> {

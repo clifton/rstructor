@@ -221,6 +221,7 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             syn::parse_quote!(::rstructor::schema::SchemaType),
             syn::parse_quote!(::serde::Serialize),
             syn::parse_quote!(::serde::de::DeserializeOwned),
+            syn::parse_quote!('static),
         ],
     );
     let (impl_generics, ty_generics, where_clause) = instructor_generics.split_for_impl();

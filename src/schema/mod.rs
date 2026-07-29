@@ -205,6 +205,16 @@ pub trait SchemaType {
     /// Generate a JSON Schema representation of this type
     fn schema() -> Schema;
 
+    /// Build this type's schema inside an existing derived-schema graph.
+    ///
+    /// This hook lets derive-generated implementations share recursion state
+    /// while composing nested schemas. Manual implementations may rely on the
+    /// default, which preserves their existing [`SchemaType::schema`] behavior.
+    #[doc(hidden)]
+    fn schema_in(context: &mut __private::SchemaBuildContext) -> Value {
+        context.import_schema(Self::schema().to_json())
+    }
+
     /// Optional name for the schema
     ///
     /// This method returns an optional name for the schema. It's used by the LLM clients
@@ -220,7 +230,441 @@ pub trait SchemaType {
 pub mod __private {
     use super::SchemaType;
     use serde_json::Value;
+    use std::any::TypeId;
+    use std::collections::{BTreeMap, HashMap, HashSet};
     use std::marker::PhantomData;
+
+    #[derive(Clone)]
+    struct ActiveType {
+        type_id: TypeId,
+        identity: String,
+        preferred_key: String,
+    }
+
+    /// Per-call state for composing derive-generated schemas as a type graph.
+    ///
+    /// The context is owned by one root `SchemaType::schema()` call. It is
+    /// deliberately neither global nor thread-local, so concurrent and nested
+    /// schema builds cannot contaminate one another.
+    #[doc(hidden)]
+    #[derive(Default)]
+    pub struct SchemaBuildContext {
+        active: Vec<ActiveType>,
+        recursive: HashSet<TypeId>,
+        definition_keys: HashMap<TypeId, String>,
+        key_owners: HashMap<String, TypeId>,
+        manual_keys: HashSet<String>,
+        definitions: BTreeMap<String, Value>,
+        completed: HashMap<TypeId, Value>,
+    }
+
+    impl SchemaBuildContext {
+        /// Create an empty schema-build context.
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Build one concrete type inside this schema graph.
+        ///
+        /// `preferred_key` is the derive-visible short type name. Direct,
+        /// non-generic self recursion keeps that familiar key. Multi-type and
+        /// generic cycles use the fully-qualified concrete Rust type identity
+        /// to avoid collisions.
+        pub fn schema_for<T, F>(&mut self, preferred_key: &str, build: F) -> Value
+        where
+            T: ?Sized + 'static,
+            F: FnOnce(&mut Self) -> Value,
+        {
+            let type_id = TypeId::of::<T>();
+            let identity = std::any::type_name::<T>().to_string();
+
+            if let Some(key) = self.definition_keys.get(&type_id) {
+                return schema_reference(key);
+            }
+
+            if let Some(index) = self
+                .active
+                .iter()
+                .position(|active| active.type_id == type_id)
+            {
+                let cycle = self.active[index..].to_vec();
+                let use_qualified_keys = cycle.len() > 1;
+                for active in cycle {
+                    self.mark_recursive(active, use_qualified_keys);
+                }
+                let key = self
+                    .definition_keys
+                    .get(&type_id)
+                    .expect("active recursive type must have a definition key");
+                return schema_reference(key);
+            }
+
+            if let Some(schema) = self.completed.get(&type_id) {
+                return schema.clone();
+            }
+
+            self.active.push(ActiveType {
+                type_id,
+                identity: identity.clone(),
+                preferred_key: preferred_key.to_string(),
+            });
+            let schema = build(self);
+            let popped = self
+                .active
+                .pop()
+                .expect("schema build stack must contain the current type");
+            debug_assert_eq!(popped.type_id, type_id);
+
+            if self.recursive.contains(&type_id) {
+                let key = self
+                    .definition_keys
+                    .get(&type_id)
+                    .expect("recursive type must have a definition key")
+                    .clone();
+                self.definitions.entry(key.clone()).or_insert(schema);
+                schema_reference(&key)
+            } else {
+                self.completed.insert(type_id, schema.clone());
+                schema
+            }
+        }
+
+        /// Import a complete schema document produced by a manual
+        /// [`SchemaType`] implementation.
+        ///
+        /// Local definitions are hoisted into this context and local references
+        /// are rewritten when a definition name collides. This keeps references
+        /// document-root relative after the manual schema is embedded in a
+        /// derive-generated parent.
+        pub fn import_schema(&mut self, mut schema: Value) -> Value {
+            self.import_schema_scopes(&mut schema);
+            schema
+        }
+
+        /// Merge the fields from an internally tagged newtype variant's inner
+        /// schema into the variant object.
+        ///
+        /// Active recursive references cannot be resolved until the full type
+        /// graph has been built. Those merges are recorded as private markers
+        /// and completed by [`SchemaBuildContext::finish`].
+        pub fn flatten_into_object(&self, mut outer: Value, inner: Value) -> Value {
+            if let Some(inner) = self.resolve(&inner) {
+                merge_flattened_object(&mut outer, &inner);
+            } else if let Value::Object(outer) = &mut outer {
+                outer.insert(DEFERRED_FLATTEN_KEY.to_string(), inner);
+            }
+            outer
+        }
+
+        /// Attach all definitions discovered while building `root`.
+        pub fn finish(mut self, mut root: Value) -> Value {
+            let definitions_snapshot = self.definitions.clone();
+            resolve_deferred_flatten(&mut root, &definitions_snapshot, &mut Vec::new());
+            for definition in self.definitions.values_mut() {
+                resolve_deferred_flatten(definition, &definitions_snapshot, &mut Vec::new());
+            }
+
+            if self.definitions.is_empty() {
+                return root;
+            }
+
+            let definitions = self
+                .definitions
+                .into_iter()
+                .collect::<serde_json::Map<String, Value>>();
+
+            match root {
+                Value::Object(mut root) => {
+                    if let Some(Value::Object(existing)) = root.get_mut("$defs") {
+                        for (key, schema) in definitions {
+                            existing.entry(key).or_insert(schema);
+                        }
+                    } else {
+                        root.insert("$defs".to_string(), Value::Object(definitions));
+                    }
+                    Value::Object(root)
+                }
+                root => serde_json::json!({
+                    "$defs": definitions,
+                    "allOf": [root]
+                }),
+            }
+        }
+
+        /// Resolve a direct local `$ref` to a definition already completed in
+        /// this context. Non-reference schemas are returned unchanged.
+        pub fn resolve(&self, schema: &Value) -> Option<Value> {
+            let Some(reference) = schema.get("$ref").and_then(Value::as_str) else {
+                return Some(schema.clone());
+            };
+            let pointer_key = reference.strip_prefix("#/$defs/")?;
+            let key = pointer_key.replace("~1", "/").replace("~0", "~");
+            self.definitions.get(&key).cloned()
+        }
+
+        fn mark_recursive(&mut self, active: ActiveType, use_qualified_key: bool) {
+            self.recursive.insert(active.type_id);
+            if self.definition_keys.contains_key(&active.type_id) {
+                return;
+            }
+
+            let prefer_qualified = use_qualified_key || active.identity.contains('<');
+            let mut key = if prefer_qualified {
+                qualified_definition_key(&active)
+            } else {
+                active.preferred_key.clone()
+            };
+
+            if self.manual_keys.contains(&key)
+                || self
+                    .key_owners
+                    .get(&key)
+                    .is_some_and(|owner| owner != &active.type_id)
+            {
+                key = qualified_definition_key(&active);
+            }
+
+            key = self.unique_derived_key(key, active.type_id);
+            self.key_owners.insert(key.clone(), active.type_id);
+            self.definition_keys.insert(active.type_id, key);
+        }
+
+        fn unique_derived_key(&self, candidate: String, type_id: TypeId) -> String {
+            if !self.manual_keys.contains(&candidate)
+                && self
+                    .key_owners
+                    .get(&candidate)
+                    .is_none_or(|owner| owner == &type_id)
+            {
+                return candidate;
+            }
+
+            for suffix in 2usize.. {
+                let candidate = format!("{candidate}{suffix}");
+                if !self.manual_keys.contains(&candidate)
+                    && !self.key_owners.contains_key(&candidate)
+                {
+                    return candidate;
+                }
+            }
+            unreachable!()
+        }
+
+        fn manual_definition_key(&mut self, preferred: &str, definition: &Value) -> String {
+            if self
+                .definitions
+                .get(preferred)
+                .is_some_and(|existing| existing == definition)
+            {
+                return preferred.to_string();
+            }
+
+            let mut key = preferred.to_string();
+            for suffix in 2usize.. {
+                if !self.definitions.contains_key(&key)
+                    && !self.key_owners.contains_key(&key)
+                    && !self.manual_keys.contains(&key)
+                {
+                    self.manual_keys.insert(key.clone());
+                    return key;
+                }
+                key = format!("{preferred}{suffix}");
+            }
+            unreachable!()
+        }
+
+        fn import_schema_scopes(&mut self, schema: &mut Value) {
+            match schema {
+                Value::Object(object) => {
+                    let definitions = object
+                        .remove("$defs")
+                        .or_else(|| object.remove("definitions"))
+                        .and_then(|definitions| definitions.as_object().cloned());
+
+                    if let Some(definitions) = definitions {
+                        let mut renamed = BTreeMap::new();
+                        for (name, definition) in &definitions {
+                            let key = self.manual_definition_key(name, definition);
+                            renamed.insert(name.clone(), key);
+                        }
+
+                        rewrite_definition_refs_in_scope(schema, &renamed, true);
+                        for (name, mut definition) in definitions {
+                            rewrite_definition_refs_in_scope(&mut definition, &renamed, true);
+                            self.import_schema_scopes(&mut definition);
+                            let key = renamed
+                                .get(&name)
+                                .expect("every imported definition must have a key")
+                                .clone();
+                            self.definitions.entry(key).or_insert(definition);
+                        }
+                    }
+
+                    if let Value::Object(object) = schema {
+                        for child in object.values_mut() {
+                            self.import_schema_scopes(child);
+                        }
+                    }
+                }
+                Value::Array(array) => {
+                    for child in array {
+                        self.import_schema_scopes(child);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn schema_reference(key: &str) -> Value {
+        let pointer_key = key.replace('~', "~0").replace('/', "~1");
+        serde_json::json!({ "$ref": format!("#/$defs/{pointer_key}") })
+    }
+
+    fn qualified_definition_key(active: &ActiveType) -> String {
+        let mut encoded_identity = String::with_capacity(active.identity.len());
+        for byte in active.identity.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.') {
+                encoded_identity.push(char::from(byte));
+            } else {
+                use std::fmt::Write as _;
+                write!(&mut encoded_identity, "_{byte:02x}")
+                    .expect("writing to a String cannot fail");
+            }
+        }
+        format!("{}__{encoded_identity}", active.preferred_key)
+    }
+
+    fn rewrite_definition_refs_in_scope(
+        value: &mut Value,
+        renamed: &BTreeMap<String, String>,
+        is_scope_root: bool,
+    ) {
+        match value {
+            Value::Object(object) => {
+                if !is_scope_root
+                    && (object.contains_key("$defs") || object.contains_key("definitions"))
+                {
+                    return;
+                }
+                if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+                    let rewritten = rewrite_definition_ref(reference, renamed);
+                    if let Some(rewritten) = rewritten {
+                        object.insert("$ref".to_string(), Value::String(rewritten));
+                    }
+                }
+                for child in object.values_mut() {
+                    rewrite_definition_refs_in_scope(child, renamed, false);
+                }
+            }
+            Value::Array(array) => {
+                for child in array {
+                    rewrite_definition_refs_in_scope(child, renamed, false);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn rewrite_definition_ref(
+        reference: &str,
+        renamed: &BTreeMap<String, String>,
+    ) -> Option<String> {
+        let (prefix, pointer) = if let Some(pointer) = reference.strip_prefix("#/$defs/") {
+            ("#/$defs/", pointer)
+        } else {
+            ("#/$defs/", reference.strip_prefix("#/definitions/")?)
+        };
+        let (encoded_key, suffix) = pointer
+            .split_once('/')
+            .map_or((pointer, ""), |(key, suffix)| (key, suffix));
+        let key = encoded_key.replace("~1", "/").replace("~0", "~");
+        let renamed = renamed.get(&key)?;
+        let encoded = renamed.replace('~', "~0").replace('/', "~1");
+        Some(if suffix.is_empty() {
+            format!("{prefix}{encoded}")
+        } else {
+            format!("{prefix}{encoded}/{suffix}")
+        })
+    }
+
+    const DEFERRED_FLATTEN_KEY: &str = "__rstructor_deferred_flatten";
+
+    fn resolve_deferred_flatten(
+        value: &mut Value,
+        definitions: &BTreeMap<String, Value>,
+        resolving: &mut Vec<String>,
+    ) {
+        match value {
+            Value::Object(object) => {
+                if let Some(mut inner) = object.remove(DEFERRED_FLATTEN_KEY) {
+                    if let Some(reference) = inner.get("$ref").and_then(Value::as_str) {
+                        let pointer_key = reference
+                            .strip_prefix("#/$defs/")
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "deferred internally tagged flatten used unsupported reference {reference}"
+                                )
+                            });
+                        let key = pointer_key.replace("~1", "/").replace("~0", "~");
+                        assert!(
+                            !resolving.contains(&key),
+                            "internally tagged recursive newtypes form an unflattenable cycle at {reference}"
+                        );
+                        inner = definitions
+                            .get(&key)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "deferred internally tagged flatten could not resolve {reference}"
+                                )
+                            })
+                            .clone();
+                        resolving.push(key);
+                        resolve_deferred_flatten(&mut inner, definitions, resolving);
+                        resolving.pop();
+                    } else {
+                        resolve_deferred_flatten(&mut inner, definitions, resolving);
+                    }
+                    merge_flattened_object(value, &inner);
+                }
+
+                if let Value::Object(object) = value {
+                    for child in object.values_mut() {
+                        resolve_deferred_flatten(child, definitions, resolving);
+                    }
+                }
+            }
+            Value::Array(array) => {
+                for child in array {
+                    resolve_deferred_flatten(child, definitions, resolving);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn merge_flattened_object(outer: &mut Value, inner: &Value) {
+        let Some(outer) = outer.as_object_mut() else {
+            return;
+        };
+        let Some(inner) = inner.as_object() else {
+            return;
+        };
+
+        if let Some(Value::Object(inner_properties)) = inner.get("properties")
+            && let Some(Value::Object(outer_properties)) = outer.get_mut("properties")
+        {
+            for (key, schema) in inner_properties {
+                outer_properties.insert(key.clone(), schema.clone());
+            }
+        }
+
+        if let Some(Value::Array(inner_required)) = inner.get("required")
+            && let Some(Value::Array(outer_required)) = outer.get_mut("required")
+        {
+            outer_required.extend(inner_required.iter().cloned());
+        }
+    }
 
     /// Autoref-specialization probe that lets generated code use a field type's
     /// own [`SchemaType`] schema **iff** the type implements it, and otherwise
@@ -229,14 +673,14 @@ pub mod __private {
     /// having to know which crate a type named `Date` comes from.
     ///
     /// `#[derive(Instructor)]` emits
-    /// `SchemaProbe::<FieldType>::new().rstructor_schema_or(fallback)` for
+    /// `SchemaProbe::<FieldType>::new().rstructor_schema_in_or(context, fallback)` for
     /// fields whose type *name* matches a well-known library type (`Date`,
     /// `DateTime`, `NaiveDate`, `NaiveDateTime`, `Uuid`). When the field's
     /// type implements `SchemaType` (e.g. a user-defined `struct Date` that
     /// derives `Instructor`), the inherent method below is selected (inherent
     /// methods take priority over trait methods) and the type's real schema
     /// wins; otherwise method resolution falls back to
-    /// [`SchemaProbeFallback`], which returns the sniffed fallback schema.
+    /// [`SchemaProbeContextFallback`], which returns the sniffed fallback.
     pub struct SchemaProbe<T: ?Sized>(PhantomData<T>);
 
     impl<T: ?Sized> SchemaProbe<T> {
@@ -246,23 +690,34 @@ pub mod __private {
         }
     }
 
-    /// Fallback for field types that do not implement [`SchemaType`]
-    /// (e.g. `chrono::NaiveDate`, `uuid::Uuid`).
-    pub trait SchemaProbeFallback {
-        fn rstructor_schema_or(&self, fallback: Value) -> Value;
-    }
-
-    impl<T: ?Sized> SchemaProbeFallback for SchemaProbe<T> {
-        fn rstructor_schema_or(&self, fallback: Value) -> Value {
-            fallback
+    impl<T: SchemaType + ?Sized> SchemaProbe<T> {
+        /// Return the wrapped type's schema within an existing build context.
+        pub fn rstructor_schema_in_or(
+            &self,
+            context: &mut SchemaBuildContext,
+            _fallback: Value,
+        ) -> Value {
+            T::schema_in(context)
         }
     }
 
-    impl<T: SchemaType + ?Sized> SchemaProbe<T> {
-        /// Return the wrapped type's real schema (selected over the trait
-        /// method when `T: SchemaType`).
-        pub fn rstructor_schema_or(&self, _fallback: Value) -> Value {
-            T::schema().to_json()
+    /// Context-aware fallback for field types without [`SchemaType`].
+    pub trait SchemaProbeContextFallback {
+        fn rstructor_schema_in_or(
+            &self,
+            context: &mut SchemaBuildContext,
+            fallback: Value,
+        ) -> Value;
+    }
+
+    impl<T: ?Sized> SchemaProbeContextFallback for SchemaProbe<T> {
+        fn rstructor_schema_in_or(
+            &self,
+            context: &mut SchemaBuildContext,
+            fallback: Value,
+        ) -> Value {
+            let _ = context;
+            fallback
         }
     }
 }

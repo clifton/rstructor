@@ -341,47 +341,11 @@ pub fn get_tuple_element_types(ty: &Type) -> Option<Vec<&Type>> {
     None
 }
 
-/// Get the final type name after unwrapping Option and Box
-/// Returns the core type name for detecting self-references
-pub fn get_core_type_name(ty: &Type) -> Option<String> {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            let type_name = segment.ident.to_string();
-            match type_name.as_str() {
-                "Option" | "Box" => {
-                    // Unwrap and recurse
-                    if let PathArguments::AngleBracketed(args) = &segment.arguments
-                        && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
-                    {
-                        return get_core_type_name(inner_ty);
-                    }
-                }
-                "Vec" | "Array" | "HashSet" | "BTreeSet" => {
-                    // For collections, get the inner type
-                    if let PathArguments::AngleBracketed(args) = &segment.arguments
-                        && let Some(GenericArgument::Type(inner_ty)) = args.args.first()
-                    {
-                        return get_core_type_name(inner_ty);
-                    }
-                }
-                _ => return Some(type_name),
-            }
-        }
-    }
-    None
-}
-
-/// Check if a type is a self-reference (matches the given struct name)
-/// Unwraps Option, Box, Vec, etc. to find the core type
-pub fn is_self_reference(ty: &Type, struct_name: &str) -> bool {
-    get_core_type_name(ty).is_some_and(|name| name == struct_name)
-}
-
 /// Clone `generics`, adding the given trait bounds to every type parameter.
 ///
-/// Used when emitting `impl` blocks for generic types: the generated schema
-/// code calls `<T as SchemaType>::schema()` for type-parameter fields, so the
-/// `SchemaType` impl needs every type parameter bound by `SchemaType` (and
+/// Used when emitting `impl` blocks for generic types: generated schemas
+/// compose type-parameter fields through `SchemaType`, so each type parameter
+/// needs a `SchemaType` bound (and
 /// the `Instructor` impl additionally by serde's traits, which `Instructor`
 /// requires as supertraits).
 pub fn generics_with_bounds(

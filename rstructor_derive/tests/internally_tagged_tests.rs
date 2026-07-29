@@ -457,8 +457,12 @@ fn test_recursive_newtype_variant_fields_appear() {
         "recursive newtype variant should include recursive child field"
     );
     assert!(
-        root_variant["$defs"].get("RecursiveNode").is_some(),
-        "recursive definitions should be preserved for nested $ref values"
+        schema["$defs"].get("RecursiveNode").is_some(),
+        "recursive definitions should be hoisted to the document root so nested $ref values resolve"
+    );
+    assert!(
+        root_variant.get("$defs").is_none(),
+        "nested definitions would not be document-root JSON Pointer targets"
     );
 
     let required: Vec<&str> = root_variant["required"]
