@@ -159,16 +159,16 @@ complete copy-paste recipes.
 use rstructor::{OpenAIClient, AnthropicClient, GrokClient, GeminiClient, LLMClient};
 
 // OpenAI (reads OPENAI_API_KEY)
-let client = OpenAIClient::from_env()?.model("gpt-5.6");
+let client = OpenAIClient::from_env()?.model("gpt-5.6-sol");
 
 // Anthropic (reads ANTHROPIC_API_KEY)
-let client = AnthropicClient::from_env()?.model("claude-sonnet-5");
+let client = AnthropicClient::from_env()?.model("claude-opus-5");
 
 // Grok/xAI (reads XAI_API_KEY)
 let client = GrokClient::from_env()?.model("grok-4.5");
 
 // Gemini (reads GEMINI_API_KEY)
-let client = GeminiClient::from_env()?.model("gemini-3.5-flash");
+let client = GeminiClient::from_env()?.model("gemini-3.6-flash");
 
 // Local Ollama (no API key)
 let client = OpenAIClient::ollama()?.model("llama3.3");
@@ -218,7 +218,7 @@ loop, without endpoint-specific schema-dialect rewriting.
 use rstructor::{AnyClient, Provider, LLMClient};
 
 // Parse a case-insensitive "provider/model" string.
-let client = rstructor::client("anthropic/claude-sonnet-5")?;
+let client = rstructor::client("anthropic/claude-opus-5")?;
 let movie: Movie = client.materialize("Describe Inception").await?;
 
 // Or auto-detect in deterministic environment-key order:
@@ -233,7 +233,7 @@ let movie: Movie = client.materialize("Describe Inception").await?;
 let client = AnyClient::from_env()?;
 
 // Or wrap a pre-configured client:
-let client: AnyClient = OpenAIClient::from_env()?.model("gpt-5.6").into();
+let client: AnyClient = OpenAIClient::from_env()?.model("gpt-5.6-sol").into();
 ```
 
 ## Validation
@@ -589,9 +589,10 @@ Configure reasoning depth for supported models:
 ```rust
 use rstructor::ThinkingLevel;
 
-// GPT-5.6, Claude 4.6 Sonnet, Gemini 3.1
+// GPT-5.6 and Gemini 3.6 use named effort levels; Claude 4.x uses
+// extended-thinking token budgets.
 let client = OpenAIClient::from_env()?
-    .model("gpt-5.6")
+    .model("gpt-5.6-sol")
     .thinking_level(ThinkingLevel::High);
 
 // Levels: Off, Minimal, Low, Medium, High

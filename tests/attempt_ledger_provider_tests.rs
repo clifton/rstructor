@@ -90,6 +90,41 @@ fn assert_semantic_retry_success(
 
 #[cfg(feature = "anthropic")]
 #[tokio::test]
+async fn anthropic_default_request_sends_the_recommended_model() {
+    let mut server = mockito::Server::new_async().await;
+    let request = server
+        .mock("POST", "/messages")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "model": "claude-opus-5",
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!({
+                "content": [{ "type": "text", "text": POSITION_JSON }],
+                "model": "claude-opus-5",
+                "usage": { "input_tokens": 70, "output_tokens": 14 },
+            })
+            .to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    let position = rstructor::AnthropicClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .materialize::<Position>("reconcile the futures position")
+        .await
+        .unwrap();
+
+    assert_eq!(position.symbol, "ESU6");
+    assert_eq!(position.quantity, -240);
+    request.assert_async().await;
+}
+
+#[cfg(feature = "anthropic")]
+#[tokio::test]
 async fn anthropic_attempt_report_parses_usage() {
     let mut server = mockito::Server::new_async().await;
     let request = server
@@ -197,6 +232,48 @@ async fn anthropic_protocol_failure_keeps_reported_usage() {
         .unwrap_err();
 
     assert_usage_bearing_protocol_failure(failure, 52);
+    request.assert_async().await;
+}
+
+#[cfg(feature = "gemini")]
+#[tokio::test]
+async fn gemini_default_request_sends_the_latest_stable_model() {
+    let mut server = mockito::Server::new_async().await;
+    let request = server
+        .mock("POST", "/models/gemini-3.6-flash:generateContent")
+        .match_query(mockito::Matcher::UrlEncoded(
+            "key".to_string(),
+            "test-key".to_string(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!({
+                "candidates": [{
+                    "content": { "parts": [{ "text": POSITION_JSON }] },
+                    "finishReason": "STOP",
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": 60,
+                    "candidatesTokenCount": 12,
+                },
+                "modelVersion": "gemini-3.6-flash",
+            })
+            .to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    let position = rstructor::GeminiClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .materialize::<Position>("reconcile the futures position")
+        .await
+        .unwrap();
+
+    assert_eq!(position.symbol, "ESU6");
+    assert_eq!(position.quantity, -240);
     request.assert_async().await;
 }
 

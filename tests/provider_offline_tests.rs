@@ -228,8 +228,9 @@ fn openai_model_roundtrip_all_variants() {
 fn anthropic_model_roundtrip_all_variants() {
     use AnthropicModel::*;
     let table: &[(AnthropicModel, &str)] = &[
-        (ClaudeFable5, "claude-fable-5"),
+        (ClaudeOpus5, "claude-opus-5"),
         (ClaudeSonnet5, "claude-sonnet-5"),
+        (ClaudeFable5, "claude-fable-5"),
         (ClaudeOpus48, "claude-opus-4-8"),
         (ClaudeOpus47, "claude-opus-4-7"),
         (ClaudeSonnet46, "claude-sonnet-4-6"),
@@ -241,7 +242,7 @@ fn anthropic_model_roundtrip_all_variants() {
     ];
     assert_eq!(
         table.len(),
-        10,
+        11,
         "Anthropic variant table drifted from source"
     );
     for (variant, id) in table {
@@ -253,7 +254,9 @@ fn anthropic_model_roundtrip_all_variants() {
 fn gemini_model_roundtrip_all_variants() {
     use GeminiModel::*;
     let table: &[(GeminiModel, &str)] = &[
+        (Gemini36Flash, "gemini-3.6-flash"),
         (Gemini35Flash, "gemini-3.5-flash"),
+        (Gemini35FlashLite, "gemini-3.5-flash-lite"),
         (Gemini31ProPreview, "gemini-3.1-pro-preview"),
         (
             Gemini31ProPreviewCustomTools,
@@ -275,7 +278,7 @@ fn gemini_model_roundtrip_all_variants() {
         (GeminiFlashLatest, "gemini-flash-latest"),
         (GeminiFlashLiteLatest, "gemini-flash-lite-latest"),
     ];
-    assert_eq!(table.len(), 18, "Gemini variant table drifted from source");
+    assert_eq!(table.len(), 20, "Gemini variant table drifted from source");
     for (variant, id) in table {
         assert_model_roundtrip!(GeminiModel, variant.clone(), id);
     }

@@ -27,7 +27,7 @@ define_model_enum! {
     /// OpenAI models available for completion
     ///
     /// For the latest available models and their identifiers, check the
-    /// [OpenAI Models Documentation](https://platform.openai.com/docs/models).
+    /// [OpenAI Models Documentation](https://developers.openai.com/api/docs/models).
     ///
     /// # Using Custom Models
     ///
@@ -143,7 +143,7 @@ impl OpenAIClient {
     fn with_api_key(api_key: String) -> Self {
         let config = OpenAIConfig {
             api_key,
-            model: Model::Gpt56, // Default to GPT-5.6 (latest flagship alias)
+            model: Model::Gpt56Sol, // Default to GPT-5.6 Sol (latest recommended flagship)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
@@ -193,7 +193,7 @@ impl OpenAIClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt56))]
+    #[instrument(name = "openai_client_new", skip(api_key), fields(model = ?Model::Gpt56Sol))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -224,7 +224,7 @@ impl OpenAIClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt56))]
+    #[instrument(name = "openai_client_from_env", fields(model = ?Model::Gpt56Sol))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| RStructorError::api_error("OpenAI", ApiErrorKind::AuthenticationFailed))?;
@@ -1147,7 +1147,7 @@ mod tests {
     #[test]
     fn default_config_uses_latest_model() {
         let client = OpenAIClient::new("test-key").unwrap();
-        assert_eq!(client.config.model, Model::Gpt56);
+        assert_eq!(client.config.model, Model::Gpt56Sol);
     }
 
     #[test]

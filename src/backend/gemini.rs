@@ -43,8 +43,12 @@ define_model_enum! {
     /// let model = GeminiModel::from_string("gemini-custom");
     /// ```
     pub enum Model {
-        /// Gemini 3.5 Flash (latest Flash model, best price/performance, default)
+        /// Gemini 3.6 Flash (latest stable model balancing speed and intelligence)
+        Gemini36Flash => "gemini-3.6-flash",
+        /// Gemini 3.5 Flash (stable model for sustained frontier performance)
         Gemini35Flash => "gemini-3.5-flash",
+        /// Gemini 3.5 Flash-Lite (fastest, most cost-effective Gemini 3.5 model)
+        Gemini35FlashLite => "gemini-3.5-flash-lite",
         /// Gemini 3.1 Pro Preview (latest Pro model)
         Gemini31ProPreview => "gemini-3.1-pro-preview",
         /// Gemini 3.1 Pro Preview Custom Tools (agentic custom-tool variant)
@@ -265,7 +269,7 @@ impl GeminiClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini35Flash))]
+    #[instrument(name = "gemini_client_new", skip(api_key), fields(model = ?Model::Gemini36Flash))]
     pub fn new(api_key: impl Into<String>) -> Result<Self> {
         let api_key = api_key.into();
         if api_key.is_empty() {
@@ -277,7 +281,7 @@ impl GeminiClient {
 
         let config = GeminiConfig {
             api_key,
-            model: Model::Gemini35Flash, // Default to Gemini 3.5 Flash (latest Flash, best price/performance)
+            model: Model::Gemini36Flash, // Default to Gemini 3.6 Flash (latest balanced stable model)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
@@ -314,7 +318,7 @@ impl GeminiClient {
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini35Flash))]
+    #[instrument(name = "gemini_client_from_env", fields(model = ?Model::Gemini36Flash))]
     pub fn from_env() -> Result<Self> {
         let api_key = std::env::var("GEMINI_API_KEY")
             .or_else(|_| std::env::var("GOOGLE_API_KEY"))
@@ -322,7 +326,7 @@ impl GeminiClient {
 
         let config = GeminiConfig {
             api_key,
-            model: Model::Gemini35Flash, // Default to Gemini 3.5 Flash (latest Flash, best price/performance)
+            model: Model::Gemini36Flash, // Default to Gemini 3.6 Flash (latest balanced stable model)
             temperature: 0.0,
             max_tokens: None,
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
@@ -1230,7 +1234,7 @@ mod tests {
     #[test]
     fn default_config_uses_latest_stable_model() {
         let client = super::GeminiClient::new("test-key").unwrap();
-        assert_eq!(client.config.model, super::Model::Gemini35Flash);
+        assert_eq!(client.config.model, super::Model::Gemini36Flash);
     }
 
     #[test]

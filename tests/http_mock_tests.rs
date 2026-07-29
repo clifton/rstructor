@@ -166,6 +166,36 @@ async fn materialize_parses_a_real_response() {
 }
 
 #[tokio::test]
+async fn default_client_sends_the_recommended_openai_model() {
+    let mut server = mockito::Server::new_async().await;
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "model": "gpt-5.6-sol",
+        })))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(chat_completion(
+            r#"{"portfolio_id":"HF-ALPHA-001","positions":[{"symbol":"ESU6","quantity":-240}]}"#,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let portfolio: Portfolio = OpenAIClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .materialize("Extract the reconciled futures position")
+        .await
+        .unwrap();
+
+    assert_eq!(portfolio.portfolio_id, "HF-ALPHA-001");
+    assert_eq!(portfolio.positions[0].symbol, "ESU6");
+    assert_eq!(portfolio.positions[0].quantity, -240);
+    request.assert_async().await;
+}
+
+#[tokio::test]
 async fn routed_client_sends_the_full_custom_model_string() {
     let _env = OpenAiEnvGuard::set_for_test();
     let mut server = mockito::Server::new_async().await;
