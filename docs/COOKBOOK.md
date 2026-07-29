@@ -26,6 +26,16 @@ image; equivalent examples cover
 accepts PDF bytes for OpenAI, Anthropic, and Gemini. Grok rejects PDFs during
 preflight because its documented media path is image-only.
 
+For an OpenAI-compatible hosted endpoint, the
+[Kimi K3 chart example](../examples/kimi_k3_multimodal_example.rs) downloads a
+labeled revenue chart, attaches the PNG bytes through
+`OpenAIClient::moonshot()`, and materializes every bar plus aggregate insights.
+Moonshot's exact model ID is
+[`kimi-k3`](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart); it accepts
+base64 image data but not public image URLs. Supported formats are JPEG, PNG,
+GIF, WebP, BMP, HEIC, and HEIF (not SVG), with a recommended maximum resolution
+of 4096×2160. K3 fixes temperature at `1.0`, which the example sets explicitly.
+
 ```rust
 use std::{env, fs, path::Path};
 
@@ -76,6 +86,13 @@ Run it with `OPENAI_API_KEY` set and pass a local file path:
 
 ```text
 cargo run -- invoice.pdf
+```
+
+Run the Kimi chart variant with:
+
+```text
+MOONSHOT_API_KEY=your_key_here \
+  cargo run --example kimi_k3_multimodal_example --features openai
 ```
 
 ## Classify text into an enum
