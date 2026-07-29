@@ -1,0 +1,34 @@
+{
+  "title": "2026 Revenue by Month",
+  "monthly_revenue": [
+    {
+      "month": "Jan",
+      "revenue_millions": 2.4
+    },
+    {
+      "month": "Feb",
+      "revenue_millions": 3.1
+    },
+    {
+      "month": "Mar",
+      "revenue_millions": 2.8
+    },
+    {
+      "month": "Apr",
+      "revenue_millions": 4.2
+    },
+    {
+      "month": "May",
+      "revenue_millions": 4.9
+    },
+    {
+      "month": "Jun",
+      "revenue_millions": 5.6
+    }
+  ],
+  "peak_month": "Jun",
+  "peak_revenue_millions": 5.6,
+  "total_revenue_millions": 23.0,
+  "overall_trend": "rising",
+  "notable_change": "Revenue rose by $1.4M from March to April, the largest monthly increase."
+}

@@ -28,6 +28,7 @@ const OTHER_FEATURE_GATED_EXAMPLES: &[(&str, &[&str])] = &[
     ("enum_example", &["derive"]),
     ("enum_with_data_example", &["derive"]),
     ("event_planner", &["anthropic", "derive"]),
+    ("kimi_k3_multimodal_example", &["derive", "openai"]),
     ("logging_example", &["anthropic", "derive", "logging"]),
     ("medical_example", &["derive"]),
     ("movie_example", &["derive"]),

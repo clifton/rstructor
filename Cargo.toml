@@ -129,6 +129,10 @@ name = "openai_multimodal_example"
 required-features = ["derive", "openai"]
 
 [[example]]
+name = "kimi_k3_multimodal_example"
+required-features = ["derive", "openai"]
+
+[[example]]
 name = "anthropic_multimodal_example"
 required-features = ["anthropic", "derive"]
 
