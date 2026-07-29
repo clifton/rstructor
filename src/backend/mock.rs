@@ -734,7 +734,7 @@ impl LLMClient for MockClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let schema = <T as SchemaType>::schema().to_json();
+        let schema = <T as SchemaType>::try_schema()?.to_json();
         let schema_name = <T as SchemaType>::schema_name();
         let mut view = MockRequestView::bare(RequestKind::Materialize, prompt);
         view.schema = Some(&schema);
@@ -747,7 +747,7 @@ impl LLMClient for MockClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let schema = <T as SchemaType>::schema().to_json();
+        let schema = <T as SchemaType>::try_schema()?.to_json();
         let schema_name = <T as SchemaType>::schema_name();
         let mut view = MockRequestView::bare(RequestKind::MaterializeWithMedia, prompt);
         view.schema = Some(&schema);
@@ -761,7 +761,7 @@ impl LLMClient for MockClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let schema = <T as SchemaType>::schema().to_json();
+        let schema = <T as SchemaType>::try_schema()?.to_json();
         let schema_name = <T as SchemaType>::schema_name();
         let mut view = MockRequestView::bare(RequestKind::MaterializeWithMetadata, prompt);
         view.schema = Some(&schema);
@@ -779,7 +779,9 @@ impl LLMClient for MockClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let schema = <T as SchemaType>::schema().to_json();
+        let schema = <T as SchemaType>::try_schema()
+            .map_err(MaterializeFailure::from_error)?
+            .to_json();
         let schema_name = <T as SchemaType>::schema_name();
         let mut view = MockRequestView::bare(RequestKind::MaterializeWithAttempts, prompt);
         view.schema = Some(&schema);
@@ -796,7 +798,9 @@ impl LLMClient for MockClient {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let schema = <T as SchemaType>::schema().to_json();
+        let schema = <T as SchemaType>::try_schema()
+            .map_err(MaterializeFailure::from_error)?
+            .to_json();
         let schema_name = <T as SchemaType>::schema_name();
         let mut view = MockRequestView::bare(RequestKind::MaterializeWithMediaAndAttempts, prompt);
         view.schema = Some(&schema);
@@ -863,7 +867,10 @@ impl LLMClient for MockClient {
         Self: Sync,
     {
         use crate::backend::streaming::StreamedObject;
-        let schema = <T as SchemaType>::schema().to_json();
+        let schema = match <T as SchemaType>::try_schema() {
+            Ok(schema) => schema.to_json(),
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let schema_name = <T as SchemaType>::schema_name();
         let mut view = MockRequestView::bare(RequestKind::MaterializeStream, prompt);
         view.schema = Some(&schema);
@@ -892,7 +899,10 @@ impl LLMClient for MockClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
-        let schema = <T as SchemaType>::schema().to_json();
+        let schema = match <T as SchemaType>::try_schema() {
+            Ok(schema) => schema.to_json(),
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let schema_name = <T as SchemaType>::schema_name();
         let mut view = MockRequestView::bare(RequestKind::MaterializeIter, prompt);
         view.schema = Some(&schema);

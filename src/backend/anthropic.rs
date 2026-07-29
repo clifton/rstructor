@@ -297,7 +297,7 @@ impl AnthropicClient {
         info!("Generating structured response with Anthropic (native structured outputs)");
 
         // Get the schema for type T
-        let schema = T::schema();
+        let schema = T::try_schema().map_err(MaterializeAttemptError::preflight)?;
         trace!("Retrieved JSON schema for type");
 
         // Reject dynamic maps before Anthropic's strict object transform can
@@ -942,8 +942,12 @@ impl LLMClient for AnthropicClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
+        let schema = match T::try_schema() {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let schema_json = match compile_strict_schema(
-            &T::schema(),
+            &schema,
             StrictSchemaProvider::Anthropic,
             "streamed structured output",
         ) {
@@ -971,8 +975,12 @@ impl LLMClient for AnthropicClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
+        let schema = match T::try_schema() {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let item_schema = match compile_strict_schema(
-            &T::schema(),
+            &schema,
             StrictSchemaProvider::Anthropic,
             "streamed item",
         ) {

@@ -98,6 +98,8 @@ pub(crate) use openai_compatible::{
 };
 #[cfg(feature = "_client")]
 pub(crate) use schema_compatibility::{StrictSchemaProvider, compile_strict_schema};
+#[cfg(all(test, feature = "schemars"))]
+pub(crate) use utils::prepare_gemini_schema;
 #[cfg(feature = "_client")]
 pub use utils::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
 #[cfg(feature = "_client")]
