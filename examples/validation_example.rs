@@ -1,3 +1,5 @@
+//! Reject invalid structured output with a custom validator that can drive a re-ask.
+
 use rstructor::{Instructor, RStructorError, SchemaType};
 use serde::{Deserialize, Serialize};
 

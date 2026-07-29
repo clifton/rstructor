@@ -1,3 +1,5 @@
+//! Inspect every retry plus cumulative known token usage for a materialization run.
+
 use rstructor::{AttemptOutcome, AttemptRecord, Instructor, LLMClient, OpenAIClient, RunUsage};
 use serde::{Deserialize, Serialize};
 

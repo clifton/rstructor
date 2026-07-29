@@ -1,3 +1,5 @@
+//! Classify an article into an enum while extracting sentiment, entities, and keywords.
+
 use rstructor::{GrokClient, Instructor, LLMClient};
 use serde::{Deserialize, Serialize};
 use std::env;

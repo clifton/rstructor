@@ -1,3 +1,5 @@
+//! Materialize and recursively validate a recipe made of nested structs and lists.
+
 use rstructor::{GeminiClient, Instructor, LLMClient, RStructorError};
 use serde::{Deserialize, Serialize};
 use std::env;

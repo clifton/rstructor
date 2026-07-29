@@ -1,8 +1,8 @@
+//! Extract a validated, typed movie record from one free-form sentence.
+
 use rstructor::{Instructor, LLMClient, OpenAIClient};
 use serde::{Deserialize, Serialize};
 use std::env;
-
-/// This example demonstrates extracting structured movie information.
 
 // Define our data model
 #[derive(Instructor, Serialize, Deserialize, Debug)]

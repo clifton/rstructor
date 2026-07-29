@@ -96,25 +96,124 @@ mock = ["dep:serde_path_to_error"]
 
 [[example]]
 name = "streaming_example"
-required-features = ["streaming"]
+required-features = ["derive", "openai", "streaming"]
 
 [[example]]
 name = "tool_calling_example"
-required-features = ["tools", "openai"]
+required-features = ["derive", "openai", "tools"]
 
 [[example]]
 name = "mock_testing_example"
-required-features = ["mock"]
+required-features = ["derive", "mock"]
 
 [[example]]
 name = "retry_attempt_ledger"
-required-features = ["openai"]
+required-features = ["derive", "openai"]
 
 [[example]]
 name = "ollama_local_example"
-required-features = ["openai"]
+required-features = ["derive", "openai"]
+
+[[example]]
+name = "structured_movie_info"
+required-features = ["derive", "openai"]
+
+[[example]]
+name = "news_article_categorizer"
+required-features = ["derive", "grok"]
+
+[[example]]
+name = "openai_multimodal_example"
+required-features = ["derive", "openai"]
+
+[[example]]
+name = "anthropic_multimodal_example"
+required-features = ["anthropic", "derive"]
+
+[[example]]
+name = "gemini_multimodal_example"
+required-features = ["derive", "gemini"]
+
+[[example]]
+name = "grok_multimodal_example"
+required-features = ["derive", "grok"]
+
+[[example]]
+name = "validation_example"
+required-features = ["derive"]
+
+[[example]]
+name = "nested_objects_example"
+required-features = ["derive", "gemini"]
+
+[[example]]
+name = "recursive_schema_graph"
+required-features = ["derive"]
+
+[[example]]
+name = "axum_handler_example"
+required-features = ["derive", "mock"]
+
+[[example]]
+name = "runtime_provider_example"
+required-features = ["derive", "openai"]
+
+[[example]]
+name = "schemars_bridge_example"
+required-features = ["mock", "schemars"]
+
+[[example]]
+name = "container_attributes_example"
+required-features = ["derive"]
+
+[[example]]
+name = "custom_type_example"
+required-features = ["derive"]
+
+[[example]]
+name = "enum_example"
+required-features = ["derive"]
+
+[[example]]
+name = "enum_with_data_example"
+required-features = ["derive"]
+
+[[example]]
+name = "event_planner"
+required-features = ["anthropic", "derive"]
+
+[[example]]
+name = "logging_example"
+required-features = ["anthropic", "derive", "logging"]
+
+[[example]]
+name = "medical_example"
+required-features = ["derive"]
+
+[[example]]
+name = "movie_example"
+required-features = ["derive"]
+
+[[example]]
+name = "nested_enum_example"
+required-features = ["derive"]
+
+[[example]]
+name = "serde_rename_example"
+required-features = ["derive"]
+
+[[example]]
+name = "token_usage_example"
+required-features = ["derive", "openai"]
+
+[[example]]
+name = "weather_example"
+required-features = ["derive", "openai"]
 
 [dev-dependencies]
+# Builds and exercises the typed HTTP-handler cookbook recipe in-process. The
+# public dependency closure is unchanged.
+axum = { version = "0.8", default-features = false, features = ["json"] }
 # Used only by examples and tests (date/time fields, custom types); not part of
 # the public dependency closure.
 chrono = { version = "0.4.44", features = ["serde"] }
@@ -124,6 +223,8 @@ tokio = { version = "1.52.1", features = ["rt", "macros", "rt-multi-thread"] }
 # Local HTTP mock server for testing the real provider clients (request building,
 # response parsing, retry/re-ask loop) offline, with no API key. Dev-only.
 mockito = "1.7.0"
+# `ServiceExt::oneshot` drives the axum cookbook router without opening a port.
+tower = { version = "0.5", features = ["util"] }
 
 [workspace]
 members = ["rstructor_derive"]
