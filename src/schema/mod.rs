@@ -234,9 +234,15 @@ pub mod __private {
     use std::collections::{BTreeMap, HashMap, HashSet};
     use std::marker::PhantomData;
 
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    enum GraphTypeId {
+        Static(TypeId),
+        Named(String),
+    }
+
     #[derive(Clone)]
     struct ActiveType {
-        type_id: TypeId,
+        type_id: GraphTypeId,
         identity: String,
         preferred_key: String,
     }
@@ -250,12 +256,12 @@ pub mod __private {
     #[derive(Default)]
     pub struct SchemaBuildContext {
         active: Vec<ActiveType>,
-        recursive: HashSet<TypeId>,
-        definition_keys: HashMap<TypeId, String>,
-        key_owners: HashMap<String, TypeId>,
+        recursive: HashSet<GraphTypeId>,
+        definition_keys: HashMap<GraphTypeId, String>,
+        key_owners: HashMap<String, GraphTypeId>,
         manual_keys: HashSet<String>,
         definitions: BTreeMap<String, Value>,
-        completed: HashMap<TypeId, Value>,
+        completed: HashMap<GraphTypeId, Value>,
     }
 
     impl SchemaBuildContext {
@@ -275,9 +281,44 @@ pub mod __private {
             T: ?Sized + 'static,
             F: FnOnce(&mut Self) -> Value,
         {
-            let type_id = TypeId::of::<T>();
             let identity = std::any::type_name::<T>().to_string();
+            self.schema_for_key(
+                GraphTypeId::Static(TypeId::of::<T>()),
+                identity,
+                preferred_key,
+                build,
+            )
+        }
 
+        /// Build a lifetime-parameterized type inside this schema graph.
+        ///
+        /// `TypeId` is unavailable for non-`'static` types. Rust lifetimes do
+        /// not affect Serde's wire representation, so these types use their
+        /// concrete diagnostic name for per-call recursion bookkeeping.
+        pub fn schema_for_named<T, F>(&mut self, preferred_key: &str, build: F) -> Value
+        where
+            T: ?Sized,
+            F: FnOnce(&mut Self) -> Value,
+        {
+            let identity = std::any::type_name::<T>().to_string();
+            self.schema_for_key(
+                GraphTypeId::Named(identity.clone()),
+                identity,
+                preferred_key,
+                build,
+            )
+        }
+
+        fn schema_for_key<F>(
+            &mut self,
+            type_id: GraphTypeId,
+            identity: String,
+            preferred_key: &str,
+            build: F,
+        ) -> Value
+        where
+            F: FnOnce(&mut Self) -> Value,
+        {
             if let Some(key) = self.definition_keys.get(&type_id) {
                 return schema_reference(key);
             }
@@ -304,8 +345,8 @@ pub mod __private {
             }
 
             self.active.push(ActiveType {
-                type_id,
-                identity: identity.clone(),
+                type_id: type_id.clone(),
+                identity,
                 preferred_key: preferred_key.to_string(),
             });
             let schema = build(self);
@@ -337,8 +378,21 @@ pub mod __private {
         /// document-root relative after the manual schema is embedded in a
         /// derive-generated parent.
         pub fn import_schema(&mut self, mut schema: Value) -> Value {
+            let needs_embedded_root = contains_embedded_root_reference(&schema);
+            let preferred_root_key = schema
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("ManualSchema")
+                .to_string();
             self.import_schema_scopes(&mut schema);
-            schema
+            if !needs_embedded_root {
+                return schema;
+            }
+
+            let root_key = self.manual_definition_key(&preferred_root_key);
+            rewrite_embedded_root_refs(&mut schema, &root_key);
+            self.definitions.insert(root_key.clone(), schema);
+            schema_reference(&root_key)
         }
 
         /// Merge the fields from an internally tagged newtype variant's inner
@@ -403,7 +457,7 @@ pub mod __private {
         }
 
         fn mark_recursive(&mut self, active: ActiveType, use_qualified_key: bool) {
-            self.recursive.insert(active.type_id);
+            self.recursive.insert(active.type_id.clone());
             if self.definition_keys.contains_key(&active.type_id) {
                 return;
             }
@@ -424,17 +478,17 @@ pub mod __private {
                 key = qualified_definition_key(&active);
             }
 
-            key = self.unique_derived_key(key, active.type_id);
-            self.key_owners.insert(key.clone(), active.type_id);
+            key = self.unique_derived_key(key, &active.type_id);
+            self.key_owners.insert(key.clone(), active.type_id.clone());
             self.definition_keys.insert(active.type_id, key);
         }
 
-        fn unique_derived_key(&self, candidate: String, type_id: TypeId) -> String {
+        fn unique_derived_key(&self, candidate: String, type_id: &GraphTypeId) -> String {
             if !self.manual_keys.contains(&candidate)
                 && self
                     .key_owners
                     .get(&candidate)
-                    .is_none_or(|owner| owner == &type_id)
+                    .is_none_or(|owner| owner == type_id)
             {
                 return candidate;
             }
@@ -450,15 +504,7 @@ pub mod __private {
             unreachable!()
         }
 
-        fn manual_definition_key(&mut self, preferred: &str, definition: &Value) -> String {
-            if self
-                .definitions
-                .get(preferred)
-                .is_some_and(|existing| existing == definition)
-            {
-                return preferred.to_string();
-            }
-
+        fn manual_definition_key(&mut self, preferred: &str) -> String {
             let mut key = preferred.to_string();
             for suffix in 2usize.. {
                 if !self.definitions.contains_key(&key)
@@ -483,8 +529,8 @@ pub mod __private {
 
                     if let Some(definitions) = definitions {
                         let mut renamed = BTreeMap::new();
-                        for (name, definition) in &definitions {
-                            let key = self.manual_definition_key(name, definition);
+                        for name in definitions.keys() {
+                            let key = self.manual_definition_key(name);
                             renamed.insert(name.clone(), key);
                         }
 
@@ -533,6 +579,61 @@ pub mod __private {
             }
         }
         format!("{}__{encoded_identity}", active.preferred_key)
+    }
+
+    fn contains_embedded_root_reference(value: &Value) -> bool {
+        match value {
+            Value::Object(object) => {
+                let has_root_reference =
+                    object
+                        .get("$ref")
+                        .and_then(Value::as_str)
+                        .is_some_and(|reference| {
+                            reference == "#"
+                                || (reference.starts_with("#/")
+                                    && !reference.starts_with("#/$defs/")
+                                    && !reference.starts_with("#/definitions/"))
+                        });
+                has_root_reference || object.values().any(contains_embedded_root_reference)
+            }
+            Value::Array(array) => array.iter().any(contains_embedded_root_reference),
+            _ => false,
+        }
+    }
+
+    fn rewrite_embedded_root_refs(value: &mut Value, root_key: &str) {
+        match value {
+            Value::Object(object) => {
+                if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+                    let suffix = if reference == "#" {
+                        Some("")
+                    } else if reference.starts_with("#/")
+                        && !reference.starts_with("#/$defs/")
+                        && !reference.starts_with("#/definitions/")
+                    {
+                        reference.strip_prefix('#')
+                    } else {
+                        None
+                    };
+                    if let Some(suffix) = suffix {
+                        let encoded_key = root_key.replace('~', "~0").replace('/', "~1");
+                        object.insert(
+                            "$ref".to_string(),
+                            Value::String(format!("#/$defs/{encoded_key}{suffix}")),
+                        );
+                    }
+                }
+                for child in object.values_mut() {
+                    rewrite_embedded_root_refs(child, root_key);
+                }
+            }
+            Value::Array(array) => {
+                for child in array {
+                    rewrite_embedded_root_refs(child, root_key);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn rewrite_definition_refs_in_scope(

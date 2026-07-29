@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
+use std::marker::PhantomData;
 use std::process::Command;
 use std::thread;
 
@@ -794,6 +795,156 @@ fn manual_schema_defs_are_hoisted_and_collisions_are_rewritten() {
     assert_ne!(
         bond_ref, equity_ref,
         "different manual schemas sharing a local definition name must not collapse"
+    );
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct ManualRateNode {
+    value: f64,
+}
+
+impl SchemaType for ManualRateNode {
+    fn schema() -> rstructor::Schema {
+        rstructor::Schema::new(json!({
+            "$ref": "#/$defs/Node",
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"$ref": "#/$defs/Leaf"}
+                    },
+                    "required": ["value"]
+                },
+                "Leaf": {"type": "number"}
+            }
+        }))
+    }
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct ManualCreditNode {
+    value: String,
+}
+
+impl SchemaType for ManualCreditNode {
+    fn schema() -> rstructor::Schema {
+        rstructor::Schema::new(json!({
+            "$ref": "#/$defs/Node",
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "value": {"$ref": "#/$defs/Leaf"}
+                    },
+                    "required": ["value"]
+                },
+                "Leaf": {"type": "string"}
+            }
+        }))
+    }
+}
+
+#[derive(Debug, Instructor, PartialEq, Serialize, Deserialize)]
+struct ManualCrossDocumentBook {
+    rate_shock: ManualRateNode,
+    credit_regime: ManualCreditNode,
+}
+
+#[test]
+fn manual_transitive_definition_collisions_do_not_cross_bind() {
+    let schema = ManualCrossDocumentBook::schema().to_json();
+
+    assert_schema_graph_integrity(&schema);
+    let leaf_type = |property: &str| {
+        let node_reference = schema["properties"][property]["$ref"]
+            .as_str()
+            .expect("manual node reference");
+        let node = resolve_local_ref(&schema, node_reference).expect("manual node definition");
+        let leaf_reference = node["properties"]["value"]["$ref"]
+            .as_str()
+            .expect("manual leaf reference");
+        resolve_local_ref(&schema, leaf_reference)
+            .and_then(|leaf| leaf.get("type"))
+            .and_then(Value::as_str)
+            .expect("manual leaf type")
+    };
+
+    assert_eq!(leaf_type("rate_shock"), "number");
+    assert_eq!(leaf_type("credit_regime"), "string");
+}
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+struct ManualDeskTree {
+    desk: String,
+    child: Option<Box<ManualDeskTree>>,
+}
+
+impl SchemaType for ManualDeskTree {
+    fn schema() -> rstructor::Schema {
+        rstructor::Schema::new(json!({
+            "type": "object",
+            "title": "ManualDeskTree",
+            "properties": {
+                "desk": {"type": "string"},
+                "child": {
+                    "anyOf": [
+                        {"$ref": "#"},
+                        {"type": "null"}
+                    ]
+                }
+            },
+            "required": ["desk"]
+        }))
+    }
+}
+
+#[derive(Debug, Instructor, PartialEq, Serialize, Deserialize)]
+struct ManualDeskEnvelope {
+    as_of_date: String,
+    hierarchy: ManualDeskTree,
+}
+
+#[test]
+fn embedded_manual_root_references_keep_their_original_scope() {
+    let schema = ManualDeskEnvelope::schema().to_json();
+
+    assert_schema_graph_integrity(&schema);
+    let hierarchy_reference = schema["properties"]["hierarchy"]["$ref"]
+        .as_str()
+        .expect("embedded manual root reference");
+    let hierarchy =
+        resolve_local_ref(&schema, hierarchy_reference).expect("embedded manual root definition");
+    assert!(
+        hierarchy["properties"]["child"]["anyOf"]
+            .as_array()
+            .expect("nullable recursive child")
+            .iter()
+            .any(|branch| {
+                branch.get("$ref").and_then(Value::as_str) == Some(hierarchy_reference)
+            }),
+        "manual `#` must resolve to the embedded manual root, not the derived parent:\n{schema:#}"
+    );
+}
+
+#[derive(Debug, Instructor, PartialEq, Serialize, Deserialize)]
+struct BorrowedPositionTree<'a> {
+    position_id: String,
+    children: Vec<Box<BorrowedPositionTree<'a>>>,
+    #[serde(skip)]
+    marker: PhantomData<&'a ()>,
+}
+
+fn lifetime_parameterized_recursion_contract() {
+    let schema = BorrowedPositionTree::<'static>::schema().to_json();
+    assert_schema_graph_integrity(&schema);
+    assert!(schema.get("$ref").is_some());
+}
+
+#[test]
+fn lifetime_parameterized_recursive_derive_remains_supported() {
+    run_recursive_contract(
+        "lifetime_parameterized_recursive_derive_remains_supported",
+        lifetime_parameterized_recursion_contract,
     );
 }
 

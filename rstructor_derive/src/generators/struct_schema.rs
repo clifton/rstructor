@@ -420,14 +420,18 @@ pub fn generate_struct_schema(
     // Emit a generics-aware impl: every type parameter is additionally bound
     // by SchemaType, since the generated code composes each nested T's schema.
     // for type-parameter fields.
-    let schema_generics = generics_with_bounds(
-        generics,
-        &[
-            syn::parse_quote!(::rstructor::schema::SchemaType),
-            syn::parse_quote!('static),
-        ],
-    );
+    let mut schema_bounds = vec![syn::parse_quote!(::rstructor::schema::SchemaType)];
+    let has_lifetime_parameters = generics.lifetimes().next().is_some();
+    if !has_lifetime_parameters {
+        schema_bounds.push(syn::parse_quote!('static));
+    }
+    let schema_generics = generics_with_bounds(generics, &schema_bounds);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = if has_lifetime_parameters {
+        Ident::new("schema_for_named", proc_macro2::Span::call_site())
+    } else {
+        Ident::new("schema_for", proc_macro2::Span::call_site())
+    };
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
@@ -440,7 +444,7 @@ pub fn generate_struct_schema(
             fn schema_in(
                 __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
             ) -> ::serde_json::Value {
-                __rstructor_context.schema_for::<Self, _>(stringify!(#name), |__rstructor_context| {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
                     // Create base schema object
                     let mut schema_obj = ::serde_json::json!({
                         "type": "object",

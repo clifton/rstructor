@@ -45,13 +45,20 @@ pub fn generate_enum_schema(
 /// `SchemaType::schema_in`. Use with `split_for_impl()` to emit
 /// the `impl ... SchemaType for ...` header.
 fn schema_bounded_generics(generics: &syn::Generics) -> syn::Generics {
-    crate::type_utils::generics_with_bounds(
-        generics,
-        &[
-            syn::parse_quote!(::rstructor::schema::SchemaType),
-            syn::parse_quote!('static),
-        ],
-    )
+    let mut bounds = vec![syn::parse_quote!(::rstructor::schema::SchemaType)];
+    if generics.lifetimes().next().is_none() {
+        bounds.push(syn::parse_quote!('static));
+    }
+    crate::type_utils::generics_with_bounds(generics, &bounds)
+}
+
+fn schema_for_method(generics: &syn::Generics) -> Ident {
+    let method = if generics.lifetimes().next().is_some() {
+        "schema_for_named"
+    } else {
+        "schema_for"
+    };
+    Ident::new(method, proc_macro2::Span::call_site())
 }
 
 fn deserialization_name(
@@ -141,6 +148,7 @@ fn generate_simple_enum_schema(
 
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
@@ -153,7 +161,7 @@ fn generate_simple_enum_schema(
             fn schema_in(
                 __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
             ) -> ::serde_json::Value {
-                __rstructor_context.schema_for::<Self, _>(stringify!(#name), |__rstructor_context| {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
                     let _ = __rstructor_context;
                     let enum_values: Vec<::serde_json::Value> = vec![
                         #(::serde_json::Value::String(#variant_values.to_string())),*
@@ -484,6 +492,7 @@ fn generate_externally_tagged_enum_schema(
     // Generate the final schema implementation
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
@@ -496,7 +505,7 @@ fn generate_externally_tagged_enum_schema(
             fn schema_in(
                 __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
             ) -> ::serde_json::Value {
-                __rstructor_context.schema_for::<Self, _>(stringify!(#name), |__rstructor_context| {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
                     let variant_schemas = vec![
                         #(#variant_schemas),*
                     ];
@@ -1003,6 +1012,7 @@ fn generate_internally_tagged_enum_schema(
 
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
@@ -1015,7 +1025,7 @@ fn generate_internally_tagged_enum_schema(
             fn schema_in(
                 __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
             ) -> ::serde_json::Value {
-                __rstructor_context.schema_for::<Self, _>(stringify!(#name), |__rstructor_context| {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
                     let variant_schemas = vec![
                         #(#variant_schemas),*
                     ];
@@ -1349,6 +1359,7 @@ fn generate_adjacently_tagged_enum_schema(
 
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
@@ -1361,7 +1372,7 @@ fn generate_adjacently_tagged_enum_schema(
             fn schema_in(
                 __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
             ) -> ::serde_json::Value {
-                __rstructor_context.schema_for::<Self, _>(stringify!(#name), |__rstructor_context| {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
                     let variant_schemas = vec![
                         #(#variant_schemas),*
                     ];
@@ -1544,6 +1555,7 @@ fn generate_untagged_enum_schema(
 
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
@@ -1556,7 +1568,7 @@ fn generate_untagged_enum_schema(
             fn schema_in(
                 __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
             ) -> ::serde_json::Value {
-                __rstructor_context.schema_for::<Self, _>(stringify!(#name), |__rstructor_context| {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
                     let variant_schemas = vec![
                         #(#variant_schemas),*
                     ];
