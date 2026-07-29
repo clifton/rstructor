@@ -205,6 +205,15 @@ pub trait SchemaType {
     /// Generate a JSON Schema representation of this type
     fn schema() -> Schema;
 
+    /// Generate a JSON Schema representation, returning generation failures.
+    ///
+    /// Existing implementations may rely on the default infallible behavior.
+    /// Adapters whose schema generators can reject a type override this method
+    /// so clients can report the failure before sending a provider request.
+    fn try_schema() -> Result<Schema> {
+        Ok(Self::schema())
+    }
+
     /// Build this type's schema inside an existing derived-schema graph.
     ///
     /// This hook lets derive-generated implementations share recursion state

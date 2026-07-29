@@ -85,6 +85,22 @@ let client = OpenAIClient::from_env()?.temperature(0.0);
 let ticket: Ticket = client.materialize(text).await?;
 ```
 
+### Already using schemars?
+
+Enable rstructor's `schemars` feature and wrap your existing
+`JsonSchema + Serialize + Deserialize` model; no `Instructor` derive is needed:
+
+```rust
+let ticket = client
+    .materialize::<rstructor::Schemars<Ticket>>(text)
+    .await?
+    .into_inner();
+```
+
+Nested schemas and doc-comment descriptions are inlined automatically.
+Recursive schemars models are rejected before a provider request because v1 of
+the bridge intentionally sends only reference-free schemas.
+
 ## Request Builder
 
 `materialize`, `generate`, and (with the `tools` feature) tool `run` are also

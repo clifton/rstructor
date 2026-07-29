@@ -193,7 +193,7 @@ impl GrokClient {
         info!("Generating structured response with Grok (native structured outputs)");
 
         // Get the schema for type T
-        let schema = T::schema();
+        let schema = T::try_schema().map_err(MaterializeAttemptError::preflight)?;
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
@@ -715,7 +715,10 @@ impl LLMClient for GrokClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
-        let schema = T::schema();
+        let schema = match T::try_schema() {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
         let schema_json = match compile_strict_schema(
             &schema,
@@ -743,14 +746,15 @@ impl LLMClient for GrokClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
-        let item_schema = match compile_strict_schema(
-            &T::schema(),
-            StrictSchemaProvider::Grok,
-            "streamed item",
-        ) {
+        let schema = match T::try_schema() {
             Ok(schema) => schema,
             Err(error) => return crate::backend::streaming::error_stream(error),
         };
+        let item_schema =
+            match compile_strict_schema(&schema, StrictSchemaProvider::Grok, "streamed item") {
+                Ok(schema) => schema,
+                Err(error) => return crate::backend::streaming::error_stream(error),
+            };
         let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, true);
         let response_format = ResponseFormat::json_schema("items".to_string(), wrapper, None);
         let body = self.stream_body(prompt, Some(response_format));

@@ -363,7 +363,7 @@ impl GeminiClient {
     {
         info!("Generating structured response with Gemini");
 
-        let schema = T::schema();
+        let schema = T::try_schema().map_err(MaterializeAttemptError::preflight)?;
         let schema_name = T::schema_name().unwrap_or_else(|| "output".to_string());
         trace!(schema_name = schema_name, "Retrieved JSON schema for type");
 
@@ -996,7 +996,10 @@ impl LLMClient for GeminiClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
-        let schema = T::schema();
+        let schema = match T::try_schema() {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         // Gemini may return internally-tagged enums; capture the mapping so the
         // final buffer can be transformed back before deserializing into `T`.
         let adjacently_tagged_info =
@@ -1036,7 +1039,10 @@ impl LLMClient for GeminiClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
-        let schema = T::schema();
+        let schema = match T::try_schema() {
+            Ok(schema) => schema,
+            Err(error) => return crate::backend::streaming::error_stream(error),
+        };
         let adjacently_tagged_info =
             crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
         let item_schema =

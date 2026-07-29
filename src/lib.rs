@@ -53,11 +53,15 @@ pub mod error;
 pub mod logging;
 pub mod model;
 pub mod schema;
+#[cfg(feature = "schemars")]
+mod schemars_bridge;
 
 // Re-exports for convenience
 pub use error::{ApiErrorKind, RStructorError, Result, StreamErrorKind};
 pub use model::Instructor;
 pub use schema::{CustomTypeSchema, Schema, SchemaBuilder, SchemaType};
+#[cfg(feature = "schemars")]
+pub use schemars_bridge::Schemars;
 
 #[cfg(feature = "openai")]
 pub use backend::openai::{Model as OpenAIModel, OpenAIClient};
