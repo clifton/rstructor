@@ -8,10 +8,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     AnthropicMessageContent, ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient,
-    MaterializeInternalOutput, MaterializeResult, ModelInfo, StrictSchemaProvider, ThinkingLevel,
-    TokenUsage, ValidationFailureContext, build_anthropic_message_content, build_http_client,
-    check_response_status, compile_strict_schema, generate_with_retry_with_history,
-    handle_http_error, materialize_with_media_with_retry, parse_validate_and_create_output,
+    MaterializeAttemptError, MaterializeFailure, MaterializeInternalOutput, MaterializeReport,
+    MaterializeResult, ModelInfo, StrictSchemaProvider, ThinkingLevel, TokenUsage,
+    build_anthropic_message_content, build_http_client, check_response_status,
+    compile_strict_schema, generate_with_retry_attempts_with_history,
+    generate_with_retry_with_history, handle_http_error,
+    materialize_with_media_and_attempts_with_retry, materialize_with_media_with_retry,
+    parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -288,10 +291,7 @@ impl AnthropicClient {
     async fn materialize_internal<T>(
         &self,
         messages: &[ChatMessage],
-    ) -> std::result::Result<
-        MaterializeInternalOutput<T>,
-        (RStructorError, Option<ValidationFailureContext>),
-    >
+    ) -> std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -308,7 +308,7 @@ impl AnthropicClient {
             StrictSchemaProvider::Anthropic,
             "structured output",
         )
-        .map_err(|error| (error, None))?;
+        .map_err(MaterializeAttemptError::preflight)?;
 
         // Build API messages from conversation history
         // With native structured outputs, we don't need to include schema instructions in the prompt
@@ -321,7 +321,7 @@ impl AnthropicClient {
                 })
             })
             .collect::<Result<Vec<_>>>()
-            .map_err(|e| (e, None))?;
+            .map_err(MaterializeAttemptError::preflight)?;
 
         // Build thinking config for Claude 4.x models
         let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
@@ -386,17 +386,19 @@ impl AnthropicClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| (handle_http_error(e, "Anthropic"), None))?;
+            .map_err(|error| {
+                MaterializeAttemptError::transport(handle_http_error(error, "Anthropic"))
+            })?;
 
         // Parse the response
         let response = check_response_status(response, "Anthropic")
             .await
-            .map_err(|e| (e, None))?;
+            .map_err(MaterializeAttemptError::transport)?;
 
         debug!("Successfully received response from Anthropic");
         let completion: CompletionResponse = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse JSON response from Anthropic");
-            (RStructorError::from(e), None)
+            MaterializeAttemptError::transport(RStructorError::from(e))
         })?;
 
         // Extract usage info
@@ -425,14 +427,14 @@ impl AnthropicClient {
             }
             None => {
                 error!("No text content in Anthropic response");
-                return Err((
+                return Err(MaterializeAttemptError::transport_with_usage(
                     RStructorError::api_error(
                         "Anthropic",
                         ApiErrorKind::UnexpectedResponse {
                             details: "No text content in response".to_string(),
                         },
                     ),
-                    None,
+                    usage,
                 ));
             }
         };
@@ -817,6 +819,63 @@ impl LLMClient for AnthropicClient {
         )
         .await?;
         Ok(MaterializeResult::new(output.data, output.usage))
+    }
+
+    #[instrument(
+        name = "anthropic_materialize_with_attempts",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn materialize_with_attempts<T>(
+        &self,
+        prompt: &str,
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        generate_with_retry_attempts_with_history(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            self.config.max_retries,
+        )
+        .await
+    }
+
+    #[instrument(
+        name = "anthropic_materialize_with_media_and_attempts",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media_and_attempts<T>(
+        &self,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        materialize_with_media_and_attempts_with_retry(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            media,
+            self.config.max_retries,
+        )
+        .await
     }
 
     #[instrument(

@@ -85,6 +85,22 @@ async fn media_default_errors_instead_of_silently_dropping() {
     );
 }
 
+#[tokio::test]
+async fn custom_client_attempt_defaults_add_no_required_trait_methods_or_fake_attempts() {
+    let client = NoMediaClient;
+    let failure = client
+        .materialize_with_attempts::<Dummy>("hi")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        RStructorError::ValidationError(message) if message == "materialize-called"
+    ));
+    assert!(failure.attempts.is_empty());
+    assert!(failure.cumulative_usage.is_none());
+}
+
 /// Fluent `Request` builder routing, exercised with the first-party `MockClient`.
 ///
 /// These assert *how the builder composes and dispatches* by reading back the
@@ -165,6 +181,32 @@ mod builder {
         assert_eq!(req.kind, RequestKind::MaterializeWithMedia);
         assert_eq!(req.prompt, "describe");
         assert_eq!(req.media.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn attempt_terminal_preserves_system_and_media_routing() {
+        let client = MockClient::new().with_response(r#"{"value":"risk chart"}"#);
+        let media = [MediaFile::new(
+            "https://example.com/risk-chart.png",
+            "image/png",
+        )];
+
+        let report = client
+            .with_system("Use the fund's base currency.")
+            .media(media.to_vec())
+            .materialize_with_attempts::<Dummy>("read the chart")
+            .await
+            .unwrap();
+
+        assert_eq!(report.data.value, "risk chart");
+        assert_eq!(report.attempts.len(), 1);
+        let request = client.last_request().unwrap();
+        assert_eq!(request.kind, RequestKind::MaterializeWithMediaAndAttempts);
+        assert_eq!(
+            request.prompt,
+            "Use the fund's base currency.\n\nread the chart"
+        );
+        assert_eq!(request.media.len(), 1);
     }
 
     #[cfg(feature = "streaming")]

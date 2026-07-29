@@ -7,7 +7,10 @@
 //! shaping and the retry loop it drives are shared by the OpenAI-compatible path.
 #![cfg(feature = "openai")]
 
-use rstructor::{ApiErrorKind, Instructor, LLMClient, OpenAIClient, RStructorError};
+use rstructor::{
+    AnyClient, ApiErrorKind, AttemptKind, AttemptOutcome, Instructor, LLMClient, OpenAIClient,
+    RStructorError,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -51,6 +54,27 @@ fn chat_completion(content: &str) -> String {
     .to_string()
 }
 
+fn chat_completion_with_usage(
+    content: Option<&str>,
+    model: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+) -> String {
+    json!({
+        "choices": [{
+            "message": { "role": "assistant", "content": content },
+            "finish_reason": "stop",
+        }],
+        "usage": {
+            "prompt_tokens": input_tokens,
+            "completion_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        },
+        "model": model,
+    })
+    .to_string()
+}
+
 fn client(server: &mockito::Server) -> OpenAIClient {
     OpenAIClient::new("test-key")
         .unwrap()
@@ -82,6 +106,34 @@ async fn materialize_parses_a_real_response() {
         }
     );
     m.assert_async().await;
+}
+
+#[tokio::test]
+async fn any_client_dispatches_attempt_reports_to_the_concrete_provider() {
+    let mut server = mockito::Server::new_async().await;
+    let response = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(r#"{"title":"Margin Call","year":2011}"#),
+            "gpt-4o-mini",
+            30,
+            9,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+    let any: AnyClient = client(&server).into();
+
+    let report = any
+        .materialize_with_attempts::<Movie>("a finance film")
+        .await
+        .unwrap();
+
+    assert_eq!(report.data.title, "Margin Call");
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(report.cumulative_usage.as_ref().unwrap().total_tokens(), 39);
+    response.assert_async().await;
 }
 
 #[tokio::test]
@@ -169,6 +221,298 @@ async fn retryable_status_is_retried() {
     assert_eq!(movie.title, "Dune");
     rate_limited.assert_async().await;
     ok.assert_async().await;
+}
+
+#[tokio::test]
+async fn attempt_report_accumulates_semantic_retry_usage_by_model() {
+    let mut server = mockito::Server::new_async().await;
+    let invalid = include_str!("fixtures/structured/portfolio_invalid_quantity.json");
+    let valid = include_str!("fixtures/structured/portfolio_valid.json");
+
+    let bad = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(chat_completion_with_usage(
+            Some(invalid),
+            "risk-router-2026-07-01",
+            210,
+            35,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+    let good = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::Regex(
+            r"\$\.positions\[1\]\.quantity".to_string(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(chat_completion_with_usage(
+            Some(valid),
+            "risk-router-2026-07-15",
+            280,
+            42,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let report = client(&server)
+        .materialize_with_attempts::<Portfolio>("reconcile the futures book")
+        .await
+        .unwrap();
+
+    assert_eq!(report.data.portfolio_id, "HF-ALPHA-001");
+    assert_eq!(report.attempts.len(), 2);
+    assert_eq!(report.attempts[0].kind, AttemptKind::Semantic);
+    assert_eq!(report.attempts[1].kind, AttemptKind::Semantic);
+    assert!(matches!(
+        report.attempts[0].outcome,
+        AttemptOutcome::Failed { retried: true, .. }
+    ));
+    assert_eq!(report.attempts[1].outcome, AttemptOutcome::Succeeded);
+    assert_eq!(
+        report.final_usage.as_ref().unwrap().model,
+        "risk-router-2026-07-15"
+    );
+
+    let cumulative = report.cumulative_usage.unwrap();
+    assert_eq!(cumulative.reported_attempts, 2);
+    assert_eq!(cumulative.input_tokens, 490);
+    assert_eq!(cumulative.output_tokens, 77);
+    assert_eq!(
+        cumulative.by_model["risk-router-2026-07-01"].total_tokens(),
+        245
+    );
+    assert_eq!(
+        cumulative.by_model["risk-router-2026-07-15"].total_tokens(),
+        322
+    );
+    bad.assert_async().await;
+    good.assert_async().await;
+}
+
+#[tokio::test]
+async fn existing_metadata_keeps_final_response_usage_after_reask() {
+    let mut server = mockito::Server::new_async().await;
+    let invalid = include_str!("fixtures/structured/portfolio_invalid_quantity.json");
+    let valid = include_str!("fixtures/structured/portfolio_valid.json");
+
+    let bad = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(invalid),
+            "risk-router",
+            210,
+            35,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+    let good = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::Regex(
+            r"\$\.positions\[1\]\.quantity".to_string(),
+        ))
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(valid),
+            "risk-router",
+            280,
+            42,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let result = client(&server)
+        .materialize_with_metadata::<Portfolio>("reconcile the futures book")
+        .await
+        .unwrap();
+
+    let usage = result.usage.unwrap();
+    assert_eq!(usage.input_tokens, 280);
+    assert_eq!(usage.output_tokens, 42);
+    bad.assert_async().await;
+    good.assert_async().await;
+}
+
+#[tokio::test]
+async fn retryable_provider_error_is_a_transport_attempt_without_history_mutation() {
+    let mut server = mockito::Server::new_async().await;
+    let rate_limited = server
+        .mock("POST", "/chat/completions")
+        .with_status(429)
+        .with_header("retry-after", "0")
+        .with_body("{}")
+        .expect(1)
+        .create_async()
+        .await;
+    let ok = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::Regex(
+            r#""messages":\[\{"role":"user""#.to_string(),
+        ))
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(r#"{"title":"Dune","year":2021}"#),
+            "gpt-4o-mini",
+            25,
+            8,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let report = client(&server)
+        .materialize_with_attempts::<Movie>("a film")
+        .await
+        .unwrap();
+
+    assert_eq!(report.attempts.len(), 2);
+    assert_eq!(report.attempts[0].kind, AttemptKind::Transport);
+    assert!(matches!(
+        report.attempts[0].outcome,
+        AttemptOutcome::Failed { retried: true, .. }
+    ));
+    assert_eq!(report.attempts[1].kind, AttemptKind::Semantic);
+    assert_eq!(
+        report.cumulative_usage.as_ref().unwrap().reported_attempts,
+        1
+    );
+    rate_limited.assert_async().await;
+    ok.assert_async().await;
+}
+
+#[tokio::test]
+async fn malformed_envelope_retains_usage_as_an_unretried_transport_attempt() {
+    let mut server = mockito::Server::new_async().await;
+    let malformed = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!({
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 55,
+                    "completion_tokens": 3,
+                    "total_tokens": 58,
+                },
+                "model": "gpt-4o-mini",
+            })
+            .to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    let failure = client(&server)
+        .materialize_with_attempts::<Movie>("a film")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        failure.error().api_error_kind(),
+        Some(ApiErrorKind::UnexpectedResponse { .. })
+    ));
+    assert_eq!(failure.attempts.len(), 1);
+    assert_eq!(failure.attempts[0].kind, AttemptKind::Transport);
+    assert!(matches!(
+        failure.attempts[0].outcome,
+        AttemptOutcome::Failed { retried: false, .. }
+    ));
+    assert_eq!(
+        failure.attempts[0].usage.as_ref().unwrap().total_tokens(),
+        58
+    );
+    assert_eq!(
+        failure.cumulative_usage.as_ref().unwrap().total_tokens(),
+        58
+    );
+    malformed.assert_async().await;
+}
+
+#[tokio::test]
+async fn semantic_exhaustion_exposes_usage_while_legacy_api_keeps_bare_error() {
+    let mut report_server = mockito::Server::new_async().await;
+    let invalid = include_str!("fixtures/structured/portfolio_invalid_quantity.json");
+
+    let first = report_server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(invalid),
+            "risk-router",
+            120,
+            20,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+    let second = report_server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(invalid),
+            "risk-router",
+            160,
+            25,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let failure = client(&report_server)
+        .max_retries(1)
+        .materialize_with_attempts::<Portfolio>("reconcile")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        RStructorError::OutputDecodeError { path, .. }
+            if path == "$.positions[1].quantity"
+    ));
+    assert_eq!(failure.attempts.len(), 2);
+    assert_eq!(
+        failure.cumulative_usage.as_ref().unwrap().total_tokens(),
+        325
+    );
+    first.assert_async().await;
+    second.assert_async().await;
+
+    let mut legacy_server = mockito::Server::new_async().await;
+    let legacy_first = legacy_server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion(invalid))
+        .expect(1)
+        .create_async()
+        .await;
+    let legacy_second = legacy_server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion(invalid))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let error = client(&legacy_server)
+        .max_retries(1)
+        .materialize::<Portfolio>("reconcile")
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        RStructorError::OutputDecodeError { ref path, .. }
+            if path == "$.positions[1].quantity"
+    ));
+    legacy_first.assert_async().await;
+    legacy_second.assert_async().await;
 }
 
 #[tokio::test]
