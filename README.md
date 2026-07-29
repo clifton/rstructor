@@ -131,6 +131,28 @@ The terminals are `materialize::<T>(prompt)` (structured), `generate(prompt)`
 attached tools in a loop). Builders compose: `with_system`, `with_media`, and
 `with_tools` can be chained in any order before the terminal.
 
+## Recipes
+
+Start with the task you need, then open the linked runnable example. The
+[task-oriented cookbook](docs/COOKBOOK.md) expands the core workflows into
+complete copy-paste recipes.
+
+| I want to… | Example | What it shows |
+|---|---|---|
+| Extract typed data from free text | [`structured_movie_info.rs`](examples/structured_movie_info.rs) | Turns one sentence into a validated Rust struct with field descriptions and business rules. |
+| Classify into an enum | [`news_article_categorizer.rs`](examples/news_article_categorizer.rs) | Selects a typed category while extracting sentiment, entities, and keywords. |
+| Extract from an image or PDF | [`openai_multimodal_example.rs`](examples/openai_multimodal_example.rs) ([Anthropic](examples/anthropic_multimodal_example.rs), [Gemini](examples/gemini_multimodal_example.rs), [Grok](examples/grok_multimodal_example.rs)) | Sends inline media with a prompt and materializes the answer into a struct. |
+| Put extraction behind an axum handler | [`axum_handler_example.rs`](examples/axum_handler_example.rs) | Injects any `LLMClient` into typed JSON request and response handling, tested in-process. |
+| Test without network | [`mock_testing_example.rs`](examples/mock_testing_example.rs) | Scripts realistic responses through the real deserialization, validation, and re-ask path. |
+| Use a local model with Ollama | [`ollama_local_example.rs`](examples/ollama_local_example.rs) | Connects to the keyless local endpoint through the same structured-output API. |
+| Choose a provider at runtime | [`runtime_provider_example.rs`](examples/runtime_provider_example.rs) | Parses `provider/model` into one `AnyClient`, including aggregator model IDs with slashes. |
+| Reuse an existing schemars model | [`schemars_bridge_example.rs`](examples/schemars_bridge_example.rs) | Materializes `JsonSchema + Serde` types through the transparent `Schemars<T>` adapter. |
+| Call tools in a loop | [`tool_calling_example.rs`](examples/tool_calling_example.rs) | Runs schema-validated tool calls until the model produces its final answer. |
+| Stream partial output | [`streaming_example.rs`](examples/streaming_example.rs) | Yields validated list items incrementally and explains completion integrity. |
+| Add custom validation and re-ask | [`validation_example.rs`](examples/validation_example.rs) | Rejects domain-invalid output with a custom validator that providers can retry. |
+| Inspect retries and token cost | [`retry_attempt_ledger.rs`](examples/retry_attempt_ledger.rs) | Reports every attempt, disposition, per-response usage, and cumulative known usage. |
+| Model nested or recursive schemas | [`nested_objects_example.rs`](examples/nested_objects_example.rs), [`recursive_schema_graph.rs`](examples/recursive_schema_graph.rs) | Builds deeply nested values and finite `$defs` graphs for recursive domain types. |
+
 ## Providers
 
 ```rust
