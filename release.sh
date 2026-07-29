@@ -1,6 +1,85 @@
 #!/bin/sh
 set -e
 
+usage() {
+    cat <<EOF
+Usage: $0 [major|minor|patch] [notes-file]
+       $0 [major|minor|patch] --notes <file>
+       $0 --notes <file> [major|minor|patch]
+
+Defaults to a patch release. When notes-file is provided, its Markdown becomes
+the release body and the generated commit list is collapsed below it.
+EOF
+}
+
+# Parse and validate all arguments before any release state can change.
+BUMP_TYPE=patch
+BUMP_TYPE_SET=0
+NOTES_FILE=
+NOTES_FILE_SET=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --notes)
+            if [ "$#" -lt 2 ]; then
+                echo "Error: --notes requires a file path" >&2
+                usage >&2
+                exit 1
+            fi
+            if [ "$NOTES_FILE_SET" -eq 1 ]; then
+                echo "Error: Release notes file specified more than once" >&2
+                exit 1
+            fi
+            NOTES_FILE=$2
+            NOTES_FILE_SET=1
+            shift 2
+            continue
+            ;;
+        major|minor|patch)
+            if [ "$BUMP_TYPE_SET" -eq 1 ]; then
+                echo "Error: Bump type specified more than once" >&2
+                exit 1
+            fi
+            BUMP_TYPE=$1
+            BUMP_TYPE_SET=1
+            ;;
+        -*)
+            echo "Error: Unknown option '$1'" >&2
+            usage >&2
+            exit 1
+            ;;
+        *)
+            if [ "$BUMP_TYPE_SET" -eq 0 ]; then
+                echo "Error: Invalid bump type '$1'. Must be one of: major, minor, patch" >&2
+                exit 1
+            fi
+            if [ "$NOTES_FILE_SET" -eq 1 ]; then
+                echo "Error: Unexpected argument '$1'" >&2
+                usage >&2
+                exit 1
+            fi
+            NOTES_FILE=$1
+            NOTES_FILE_SET=1
+            ;;
+    esac
+    shift
+done
+
+if [ "$NOTES_FILE_SET" -eq 1 ]; then
+    if [ ! -f "$NOTES_FILE" ]; then
+        echo "Error: Release notes file '$NOTES_FILE' does not exist or is not a regular file" >&2
+        exit 1
+    fi
+    if [ ! -r "$NOTES_FILE" ]; then
+        echo "Error: Release notes file '$NOTES_FILE' is not readable" >&2
+        exit 1
+    fi
+fi
+
 # Check if we're on the main branch
 CURRENT_BRANCH=$(git branch --show-current)
 if [ "$CURRENT_BRANCH" != "main" ]; then
@@ -14,18 +93,6 @@ if ! git diff-index --quiet HEAD -- || ! git diff --staged --quiet; then
     exit 1
 fi
 
-# Default to patch if no argument provided
-BUMP_TYPE=${1:-patch}
-
-# Validate bump type
-case "$BUMP_TYPE" in
-    major|minor|patch) ;;
-    *)
-        echo "Error: Invalid bump type '$BUMP_TYPE'. Must be one of: major, minor, patch"
-        exit 1
-        ;;
-esac
-
 # Pull latest changes from remote
 echo "Pulling latest changes from remote..."
 if ! git pull; then
@@ -34,18 +101,18 @@ if ! git pull; then
 fi
 
 # Silent version bumping function with no terminal output
-bump_version_silent() {
-    local cargo_file=$1
-    local current_version=$(grep '^version = ' "$cargo_file" | cut -d'"' -f2)
+bump_version_silent() (
+    cargo_file=$1
+    current_version=$(grep '^version = ' "$cargo_file" | cut -d'"' -f2)
     if [ -z "$current_version" ]; then
         echo "Error: Could not find version in $cargo_file" >&2
         exit 1
     fi
 
     # Split version into major, minor, and patch numbers
-    local major=$(echo "$current_version" | cut -d. -f1)
-    local minor=$(echo "$current_version" | cut -d. -f2)
-    local patch=$(echo "$current_version" | cut -d. -f3)
+    major=$(echo "$current_version" | cut -d. -f1)
+    minor=$(echo "$current_version" | cut -d. -f2)
+    patch=$(echo "$current_version" | cut -d. -f3)
 
     # Bump version according to type
     case "$BUMP_TYPE" in
@@ -63,7 +130,7 @@ bump_version_silent() {
             ;;
     esac
 
-    local new_version="$major.$minor.$patch"
+    new_version="$major.$minor.$patch"
 
     # Update version in Cargo.toml
     sed -i.bak "s/^version = \"$current_version\"/version = \"$new_version\"/" "$cargo_file"
@@ -71,7 +138,7 @@ bump_version_silent() {
 
     # Print the version without any other message
     echo "$new_version"
-}
+)
 
 # First, bump version in the main crate
 echo "Updating main crate version..."
@@ -121,8 +188,26 @@ if [ -z "$CHANGELOG" ]; then
     CHANGELOG="- No changes to document"
 fi
 
-# Create release notes
-RELEASE_NOTES=$(cat <<EOF
+# Create release notes. Preserve the original output when no curated file is supplied.
+if [ "$NOTES_FILE_SET" -eq 1 ]; then
+    CURATED_NOTES=$(cat "$NOTES_FILE")
+    RELEASE_NOTES=$(cat <<EOF
+$CURATED_NOTES
+
+<details>
+<summary>Commits</summary>
+
+$CHANGELOG
+
+</details>
+
+### Dependency Versions
+- **rstructor**: $MAIN_VERSION
+- **rstructor_derive**: $DERIVE_VERSION
+EOF
+)
+else
+    RELEASE_NOTES=$(cat <<EOF
 ## Version $MAIN_VERSION
 
 ### Changes
@@ -134,6 +219,7 @@ $CHANGELOG
 - **rstructor_derive**: $DERIVE_VERSION
 EOF
 )
+fi
 
 # Create git commit and tag for both
 git add rstructor_derive/Cargo.toml Cargo.toml
@@ -146,14 +232,15 @@ echo "  - rstructor_derive: $DERIVE_VERSION"
 echo "  - rstructor: $MAIN_VERSION"
 
 # Ask for confirmation before pushing to git
-read -p "Would you like to push the changes and tags to git? (y/N) " should_push
+printf "Would you like to push the changes and tags to git? (y/N) "
+IFS= read -r should_push
 if [ "$should_push" = "y" ] || [ "$should_push" = "Y" ]; then
     git push && git push origin "v$MAIN_VERSION" "derive-v$DERIVE_VERSION"
     echo "Successfully pushed changes to git"
 
     # Create GitHub release with changelog
     echo "Creating GitHub release..."
-    echo "$RELEASE_NOTES" | gh release create "v$MAIN_VERSION" \
+    printf "%s\n" "$RELEASE_NOTES" | gh release create "v$MAIN_VERSION" \
         --title "v$MAIN_VERSION" \
         --notes-file - \
         --target main
@@ -163,7 +250,8 @@ else
 fi
 
 # Ask for confirmation before publishing to crates.io
-read -p "Would you like to publish to crates.io? (y/N) " should_publish
+printf "Would you like to publish to crates.io? (y/N) "
+IFS= read -r should_publish
 if [ "$should_publish" = "y" ] || [ "$should_publish" = "Y" ]; then
     # Verify what will be packaged for derive crate
     echo ""
@@ -171,7 +259,8 @@ if [ "$should_publish" = "y" ] || [ "$should_publish" = "Y" ]; then
     echo "Files that will be included:"
     (cd rstructor_derive && cargo package --list --allow-dirty 2>/dev/null | head -20)
     echo "... (showing first 20 files)"
-    read -p "Continue with rstructor_derive publish? (y/N) " continue_derive
+    printf "Continue with rstructor_derive publish? (y/N) "
+    IFS= read -r continue_derive
     if [ "$continue_derive" != "y" ] && [ "$continue_derive" != "Y" ]; then
         echo "Aborted publishing rstructor_derive"
         exit 1
@@ -191,7 +280,8 @@ if [ "$should_publish" = "y" ] || [ "$should_publish" = "Y" ]; then
     echo "Files that will be included:"
     cargo package --list --allow-dirty 2>/dev/null | head -30
     echo "... (showing first 30 files)"
-    read -p "Continue with rstructor publish? (y/N) " continue_main
+    printf "Continue with rstructor publish? (y/N) "
+    IFS= read -r continue_main
     if [ "$continue_main" != "y" ] && [ "$continue_main" != "Y" ]; then
         echo "Aborted publishing rstructor"
         exit 1
