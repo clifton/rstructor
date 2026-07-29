@@ -882,18 +882,23 @@ struct ManualDeskTree {
 impl SchemaType for ManualDeskTree {
     fn schema() -> rstructor::Schema {
         rstructor::Schema::new(json!({
-            "type": "object",
-            "title": "ManualDeskTree",
-            "properties": {
-                "desk": {"type": "string"},
-                "child": {
-                    "anyOf": [
-                        {"$ref": "#"},
-                        {"type": "null"}
-                    ]
+            "title": "Node",
+            "$ref": "#/$defs/Node",
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": {
+                        "desk": {"type": "string"},
+                        "child": {
+                            "anyOf": [
+                                {"$ref": "#"},
+                                {"type": "null"}
+                            ]
+                        }
+                    },
+                    "required": ["desk"]
                 }
-            },
-            "required": ["desk"]
+            }
         }))
     }
 }
@@ -912,8 +917,17 @@ fn embedded_manual_root_references_keep_their_original_scope() {
     let hierarchy_reference = schema["properties"]["hierarchy"]["$ref"]
         .as_str()
         .expect("embedded manual root reference");
-    let hierarchy =
+    let hierarchy_root =
         resolve_local_ref(&schema, hierarchy_reference).expect("embedded manual root definition");
+    assert_eq!(
+        hierarchy_root["title"], "Node",
+        "embedded-root sibling constraints must remain on the wrapper"
+    );
+    let node_reference = hierarchy_root["$ref"]
+        .as_str()
+        .expect("manual root's local Node reference");
+    let hierarchy =
+        resolve_local_ref(&schema, node_reference).expect("hoisted manual Node definition");
     assert!(
         hierarchy["properties"]["child"]["anyOf"]
             .as_array()

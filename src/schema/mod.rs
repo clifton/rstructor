@@ -384,13 +384,23 @@ pub mod __private {
                 .and_then(Value::as_str)
                 .unwrap_or("ManualSchema")
                 .to_string();
-            self.import_schema_scopes(&mut schema);
-            if !needs_embedded_root {
-                return schema;
+            let local_definition_names = schema
+                .get("$defs")
+                .or_else(|| schema.get("definitions"))
+                .and_then(Value::as_object)
+                .map(|definitions| definitions.keys().cloned().collect::<HashSet<_>>())
+                .unwrap_or_default();
+            let root_key = needs_embedded_root.then(|| {
+                self.manual_definition_key_avoiding(&preferred_root_key, &local_definition_names)
+            });
+            if let Some(root_key) = &root_key {
+                rewrite_embedded_root_refs(&mut schema, root_key);
             }
+            self.import_schema_scopes(&mut schema);
+            let Some(root_key) = root_key else {
+                return schema;
+            };
 
-            let root_key = self.manual_definition_key(&preferred_root_key);
-            rewrite_embedded_root_refs(&mut schema, &root_key);
             self.definitions.insert(root_key.clone(), schema);
             schema_reference(&root_key)
         }
@@ -505,11 +515,20 @@ pub mod __private {
         }
 
         fn manual_definition_key(&mut self, preferred: &str) -> String {
+            self.manual_definition_key_avoiding(preferred, &HashSet::new())
+        }
+
+        fn manual_definition_key_avoiding(
+            &mut self,
+            preferred: &str,
+            reserved: &HashSet<String>,
+        ) -> String {
             let mut key = preferred.to_string();
             for suffix in 2usize.. {
                 if !self.definitions.contains_key(&key)
                     && !self.key_owners.contains_key(&key)
                     && !self.manual_keys.contains(&key)
+                    && !reserved.contains(&key)
                 {
                     self.manual_keys.insert(key.clone());
                     return key;
