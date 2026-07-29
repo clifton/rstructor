@@ -11,8 +11,8 @@ use crate::backend::{
     MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
     ThinkingLevel, TokenUsage, build_http_client, check_response_status,
     generate_with_retry_attempts_with_history, generate_with_retry_with_history, handle_http_error,
-    materialize_with_media_and_attempts_with_retry, materialize_with_media_with_retry,
-    parse_validate_and_create_output,
+    materialize_request_error, materialize_with_media_and_attempts_with_retry,
+    materialize_with_media_with_retry, parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -181,10 +181,22 @@ struct UsageMetadata {
 
 #[derive(Debug, Deserialize)]
 struct GenerateContentResponse {
+    #[serde(
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     candidates: Vec<Candidate>,
-    #[serde(rename = "usageMetadata", default)]
+    #[serde(
+        rename = "usageMetadata",
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     usage_metadata: Option<UsageMetadata>,
-    #[serde(rename = "modelVersion", default)]
+    #[serde(
+        rename = "modelVersion",
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     model_version: Option<String>,
 }
 
@@ -426,9 +438,7 @@ impl GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|error| {
-                MaterializeAttemptError::transport(handle_http_error(error, "Gemini"))
-            })?;
+            .map_err(|error| materialize_request_error(error, "Gemini"))?;
 
         let response = check_response_status(response, "Gemini")
             .await

@@ -11,8 +11,8 @@ use crate::backend::{
     StrictSchemaProvider, TokenUsage, build_http_client, check_response_status,
     compile_strict_schema, convert_openai_compatible_chat_messages,
     generate_with_retry_attempts_with_history, generate_with_retry_with_history, handle_http_error,
-    materialize_with_media_and_attempts_with_retry, materialize_with_media_with_retry,
-    parse_validate_and_create_output,
+    materialize_request_error, materialize_with_media_and_attempts_with_retry,
+    materialize_with_media_with_retry, parse_validate_and_create_output,
 };
 #[cfg(feature = "streaming")]
 use crate::backend::{OpenAICompatibleChatMessage, OpenAICompatibleMessageContent};
@@ -239,9 +239,7 @@ impl GrokClient {
             .json(&request)
             .send()
             .await
-            .map_err(|error| {
-                MaterializeAttemptError::transport(handle_http_error(error, "Grok"))
-            })?;
+            .map_err(|error| materialize_request_error(error, "Grok"))?;
 
         let response = check_response_status(response, "Grok")
             .await

@@ -81,7 +81,8 @@ pub use backend::ThinkingLevel;
 pub use backend::{AnyClient, Provider, Request, RequestExt};
 pub use backend::{
     AttemptKind, AttemptOutcome, AttemptRecord, ChatMessage, ChatRole, GenerateResult,
-    MaterializeFailure, MaterializeReport, MaterializeResult, MediaFile, RunUsage, TokenUsage,
+    MaterializeFailure, MaterializeReport, MaterializeResult, MediaFile, RetryDisposition,
+    RunUsage, TokenUsage,
 };
 #[cfg(feature = "_client")]
 pub use backend::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};

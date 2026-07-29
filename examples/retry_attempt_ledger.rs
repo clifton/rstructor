@@ -20,9 +20,13 @@ fn print_attempts(attempts: &[AttemptRecord], cumulative_usage: Option<&RunUsage
     for attempt in attempts {
         let outcome = match &attempt.outcome {
             AttemptOutcome::Succeeded => "succeeded".to_string(),
-            AttemptOutcome::Failed { message, retried } => {
-                format!("failed (retried={retried}): {message}")
+            AttemptOutcome::Failed {
+                message,
+                disposition,
+            } => {
+                format!("failed ({disposition:?}): {message}")
             }
+            _ => "unknown outcome".to_string(),
         };
         let tokens = attempt.usage.as_ref().map_or_else(
             || "unknown".to_string(),
@@ -61,10 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match client.materialize_with_attempts::<Portfolio>(prompt).await {
         Ok(report) => {
             println!("{:#?}", report.data);
+            println!("complete attempt history: {}", report.attempts_complete);
             print_attempts(&report.attempts, report.cumulative_usage.as_ref());
         }
         Err(failure) => {
             eprintln!("materialization failed: {}", failure.error());
+            eprintln!("complete attempt history: {}", failure.attempts_complete);
             print_attempts(&failure.attempts, failure.cumulative_usage.as_ref());
         }
     }

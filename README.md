@@ -181,7 +181,7 @@ fn validate_movie(movie: &Movie) -> Result<()> {
     Ok(())
 }
 
-// Retries are enabled by default (3 attempts with error feedback)
+// Retries are enabled by default (3 retries, 4 total attempts)
 // To increase retries:
 let client = OpenAIClient::from_env()?.max_retries(5);
 
@@ -555,6 +555,9 @@ match client.materialize_with_attempts::<Portfolio>("Reconcile the fund book").a
 Usage is conservative: attempts remain in the ledger when a provider omits
 token metadata, while cumulative totals include only responses with reported
 usage. Local schema/media preflight failures record zero provider attempts.
+Built-in clients and `MockClient` set `attempts_complete` to `true`; the default
+implementation for custom clients sets it to `false` rather than inventing
+provider attempts it cannot observe.
 See `examples/retry_attempt_ledger.rs` for a complete success-and-failure
 example.
 
@@ -738,11 +741,13 @@ async fn extracts_a_movie() {
 
 Script multiple responses with `with_response`/`with_responses` (a FIFO queue), branch
 on the request with `with_responder`, simulate the validation re-ask loop with
-`with_retries`, attach token usage with `with_usage`, and assert on captured requests via
-`requests()` / `last_request()`. The `mock` feature pulls in only the lightweight
-path-aware decoder and works without the HTTP client; streaming and tool-loop mocking
-light up when the `streaming` / `tools` features are also enabled. See
-`examples/mock_testing_example.rs`.
+`with_retries`, attach final/default token usage with `with_usage`, or attach
+per-attempt usage with `with_response_and_usage`. Assert on captured requests via
+`requests()` / `last_request()`. `RequestKind` is non-exhaustive, so downstream
+matches should include a wildcard arm as new client terminals are added. The `mock`
+feature pulls in only the lightweight path-aware decoder and works without the HTTP
+client; streaming and tool-loop mocking light up when the `streaming` / `tools`
+features are also enabled. See `examples/mock_testing_example.rs`.
 
 ## Feature Flags
 

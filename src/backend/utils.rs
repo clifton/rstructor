@@ -1,12 +1,13 @@
 use crate::backend::{
     AttemptKind, AttemptRecord, ChatMessage, MaterializeAttemptError, MaterializeFailure,
-    MaterializeInternalOutput, MaterializeReport, RunUsage, TokenUsage, ValidationFailureContext,
+    MaterializeInternalOutput, MaterializeReport, RetryDisposition, RunUsage, TokenUsage,
+    ValidationFailureContext,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 use reqwest::Response;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -46,6 +47,21 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 /// assert_eq!(DEFAULT_CONNECT_TIMEOUT, Duration::from_secs(30));
 /// ```
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Deserialize a provider-envelope field conservatively.
+///
+/// A malformed envelope should not prevent other independently valid fields,
+/// especially provider-reported usage, from being accounted for. Invalid or
+/// missing fields are treated as their default and validated by the caller as
+/// a protocol failure.
+pub(crate) fn deserialize_or_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: DeserializeOwned + Default,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
 
 /// Build the reqwest client used by all provider clients.
 ///
@@ -1066,6 +1082,23 @@ pub fn handle_http_error(e: reqwest::Error, provider_name: &str) -> RStructorErr
     }
 }
 
+/// Classify an error returned while sending a materialization request.
+///
+/// Reqwest builder errors happen before a request can reach the network, so
+/// they are preflight failures rather than provider attempts.
+pub(crate) fn materialize_request_error(
+    error: reqwest::Error,
+    provider_name: &str,
+) -> MaterializeAttemptError {
+    let is_builder_error = error.is_builder();
+    let error = handle_http_error(error, provider_name);
+    if is_builder_error {
+        MaterializeAttemptError::preflight(error)
+    } else {
+        MaterializeAttemptError::transport(error)
+    }
+}
+
 /// Parse retry-after header value to Duration.
 fn parse_retry_after(value: &str) -> Option<Duration> {
     // Try parsing as seconds (most common)
@@ -1422,7 +1455,11 @@ where
                 usage,
             }) => {
                 let is_last_attempt = attempt >= max_attempts - 1;
-                let retried = !is_last_attempt;
+                let disposition = if is_last_attempt {
+                    RetryDisposition::BudgetExhausted
+                } else {
+                    RetryDisposition::Retried
+                };
                 if let Some(response_usage) = usage.clone() {
                     cumulative_usage
                         .get_or_insert_with(RunUsage::new)
@@ -1432,11 +1469,11 @@ where
                     attempt + 1,
                     AttemptKind::Semantic,
                     &attempt_error,
-                    retried,
+                    disposition,
                     usage,
                 ));
 
-                if retried {
+                if disposition == RetryDisposition::Retried {
                     warn!(
                         attempt = attempt + 1,
                         error = %context.error_message,
@@ -1470,7 +1507,14 @@ where
                 usage,
             }) => {
                 let is_last_attempt = attempt >= max_attempts - 1;
-                let retried = attempt_error.is_retryable() && !is_last_attempt;
+                let retryable = attempt_error.is_retryable();
+                let disposition = if !retryable {
+                    RetryDisposition::NonRetryable
+                } else if is_last_attempt {
+                    RetryDisposition::BudgetExhausted
+                } else {
+                    RetryDisposition::Retried
+                };
                 if let Some(response_usage) = usage.clone() {
                     cumulative_usage
                         .get_or_insert_with(RunUsage::new)
@@ -1480,11 +1524,11 @@ where
                     attempt + 1,
                     AttemptKind::Transport,
                     &attempt_error,
-                    retried,
+                    disposition,
                     usage,
                 ));
 
-                if retried {
+                if disposition == RetryDisposition::Retried {
                     let delay = attempt_error
                         .retry_delay()
                         .unwrap_or(Duration::from_secs(1));
@@ -1629,12 +1673,14 @@ macro_rules! impl_client_builder_methods {
                 self
             }
 
-            /// Set the maximum number of retry attempts for validation errors.
+            /// Set the shared materialization retry budget.
             ///
-            /// When `materialize` encounters a validation error, it will automatically
-            /// retry up to this many times, including the validation error message in subsequent attempts.
+            /// Semantic decode/validation failures re-ask with error feedback.
+            /// Retryable transport/provider failures retry the same history
+            /// after their classified delay. Both consume this one budget.
             ///
-            /// The default is 3 retries. Use `.no_retries()` to disable retries entirely.
+            /// The default is 3 retries (4 total attempts). Use
+            /// `.no_retries()` to make exactly one attempt.
             ///
             /// # Arguments
             ///
@@ -1661,10 +1707,11 @@ macro_rules! impl_client_builder_methods {
                 self
             }
 
-            /// Disable automatic retries on validation errors.
+            /// Disable automatic materialization retries.
             ///
-            /// By default, the client retries up to 3 times when validation errors occur.
-            /// Use this method to disable retries and fail immediately on the first error.
+            /// By default, the client retries semantic and retryable transport
+            /// failures up to 3 times. Use this method to stop after the first
+            /// failed attempt.
             ///
             /// # Examples
             ///
@@ -1672,7 +1719,7 @@ macro_rules! impl_client_builder_methods {
             /// # use rstructor::OpenAIClient;
             /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
             /// let client = OpenAIClient::new("api-key")?
-            ///     .no_retries();  // Fail immediately on validation errors
+            ///     .no_retries();  // Stop after the first failed attempt
             /// # Ok(())
             /// # }
             /// ```
@@ -4122,11 +4169,17 @@ mod tests {
         assert_eq!(report.attempts[2].kind, AttemptKind::Semantic);
         assert!(matches!(
             report.attempts[0].outcome,
-            crate::AttemptOutcome::Failed { retried: true, .. }
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::Retried,
+                ..
+            }
         ));
         assert!(matches!(
             report.attempts[1].outcome,
-            crate::AttemptOutcome::Failed { retried: true, .. }
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::Retried,
+                ..
+            }
         ));
         assert_eq!(report.attempts[2].outcome, crate::AttemptOutcome::Succeeded);
 
@@ -4179,11 +4232,17 @@ mod tests {
         assert_eq!(failure.attempts.len(), 2);
         assert!(matches!(
             failure.attempts[0].outcome,
-            crate::AttemptOutcome::Failed { retried: true, .. }
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::Retried,
+                ..
+            }
         ));
         assert!(matches!(
             failure.attempts[1].outcome,
-            crate::AttemptOutcome::Failed { retried: false, .. }
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::BudgetExhausted,
+                ..
+            }
         ));
         assert_eq!(
             failure.cumulative_usage.as_ref().unwrap().total_tokens(),
@@ -4229,7 +4288,10 @@ mod tests {
         assert_eq!(failure.attempts[0].kind, AttemptKind::Transport);
         assert!(matches!(
             failure.attempts[0].outcome,
-            crate::AttemptOutcome::Failed { retried: false, .. }
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::BudgetExhausted,
+                ..
+            }
         ));
     }
 
@@ -4267,11 +4329,17 @@ mod tests {
         assert_eq!(failure.attempts.len(), 2);
         assert!(matches!(
             failure.attempts[0].outcome,
-            crate::AttemptOutcome::Failed { retried: true, .. }
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::Retried,
+                ..
+            }
         ));
         assert!(matches!(
             failure.attempts[1].outcome,
-            crate::AttemptOutcome::Failed { retried: false, .. }
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::NonRetryable,
+                ..
+            }
         ));
         let usage = failure.cumulative_usage.unwrap();
         assert_eq!(usage.reported_attempts, 1);

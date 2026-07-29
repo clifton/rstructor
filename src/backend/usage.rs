@@ -54,9 +54,11 @@ impl TokenUsage {
 /// Cumulative token usage across every provider response in one materialization run.
 ///
 /// Providers normally use one model for the whole run, but `by_model` preserves
-/// exact accounting if a provider reports different concrete model versions
-/// across retries.
+/// accounting if a provider reports different concrete model versions across
+/// retries. Keys use the response's model identifier when present and the
+/// configured model as a fallback.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct RunUsage {
     /// Number of attempts whose provider response included token usage.
     ///
@@ -67,8 +69,13 @@ pub struct RunUsage {
     pub input_tokens: u64,
     /// Cumulative output tokens across all reported responses.
     pub output_tokens: u64,
-    /// Cumulative usage grouped by the exact model identifier reported.
+    /// Cumulative usage grouped by reported model, or configured-model fallback.
     pub by_model: BTreeMap<String, TokenUsage>,
+    /// Whether any cumulative counter exceeded its representable range.
+    ///
+    /// When this is `true`, affected counters and `total_tokens()` saturate at
+    /// their maximum value rather than panicking or wrapping.
+    pub overflowed: bool,
 }
 
 impl RunUsage {
@@ -88,26 +95,65 @@ impl RunUsage {
 
     /// Add one provider response to the cumulative totals.
     pub fn record(&mut self, usage: TokenUsage) {
-        self.reported_attempts += 1;
-        self.input_tokens += usage.input_tokens;
-        self.output_tokens += usage.output_tokens;
+        self.reported_attempts = match self.reported_attempts.checked_add(1) {
+            Some(attempts) => attempts,
+            None => {
+                self.overflowed = true;
+                usize::MAX
+            }
+        };
+        self.input_tokens =
+            saturating_add(&mut self.overflowed, self.input_tokens, usage.input_tokens);
+        self.output_tokens = saturating_add(
+            &mut self.overflowed,
+            self.output_tokens,
+            usage.output_tokens,
+        );
 
         let model_usage = self
             .by_model
             .entry(usage.model.clone())
             .or_insert_with(|| TokenUsage::new(usage.model, 0, 0));
-        model_usage.input_tokens += usage.input_tokens;
-        model_usage.output_tokens += usage.output_tokens;
+        model_usage.input_tokens = saturating_add(
+            &mut self.overflowed,
+            model_usage.input_tokens,
+            usage.input_tokens,
+        );
+        model_usage.output_tokens = saturating_add(
+            &mut self.overflowed,
+            model_usage.output_tokens,
+            usage.output_tokens,
+        );
+
+        if self.input_tokens.checked_add(self.output_tokens).is_none()
+            || model_usage
+                .input_tokens
+                .checked_add(model_usage.output_tokens)
+                .is_none()
+        {
+            self.overflowed = true;
+        }
     }
 
     /// Total known tokens used across the run.
     #[must_use]
     pub fn total_tokens(&self) -> u64 {
-        self.input_tokens + self.output_tokens
+        self.input_tokens.saturating_add(self.output_tokens)
+    }
+}
+
+fn saturating_add(overflowed: &mut bool, left: u64, right: u64) -> u64 {
+    match left.checked_add(right) {
+        Some(total) => total,
+        None => {
+            *overflowed = true;
+            u64::MAX
+        }
     }
 }
 
 /// Whether an attempt reached structured-output validation.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttemptKind {
     /// A structured response reached decoding and custom validation.
@@ -116,7 +162,20 @@ pub enum AttemptKind {
     Transport,
 }
 
+/// Why execution did or did not continue after a failed attempt.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryDisposition {
+    /// Another provider attempt was made.
+    Retried,
+    /// The error was retryable, but the configured attempt budget was exhausted.
+    BudgetExhausted,
+    /// The active retry policy did not permit another attempt for this error.
+    NonRetryable,
+}
+
 /// Outcome of one materialization attempt.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttemptOutcome {
     /// Structured output decoded and validated successfully.
@@ -125,13 +184,14 @@ pub enum AttemptOutcome {
     Failed {
         /// Human-readable error message.
         message: String,
-        /// Whether another attempt was actually made after this failure.
-        retried: bool,
+        /// Whether execution continued, exhausted its budget, or stopped early.
+        disposition: RetryDisposition,
     },
 }
 
 /// Immutable record of one materialization attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AttemptRecord {
     /// One-indexed attempt number.
     pub number: usize,
@@ -144,6 +204,7 @@ pub struct AttemptRecord {
 }
 
 impl AttemptRecord {
+    #[cfg(any(feature = "_client", feature = "mock"))]
     pub(crate) fn succeeded(number: usize, usage: Option<TokenUsage>) -> Self {
         Self {
             number,
@@ -153,11 +214,12 @@ impl AttemptRecord {
         }
     }
 
+    #[cfg(any(feature = "_client", feature = "mock"))]
     pub(crate) fn failed(
         number: usize,
         kind: AttemptKind,
         error: &RStructorError,
-        retried: bool,
+        disposition: RetryDisposition,
         usage: Option<TokenUsage>,
     ) -> Self {
         Self {
@@ -165,14 +227,15 @@ impl AttemptRecord {
             kind,
             outcome: AttemptOutcome::Failed {
                 message: error.to_string(),
-                retried,
+                disposition,
             },
             usage,
         }
     }
 }
 
-/// Successful structured-output run with its complete attempt ledger.
+/// Successful structured-output run with usage and available attempt metadata.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub struct MaterializeReport<T> {
     /// Deserialized and validated data.
@@ -183,9 +246,16 @@ pub struct MaterializeReport<T> {
     pub cumulative_usage: Option<RunUsage>,
     /// Ordered, one-indexed attempt ledger.
     pub attempts: Vec<AttemptRecord>,
+    /// Whether `attempts` and `cumulative_usage` cover the complete run.
+    ///
+    /// This is `true` for built-in providers and `MockClient`. It is `false`
+    /// for the default implementation used by custom clients, whose existing
+    /// materialization methods do not expose their internal attempts.
+    pub attempts_complete: bool,
 }
 
 impl<T> MaterializeReport<T> {
+    #[cfg(any(feature = "_client", feature = "mock"))]
     pub(crate) fn new(
         data: T,
         final_usage: Option<TokenUsage>,
@@ -197,24 +267,25 @@ impl<T> MaterializeReport<T> {
             final_usage,
             cumulative_usage,
             attempts,
+            attempts_complete: true,
         }
     }
 
-    /// Build a one-attempt report from a client's existing metadata result.
+    /// Build a report from final-only metadata with unavailable attempt history.
     ///
     /// This is used by the default [`LLMClient`](crate::LLMClient)
     /// implementation for custom clients that do not expose per-attempt
-    /// responses. Built-in clients override that method with the full ledger.
+    /// responses. `final_usage` remains available, but `cumulative_usage` and
+    /// `attempts` are empty and `attempts_complete` is `false`.
     #[must_use]
     pub fn from_result(result: MaterializeResult<T>) -> Self {
-        let final_usage = result.usage;
-        let cumulative_usage = final_usage.clone().map(RunUsage::from_response);
-        Self::new(
-            result.data,
-            final_usage.clone(),
-            cumulative_usage,
-            vec![AttemptRecord::succeeded(1, final_usage)],
-        )
+        Self {
+            data: result.data,
+            final_usage: result.usage,
+            cumulative_usage: None,
+            attempts: Vec::new(),
+            attempts_complete: false,
+        }
     }
 
     /// Map the successful data while preserving usage and attempt metadata.
@@ -224,6 +295,7 @@ impl<T> MaterializeReport<T> {
             final_usage: self.final_usage,
             cumulative_usage: self.cumulative_usage,
             attempts: self.attempts,
+            attempts_complete: self.attempts_complete,
         }
     }
 
@@ -234,7 +306,8 @@ impl<T> MaterializeReport<T> {
     }
 }
 
-/// Failed structured-output run with cumulative usage and every attempt.
+/// Failed structured-output run with available usage and attempt metadata.
+#[non_exhaustive]
 #[derive(Debug)]
 pub struct MaterializeFailure {
     /// Final error returned by the last or non-retryable attempt.
@@ -243,9 +316,12 @@ pub struct MaterializeFailure {
     pub cumulative_usage: Option<RunUsage>,
     /// Ordered, one-indexed attempt ledger.
     pub attempts: Vec<AttemptRecord>,
+    /// Whether `attempts` and `cumulative_usage` cover the complete run.
+    pub attempts_complete: bool,
 }
 
 impl MaterializeFailure {
+    #[cfg(any(feature = "_client", feature = "mock"))]
     pub(crate) fn new(
         error: RStructorError,
         cumulative_usage: Option<RunUsage>,
@@ -255,13 +331,19 @@ impl MaterializeFailure {
             error: Box::new(error),
             cumulative_usage,
             attempts,
+            attempts_complete: true,
         }
     }
 
     /// Create an empty-ledger failure when a client cannot expose attempt metadata.
     #[must_use]
     pub fn from_error(error: RStructorError) -> Self {
-        Self::new(error, None, Vec::new())
+        Self {
+            error: Box::new(error),
+            cumulative_usage: None,
+            attempts: Vec::new(),
+            attempts_complete: false,
+        }
     }
 
     /// Return the original final error.
@@ -376,6 +458,7 @@ mod tests {
         assert_eq!(usage.input_tokens, 500);
         assert_eq!(usage.output_tokens, 125);
         assert_eq!(usage.total_tokens(), 625);
+        assert!(!usage.overflowed);
         assert_eq!(
             usage.by_model["gpt-5.6-2026-07-01"],
             TokenUsage::new("gpt-5.6-2026-07-01", 300, 75)
@@ -387,17 +470,37 @@ mod tests {
     }
 
     #[test]
-    fn custom_client_result_becomes_one_successful_semantic_attempt() {
+    fn run_usage_saturates_and_flags_untrusted_counter_overflow() {
+        let mut usage = RunUsage::new();
+        usage.record(TokenUsage::new("hostile-compatible-endpoint", u64::MAX, 1));
+        usage.record(TokenUsage::new("hostile-compatible-endpoint", 1, u64::MAX));
+
+        assert!(usage.overflowed);
+        assert_eq!(usage.reported_attempts, 2);
+        assert_eq!(usage.input_tokens, u64::MAX);
+        assert_eq!(usage.output_tokens, u64::MAX);
+        assert_eq!(usage.total_tokens(), u64::MAX);
+        assert_eq!(
+            usage.by_model["hostile-compatible-endpoint"].input_tokens,
+            u64::MAX
+        );
+        assert_eq!(
+            usage.by_model["hostile-compatible-endpoint"].output_tokens,
+            u64::MAX
+        );
+    }
+
+    #[test]
+    fn custom_client_result_preserves_final_usage_without_inventing_attempts() {
         let final_usage = TokenUsage::new("mock-risk-model", 42, 11);
         let report =
             MaterializeReport::from_result(MaterializeResult::new("portfolio", Some(final_usage)));
 
         assert_eq!(report.data, "portfolio");
         assert_eq!(report.final_usage.as_ref().unwrap().total_tokens(), 53);
-        assert_eq!(report.cumulative_usage.as_ref().unwrap().total_tokens(), 53);
-        assert_eq!(report.attempts.len(), 1);
-        assert_eq!(report.attempts[0].kind, AttemptKind::Semantic);
-        assert_eq!(report.attempts[0].outcome, AttemptOutcome::Succeeded);
+        assert!(report.cumulative_usage.is_none());
+        assert!(report.attempts.is_empty());
+        assert!(!report.attempts_complete);
     }
 
     #[test]
@@ -407,6 +510,7 @@ mod tests {
 
         assert!(failure.attempts.is_empty());
         assert!(failure.cumulative_usage.is_none());
+        assert!(!failure.attempts_complete);
         assert!(matches!(failure.error(), RStructorError::SchemaError(_)));
     }
 }

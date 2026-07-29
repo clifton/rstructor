@@ -270,7 +270,10 @@ async fn attempt_report_accumulates_semantic_retry_usage_by_model() {
     assert_eq!(report.attempts[1].kind, AttemptKind::Semantic);
     assert!(matches!(
         report.attempts[0].outcome,
-        AttemptOutcome::Failed { retried: true, .. }
+        AttemptOutcome::Failed {
+            disposition: rstructor::RetryDisposition::Retried,
+            ..
+        }
     ));
     assert_eq!(report.attempts[1].outcome, AttemptOutcome::Succeeded);
     assert_eq!(
@@ -341,6 +344,87 @@ async fn existing_metadata_keeps_final_response_usage_after_reask() {
 }
 
 #[tokio::test]
+async fn earlier_usage_survives_when_success_omits_usage_but_legacy_metadata_stays_final_only() {
+    let invalid = include_str!("fixtures/structured/portfolio_invalid_quantity.json");
+    let valid = include_str!("fixtures/structured/portfolio_valid.json");
+
+    let mut report_server = mockito::Server::new_async().await;
+    let report_bad = report_server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(invalid),
+            "risk-router",
+            90,
+            15,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+    let report_good = report_server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::Regex(
+            r"\$\.positions\[1\]\.quantity".to_string(),
+        ))
+        .with_status(200)
+        .with_body(chat_completion(valid))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let report = client(&report_server)
+        .max_retries(1)
+        .materialize_with_attempts::<Portfolio>("reconcile the futures book")
+        .await
+        .unwrap();
+
+    assert!(report.attempts_complete);
+    assert_eq!(report.attempts.len(), 2);
+    assert!(report.final_usage.is_none());
+    assert!(report.attempts[1].usage.is_none());
+    assert_eq!(
+        report.cumulative_usage.as_ref().unwrap().total_tokens(),
+        105
+    );
+    report_bad.assert_async().await;
+    report_good.assert_async().await;
+
+    let mut legacy_server = mockito::Server::new_async().await;
+    let legacy_bad = legacy_server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(invalid),
+            "risk-router",
+            90,
+            15,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+    let legacy_good = legacy_server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::Regex(
+            r"\$\.positions\[1\]\.quantity".to_string(),
+        ))
+        .with_status(200)
+        .with_body(chat_completion(valid))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let legacy = client(&legacy_server)
+        .max_retries(1)
+        .materialize_with_metadata::<Portfolio>("reconcile the futures book")
+        .await
+        .unwrap();
+
+    assert!(legacy.usage.is_none());
+    legacy_bad.assert_async().await;
+    legacy_good.assert_async().await;
+}
+
+#[tokio::test]
 async fn retryable_provider_error_is_a_transport_attempt_without_history_mutation() {
     let mut server = mockito::Server::new_async().await;
     let rate_limited = server
@@ -376,7 +460,10 @@ async fn retryable_provider_error_is_a_transport_attempt_without_history_mutatio
     assert_eq!(report.attempts[0].kind, AttemptKind::Transport);
     assert!(matches!(
         report.attempts[0].outcome,
-        AttemptOutcome::Failed { retried: true, .. }
+        AttemptOutcome::Failed {
+            disposition: rstructor::RetryDisposition::Retried,
+            ..
+        }
     ));
     assert_eq!(report.attempts[1].kind, AttemptKind::Semantic);
     assert_eq!(
@@ -396,7 +483,7 @@ async fn malformed_envelope_retains_usage_as_an_unretried_transport_attempt() {
         .with_header("content-type", "application/json")
         .with_body(
             json!({
-                "choices": [],
+                "choices": { "unexpected": "object instead of array" },
                 "usage": {
                     "prompt_tokens": 55,
                     "completion_tokens": 3,
@@ -423,7 +510,10 @@ async fn malformed_envelope_retains_usage_as_an_unretried_transport_attempt() {
     assert_eq!(failure.attempts[0].kind, AttemptKind::Transport);
     assert!(matches!(
         failure.attempts[0].outcome,
-        AttemptOutcome::Failed { retried: false, .. }
+        AttemptOutcome::Failed {
+            disposition: rstructor::RetryDisposition::NonRetryable,
+            ..
+        }
     ));
     assert_eq!(
         failure.attempts[0].usage.as_ref().unwrap().total_tokens(),
@@ -434,6 +524,73 @@ async fn malformed_envelope_retains_usage_as_an_unretried_transport_attempt() {
         58
     );
     malformed.assert_async().await;
+}
+
+#[tokio::test]
+async fn invalid_request_url_is_preflight_and_records_no_provider_attempt() {
+    let failure = OpenAIClient::new("test-key")
+        .unwrap()
+        .base_url("://invalid-url")
+        .materialize_with_attempts::<Movie>("a film")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        RStructorError::HttpError(error) if error.is_builder()
+    ));
+    assert!(failure.attempts.is_empty());
+    assert!(failure.cumulative_usage.is_none());
+}
+
+#[tokio::test]
+async fn media_attempt_report_uses_provider_path_and_retains_usage() {
+    use rstructor::MediaFile;
+
+    let mut server = mockito::Server::new_async().await;
+    let valid = include_str!("fixtures/structured/portfolio_valid.json");
+    let request = server
+        .mock("POST", "/chat/completions")
+        .match_body(mockito::Matcher::PartialJson(json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "reconcile the chart" },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,YWJj",
+                            "detail": "auto",
+                        },
+                    },
+                ],
+            }],
+        })))
+        .with_status(200)
+        .with_body(chat_completion_with_usage(
+            Some(valid),
+            "vision-risk-router",
+            75,
+            12,
+        ))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let media = [MediaFile::from_bytes(b"abc", "image/png")];
+    let report = client(&server)
+        .materialize_with_media_and_attempts::<Portfolio>("reconcile the chart", &media)
+        .await
+        .unwrap();
+
+    assert!(report.attempts_complete);
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(
+        report.final_usage.as_ref().unwrap().model,
+        "vision-risk-router"
+    );
+    assert_eq!(report.cumulative_usage.as_ref().unwrap().total_tokens(), 87);
+    request.assert_async().await;
 }
 
 #[tokio::test]

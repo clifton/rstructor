@@ -99,6 +99,7 @@ async fn custom_client_attempt_defaults_add_no_required_trait_methods_or_fake_at
     ));
     assert!(failure.attempts.is_empty());
     assert!(failure.cumulative_usage.is_none());
+    assert!(!failure.attempts_complete);
 }
 
 /// Fluent `Request` builder routing, exercised with the first-party `MockClient`.

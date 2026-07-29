@@ -60,7 +60,7 @@ use crate::backend::ModelInfo;
 use crate::backend::client::{LLMClient, MediaFile};
 use crate::backend::usage::{
     AttemptKind, AttemptRecord, GenerateResult, MaterializeFailure, MaterializeReport,
-    MaterializeResult, RunUsage, TokenUsage,
+    MaterializeResult, RetryDisposition, RunUsage, TokenUsage,
 };
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
@@ -196,6 +196,7 @@ impl ScriptedResponse {
 
 /// Which [`LLMClient`](crate::LLMClient) (or extension) method produced a
 /// [`RecordedRequest`].
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestKind {
     /// [`LLMClient::materialize`](crate::LLMClient::materialize)
@@ -669,15 +670,19 @@ impl MockClient {
                             ));
                         }
                         Err(error) => {
-                            let retried = attempt + 1 < attempts;
+                            let disposition = if attempt + 1 < attempts {
+                                RetryDisposition::Retried
+                            } else {
+                                RetryDisposition::BudgetExhausted
+                            };
                             ledger.push(AttemptRecord::failed(
                                 attempt + 1,
                                 AttemptKind::Semantic,
                                 &error,
-                                retried,
+                                disposition,
                                 usage,
                             ));
-                            if !retried {
+                            if disposition != RetryDisposition::Retried {
                                 return Err(MaterializeFailure::new(
                                     error,
                                     cumulative_usage,
@@ -701,7 +706,7 @@ impl MockClient {
                         attempt + 1,
                         AttemptKind::Transport,
                         &error,
-                        false,
+                        RetryDisposition::NonRetryable,
                         usage,
                     ));
                     return Err(MaterializeFailure::new(error, cumulative_usage, ledger));

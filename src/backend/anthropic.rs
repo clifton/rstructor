@@ -12,7 +12,7 @@ use crate::backend::{
     MaterializeResult, ModelInfo, StrictSchemaProvider, ThinkingLevel, TokenUsage,
     build_anthropic_message_content, build_http_client, check_response_status,
     compile_strict_schema, generate_with_retry_attempts_with_history,
-    generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_with_history, handle_http_error, materialize_request_error,
     materialize_with_media_and_attempts_with_retry, materialize_with_media_with_retry,
     parse_validate_and_create_output,
 };
@@ -181,9 +181,20 @@ struct UsageInfo {
 
 #[derive(Debug, Deserialize)]
 struct CompletionResponse {
+    #[serde(
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     content: Vec<ContentBlock>,
+    #[serde(
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     model: Option<String>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     usage: Option<UsageInfo>,
 }
 
@@ -386,9 +397,7 @@ impl AnthropicClient {
             .json(&request)
             .send()
             .await
-            .map_err(|error| {
-                MaterializeAttemptError::transport(handle_http_error(error, "Anthropic"))
-            })?;
+            .map_err(|error| materialize_request_error(error, "Anthropic"))?;
 
         // Parse the response
         let response = check_response_status(response, "Anthropic")

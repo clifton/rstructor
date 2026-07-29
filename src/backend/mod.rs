@@ -49,7 +49,7 @@ pub use streaming::{ItemStream, ObjectStream, StreamedObject, TextStream};
 pub use tools::{DynTool, FnTool, Tool, ToolRunner, Toolbox};
 pub use usage::{
     AttemptKind, AttemptOutcome, AttemptRecord, GenerateResult, MaterializeFailure,
-    MaterializeReport, MaterializeResult, RunUsage, TokenUsage,
+    MaterializeReport, MaterializeResult, RetryDisposition, RunUsage, TokenUsage,
 };
 
 /// Information about an available model from an LLM provider.
@@ -100,8 +100,8 @@ pub use utils::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
 pub(crate) use utils::{
     ResponseFormat, build_http_client, check_response_status,
     generate_with_retry_attempts_with_history, generate_with_retry_with_history, handle_http_error,
-    materialize_with_media_and_attempts_with_retry, materialize_with_media_with_retry,
-    parse_validate_and_create_output,
+    materialize_request_error, materialize_with_media_and_attempts_with_retry,
+    materialize_with_media_with_retry, parse_validate_and_create_output,
 };
 
 /// Thinking level configuration for models that support extended reasoning.

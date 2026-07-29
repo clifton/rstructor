@@ -67,9 +67,20 @@ pub(crate) struct OpenAICompatibleUsageInfo {
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct OpenAICompatibleChatCompletionResponse {
+    #[serde(
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     pub choices: Vec<OpenAICompatibleChatCompletionChoice>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     pub usage: Option<OpenAICompatibleUsageInfo>,
+    #[serde(
+        default,
+        deserialize_with = "crate::backend::utils::deserialize_or_default"
+    )]
     pub model: Option<String>,
 }
 

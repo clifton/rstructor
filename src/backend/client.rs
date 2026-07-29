@@ -282,8 +282,9 @@ pub trait LLMClient {
     /// Built-in clients retain each successful, semantic-failed, or transport
     /// attempt together with per-response and cumulative usage. Local preflight
     /// failures have an empty ledger because no provider attempt occurred.
-    /// Custom clients receive a one-attempt success report and an empty-ledger
-    /// failure unless they override this method with richer information.
+    /// Custom clients receive final-only success metadata or the original
+    /// failure with `attempts_complete == false` unless they override this
+    /// method with richer information.
     ///
     /// This method returns [`MaterializeFailure`] on error so callers can inspect
     /// usage and attempts even when every retry fails. [`materialize`](Self::materialize)
