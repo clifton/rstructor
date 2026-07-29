@@ -515,6 +515,9 @@ let client = OpenAIClient::from_env()?
 
 ## Token Usage
 
+`materialize_with_metadata` preserves its original behavior: `usage` describes
+only the final successful provider response.
+
 ```rust
 let result = client.materialize_with_metadata::<Movie>("...").await?;
 println!("Movie: {}", result.data.title);
@@ -522,6 +525,38 @@ if let Some(usage) = result.usage {
     println!("Tokens: {} in, {} out", usage.input_tokens, usage.output_tokens);
 }
 ```
+
+Use `materialize_with_attempts` when retry cost or failure observability matters.
+It returns an ordered ledger plus cumulative known usage, including provider
+responses that failed decoding or validation:
+
+```rust
+match client.materialize_with_attempts::<Portfolio>("Reconcile the fund book").await {
+    Ok(report) => {
+        println!("Portfolio: {:?}", report.data);
+        println!("Provider attempts: {}", report.attempts.len());
+        if let Some(usage) = report.cumulative_usage {
+            println!("Known run tokens: {}", usage.total_tokens());
+            for (model, model_usage) in usage.by_model {
+                println!("{model}: {} tokens", model_usage.total_tokens());
+            }
+        }
+    }
+    Err(failure) => {
+        eprintln!("Final error: {}", failure.error());
+        eprintln!("Attempts made: {}", failure.attempts.len());
+        if let Some(usage) = failure.cumulative_usage {
+            eprintln!("Known tokens before failure: {}", usage.total_tokens());
+        }
+    }
+}
+```
+
+Usage is conservative: attempts remain in the ledger when a provider omits
+token metadata, while cumulative totals include only responses with reported
+usage. Local schema/media preflight failures record zero provider attempts.
+See `examples/retry_attempt_ledger.rs` for a complete success-and-failure
+example.
 
 ## Error Handling
 
@@ -743,6 +778,7 @@ cargo run --example nested_objects_example
 cargo run --example enum_with_data_example
 cargo run --example serde_rename_example
 cargo run --example gemini_multimodal_example
+cargo run --example retry_attempt_ledger --features openai
 ```
 
 ## For Python Developers
