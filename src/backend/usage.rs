@@ -1,3 +1,8 @@
+use std::collections::BTreeMap;
+use std::fmt;
+
+use crate::error::RStructorError;
+
 /// Token usage information from an LLM API call.
 ///
 /// This struct contains the token counts returned by LLM providers,
@@ -6,17 +11,12 @@
 /// # Example
 ///
 /// ```no_run
-/// use rstructor::{LLMClient, OpenAIClient, Instructor};
-/// use serde::{Serialize, Deserialize};
-///
-/// #[derive(Instructor, Serialize, Deserialize)]
-/// struct Movie { title: String }
+/// use rstructor::{LLMClient, OpenAIClient};
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let client = OpenAIClient::from_env()?;
-/// let result = client.materialize_with_metadata::<Movie>("Describe Inception").await?;
+/// let result = client.generate_with_metadata("Describe Inception").await?;
 ///
-/// println!("Movie: {}", result.data.title);
 /// if let Some(usage) = &result.usage {
 ///     println!("Model: {}", usage.model);
 ///     println!("Input tokens: {}", usage.input_tokens);
@@ -51,10 +51,330 @@ impl TokenUsage {
     }
 }
 
+/// Cumulative token usage across every provider response in one materialization run.
+///
+/// Providers normally use one model for the whole run, but `by_model` preserves
+/// accounting if a provider reports different concrete model versions across
+/// retries. Keys use the response's model identifier when present and the
+/// configured model as a fallback.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub struct RunUsage {
+    /// Number of attempts whose provider response included token usage.
+    ///
+    /// This can be lower than the number of attempts when a transport error
+    /// occurs or a provider omits usage metadata.
+    pub reported_attempts: usize,
+    /// Cumulative input tokens across all reported responses.
+    pub input_tokens: u64,
+    /// Cumulative output tokens across all reported responses.
+    pub output_tokens: u64,
+    /// Cumulative usage grouped by reported model, or configured-model fallback.
+    pub by_model: BTreeMap<String, TokenUsage>,
+    /// Whether any cumulative counter exceeded its representable range.
+    ///
+    /// When this is `true`, affected counters and `total_tokens()` saturate at
+    /// their maximum value rather than panicking or wrapping.
+    pub overflowed: bool,
+}
+
+impl RunUsage {
+    /// Create an empty cumulative usage record.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create cumulative usage from one provider response.
+    #[must_use]
+    pub fn from_response(usage: TokenUsage) -> Self {
+        let mut total = Self::new();
+        total.record(usage);
+        total
+    }
+
+    /// Add one provider response to the cumulative totals.
+    pub fn record(&mut self, usage: TokenUsage) {
+        self.reported_attempts = match self.reported_attempts.checked_add(1) {
+            Some(attempts) => attempts,
+            None => {
+                self.overflowed = true;
+                usize::MAX
+            }
+        };
+        self.input_tokens =
+            saturating_add(&mut self.overflowed, self.input_tokens, usage.input_tokens);
+        self.output_tokens = saturating_add(
+            &mut self.overflowed,
+            self.output_tokens,
+            usage.output_tokens,
+        );
+
+        let model_usage = self
+            .by_model
+            .entry(usage.model.clone())
+            .or_insert_with(|| TokenUsage::new(usage.model, 0, 0));
+        model_usage.input_tokens = saturating_add(
+            &mut self.overflowed,
+            model_usage.input_tokens,
+            usage.input_tokens,
+        );
+        model_usage.output_tokens = saturating_add(
+            &mut self.overflowed,
+            model_usage.output_tokens,
+            usage.output_tokens,
+        );
+
+        if self.input_tokens.checked_add(self.output_tokens).is_none()
+            || model_usage
+                .input_tokens
+                .checked_add(model_usage.output_tokens)
+                .is_none()
+        {
+            self.overflowed = true;
+        }
+    }
+
+    /// Total known tokens used across the run.
+    #[must_use]
+    pub fn total_tokens(&self) -> u64 {
+        self.input_tokens.saturating_add(self.output_tokens)
+    }
+}
+
+fn saturating_add(overflowed: &mut bool, left: u64, right: u64) -> u64 {
+    match left.checked_add(right) {
+        Some(total) => total,
+        None => {
+            *overflowed = true;
+            u64::MAX
+        }
+    }
+}
+
+/// Whether an attempt reached structured-output validation.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttemptKind {
+    /// A structured response reached decoding and custom validation.
+    Semantic,
+    /// A provider request did not produce a usable structured response.
+    Transport,
+}
+
+/// Why execution did or did not continue after a failed attempt.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryDisposition {
+    /// Another provider attempt was made.
+    Retried,
+    /// The error was retryable, but the configured attempt budget was exhausted.
+    BudgetExhausted,
+    /// The active retry policy did not permit another attempt for this error.
+    NonRetryable,
+}
+
+/// Outcome of one materialization attempt.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttemptOutcome {
+    /// Structured output decoded and validated successfully.
+    Succeeded,
+    /// The attempt failed.
+    Failed {
+        /// Human-readable error message.
+        message: String,
+        /// Whether execution continued, exhausted its budget, or stopped early.
+        disposition: RetryDisposition,
+    },
+}
+
+/// Immutable record of one materialization attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AttemptRecord {
+    /// One-indexed attempt number.
+    pub number: usize,
+    /// Whether this was a semantic or transport attempt.
+    pub kind: AttemptKind,
+    /// Success or categorized failure information.
+    pub outcome: AttemptOutcome,
+    /// Per-response token usage, when reported by the provider.
+    pub usage: Option<TokenUsage>,
+}
+
+impl AttemptRecord {
+    #[cfg(any(feature = "_client", feature = "mock"))]
+    pub(crate) fn succeeded(number: usize, usage: Option<TokenUsage>) -> Self {
+        Self {
+            number,
+            kind: AttemptKind::Semantic,
+            outcome: AttemptOutcome::Succeeded,
+            usage,
+        }
+    }
+
+    #[cfg(any(feature = "_client", feature = "mock"))]
+    pub(crate) fn failed(
+        number: usize,
+        kind: AttemptKind,
+        error: &RStructorError,
+        disposition: RetryDisposition,
+        usage: Option<TokenUsage>,
+    ) -> Self {
+        Self {
+            number,
+            kind,
+            outcome: AttemptOutcome::Failed {
+                message: error.to_string(),
+                disposition,
+            },
+            usage,
+        }
+    }
+}
+
+/// Successful structured-output run with usage and available attempt metadata.
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct MaterializeReport<T> {
+    /// Deserialized and validated data.
+    pub data: T,
+    /// Usage from the final successful provider response.
+    pub final_usage: Option<TokenUsage>,
+    /// Cumulative known usage across every provider response in this run.
+    pub cumulative_usage: Option<RunUsage>,
+    /// Ordered, one-indexed attempt ledger.
+    pub attempts: Vec<AttemptRecord>,
+    /// Whether `attempts` and `cumulative_usage` cover the complete run.
+    ///
+    /// This is `true` for built-in providers and `MockClient`. It is `false`
+    /// for the default implementation used by custom clients, whose existing
+    /// materialization methods do not expose their internal attempts.
+    pub attempts_complete: bool,
+}
+
+impl<T> MaterializeReport<T> {
+    #[cfg(any(feature = "_client", feature = "mock"))]
+    pub(crate) fn new(
+        data: T,
+        final_usage: Option<TokenUsage>,
+        cumulative_usage: Option<RunUsage>,
+        attempts: Vec<AttemptRecord>,
+    ) -> Self {
+        Self {
+            data,
+            final_usage,
+            cumulative_usage,
+            attempts,
+            attempts_complete: true,
+        }
+    }
+
+    /// Build a report from final-only metadata with unavailable attempt history.
+    ///
+    /// This is used by the default [`LLMClient`](crate::LLMClient)
+    /// implementation for custom clients that do not expose per-attempt
+    /// responses. `final_usage` remains available, but `cumulative_usage` and
+    /// `attempts` are empty and `attempts_complete` is `false`.
+    #[must_use]
+    pub fn from_result(result: MaterializeResult<T>) -> Self {
+        Self {
+            data: result.data,
+            final_usage: result.usage,
+            cumulative_usage: None,
+            attempts: Vec::new(),
+            attempts_complete: false,
+        }
+    }
+
+    /// Map the successful data while preserving usage and attempt metadata.
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> MaterializeReport<U> {
+        MaterializeReport {
+            data: f(self.data),
+            final_usage: self.final_usage,
+            cumulative_usage: self.cumulative_usage,
+            attempts: self.attempts,
+            attempts_complete: self.attempts_complete,
+        }
+    }
+
+    /// Discard the attempt ledger and keep the successful data and final usage.
+    #[must_use]
+    pub fn into_result(self) -> MaterializeResult<T> {
+        MaterializeResult::new(self.data, self.final_usage)
+    }
+}
+
+/// Failed structured-output run with available usage and attempt metadata.
+#[non_exhaustive]
+#[derive(Debug)]
+pub struct MaterializeFailure {
+    /// Final error returned by the last or non-retryable attempt.
+    error: Box<RStructorError>,
+    /// Cumulative known token usage across every provider response.
+    pub cumulative_usage: Option<RunUsage>,
+    /// Ordered, one-indexed attempt ledger.
+    pub attempts: Vec<AttemptRecord>,
+    /// Whether `attempts` and `cumulative_usage` cover the complete run.
+    pub attempts_complete: bool,
+}
+
+impl MaterializeFailure {
+    #[cfg(any(feature = "_client", feature = "mock"))]
+    pub(crate) fn new(
+        error: RStructorError,
+        cumulative_usage: Option<RunUsage>,
+        attempts: Vec<AttemptRecord>,
+    ) -> Self {
+        Self {
+            error: Box::new(error),
+            cumulative_usage,
+            attempts,
+            attempts_complete: true,
+        }
+    }
+
+    /// Create an empty-ledger failure when a client cannot expose attempt metadata.
+    #[must_use]
+    pub fn from_error(error: RStructorError) -> Self {
+        Self {
+            error: Box::new(error),
+            cumulative_usage: None,
+            attempts: Vec::new(),
+            attempts_complete: false,
+        }
+    }
+
+    /// Return the original final error.
+    #[must_use]
+    pub fn error(&self) -> &RStructorError {
+        &self.error
+    }
+
+    /// Consume the report and return the original final error.
+    #[must_use]
+    pub fn into_error(self) -> RStructorError {
+        *self.error
+    }
+}
+
+impl fmt::Display for MaterializeFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error().fmt(formatter)
+    }
+}
+
+impl std::error::Error for MaterializeFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error())
+    }
+}
+
 /// Result of a materialize call, containing both the data and optional usage information.
 ///
 /// This struct wraps the deserialized data along with token usage metadata
-/// from the LLM API call.
+/// from the final successful LLM API call.
 ///
 /// # Example
 ///
@@ -120,5 +440,77 @@ impl GenerateResult {
     /// Create a new GenerateResult with text and usage
     pub fn new(text: String, usage: Option<TokenUsage>) -> Self {
         Self { text, usage }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_usage_groups_exact_provider_model_versions() {
+        let mut usage = RunUsage::new();
+        usage.record(TokenUsage::new("gpt-5.6-2026-07-01", 120, 30));
+        usage.record(TokenUsage::new("gpt-5.6-2026-07-01", 180, 45));
+        usage.record(TokenUsage::new("gpt-5.6-2026-07-15", 200, 50));
+
+        assert_eq!(usage.reported_attempts, 3);
+        assert_eq!(usage.input_tokens, 500);
+        assert_eq!(usage.output_tokens, 125);
+        assert_eq!(usage.total_tokens(), 625);
+        assert!(!usage.overflowed);
+        assert_eq!(
+            usage.by_model["gpt-5.6-2026-07-01"],
+            TokenUsage::new("gpt-5.6-2026-07-01", 300, 75)
+        );
+        assert_eq!(
+            usage.by_model["gpt-5.6-2026-07-15"],
+            TokenUsage::new("gpt-5.6-2026-07-15", 200, 50)
+        );
+    }
+
+    #[test]
+    fn run_usage_saturates_and_flags_untrusted_counter_overflow() {
+        let mut usage = RunUsage::new();
+        usage.record(TokenUsage::new("hostile-compatible-endpoint", u64::MAX, 1));
+        usage.record(TokenUsage::new("hostile-compatible-endpoint", 1, u64::MAX));
+
+        assert!(usage.overflowed);
+        assert_eq!(usage.reported_attempts, 2);
+        assert_eq!(usage.input_tokens, u64::MAX);
+        assert_eq!(usage.output_tokens, u64::MAX);
+        assert_eq!(usage.total_tokens(), u64::MAX);
+        assert_eq!(
+            usage.by_model["hostile-compatible-endpoint"].input_tokens,
+            u64::MAX
+        );
+        assert_eq!(
+            usage.by_model["hostile-compatible-endpoint"].output_tokens,
+            u64::MAX
+        );
+    }
+
+    #[test]
+    fn custom_client_result_preserves_final_usage_without_inventing_attempts() {
+        let final_usage = TokenUsage::new("mock-risk-model", 42, 11);
+        let report =
+            MaterializeReport::from_result(MaterializeResult::new("portfolio", Some(final_usage)));
+
+        assert_eq!(report.data, "portfolio");
+        assert_eq!(report.final_usage.as_ref().unwrap().total_tokens(), 53);
+        assert!(report.cumulative_usage.is_none());
+        assert!(report.attempts.is_empty());
+        assert!(!report.attempts_complete);
+    }
+
+    #[test]
+    fn unknown_custom_client_failure_does_not_invent_a_provider_attempt() {
+        let failure =
+            MaterializeFailure::from_error(RStructorError::SchemaError("bad schema".into()));
+
+        assert!(failure.attempts.is_empty());
+        assert!(failure.cumulative_usage.is_none());
+        assert!(!failure.attempts_complete);
+        assert!(matches!(failure.error(), RStructorError::SchemaError(_)));
     }
 }

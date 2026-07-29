@@ -72,6 +72,125 @@ async fn metadata_usage_can_be_configured() {
 }
 
 #[tokio::test]
+async fn attempt_report_uses_per_response_usage_for_realistic_reask_fixture() {
+    use rstructor::{AttemptKind, AttemptOutcome, TokenUsage};
+
+    let client = MockClient::new()
+        .with_response_and_usage(
+            include_str!("fixtures/structured/portfolio_invalid_quantity.json"),
+            TokenUsage::new("mock-risk-router-v1", 90, 15),
+        )
+        .with_response_and_usage(
+            include_str!("fixtures/structured/portfolio_valid.json"),
+            TokenUsage::new("mock-risk-router-v2", 120, 18),
+        )
+        .with_retries(1);
+
+    let report = client
+        .materialize_with_attempts::<Portfolio>("reconcile positions")
+        .await
+        .unwrap();
+
+    assert_eq!(report.data.positions[1].quantity, -240);
+    assert_eq!(report.attempts.len(), 2);
+    assert_eq!(report.attempts[0].kind, AttemptKind::Semantic);
+    assert!(matches!(
+        report.attempts[0].outcome,
+        AttemptOutcome::Failed {
+            disposition: rstructor::RetryDisposition::Retried,
+            ..
+        }
+    ));
+    assert_eq!(report.attempts[1].outcome, AttemptOutcome::Succeeded);
+    assert_eq!(
+        report.cumulative_usage.as_ref().unwrap().total_tokens(),
+        243
+    );
+    assert_eq!(
+        report.final_usage.as_ref().unwrap().model,
+        "mock-risk-router-v2"
+    );
+    assert_eq!(
+        client.last_request().unwrap().kind,
+        RequestKind::MaterializeWithAttempts
+    );
+    assert_eq!(client.request_count(), 1);
+}
+
+#[tokio::test]
+async fn attempt_exhaustion_keeps_usage_and_final_decode_error() {
+    use rstructor::{AttemptOutcome, TokenUsage};
+
+    let invalid = include_str!("fixtures/structured/portfolio_invalid_quantity.json");
+    let client = MockClient::new()
+        .with_response_and_usage(invalid, TokenUsage::new("mock-risk-router", 80, 10))
+        .with_response_and_usage(invalid, TokenUsage::new("mock-risk-router", 100, 12))
+        .with_retries(1);
+
+    let failure = client
+        .materialize_with_attempts::<Portfolio>("reconcile positions")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        RStructorError::OutputDecodeError { path, .. }
+            if path == "$.positions[1].quantity"
+    ));
+    assert_eq!(failure.attempts.len(), 2);
+    assert!(matches!(
+        failure.attempts[1].outcome,
+        AttemptOutcome::Failed {
+            disposition: rstructor::RetryDisposition::BudgetExhausted,
+            ..
+        }
+    ));
+    assert_eq!(
+        failure.cumulative_usage.as_ref().unwrap().total_tokens(),
+        202
+    );
+}
+
+#[tokio::test]
+async fn scripted_transport_error_retains_usage_without_retrying() {
+    use rstructor::{ApiErrorKind, AttemptKind, AttemptOutcome, RetryDisposition, TokenUsage};
+
+    let client = MockClient::new()
+        .with_response_and_usage(
+            MockResponse::Error(RStructorError::api_error(
+                "MockProvider",
+                ApiErrorKind::AuthenticationFailed,
+            )),
+            TokenUsage::new("mock-risk-router", 22, 3),
+        )
+        .with_retries(3);
+
+    let failure = client
+        .materialize_with_attempts::<Portfolio>("reconcile positions")
+        .await
+        .unwrap_err();
+
+    assert!(failure.attempts_complete);
+    assert_eq!(failure.attempts.len(), 1);
+    assert_eq!(failure.attempts[0].kind, AttemptKind::Transport);
+    assert!(matches!(
+        failure.attempts[0].outcome,
+        AttemptOutcome::Failed {
+            disposition: RetryDisposition::NonRetryable,
+            ..
+        }
+    ));
+    assert_eq!(
+        failure.attempts[0].usage.as_ref().unwrap().total_tokens(),
+        25
+    );
+    assert_eq!(
+        failure.cumulative_usage.as_ref().unwrap().total_tokens(),
+        25
+    );
+}
+
+#[tokio::test]
 async fn queue_is_fifo() {
     let client = MockClient::new()
         .with_response(r#"{"title":"First","year":2001}"#)

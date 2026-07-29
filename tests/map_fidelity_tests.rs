@@ -91,6 +91,22 @@ async fn openai_rejects_dynamic_maps_before_http() {
     assert_map_compatibility_error(error, "OpenAI", "structured output");
 }
 
+#[cfg(feature = "openai")]
+#[tokio::test]
+async fn openai_attempt_report_keeps_preflight_failure_out_of_provider_ledger() {
+    let server = mockito::Server::new_async().await;
+    let failure = rstructor::OpenAIClient::new("test-key")
+        .unwrap()
+        .base_url(server.url())
+        .materialize_with_attempts::<MappedPortfolio>("reconcile the portfolio")
+        .await
+        .unwrap_err();
+
+    assert!(failure.attempts.is_empty());
+    assert!(failure.cumulative_usage.is_none());
+    assert_map_compatibility_error(failure.into_error(), "OpenAI", "structured output");
+}
+
 #[cfg(feature = "anthropic")]
 #[tokio::test]
 async fn anthropic_rejects_dynamic_maps_before_http() {

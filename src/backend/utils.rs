@@ -1,5 +1,7 @@
 use crate::backend::{
-    ChatMessage, MaterializeInternalOutput, TokenUsage, ValidationFailureContext,
+    AttemptKind, AttemptRecord, ChatMessage, MaterializeAttemptError, MaterializeFailure,
+    MaterializeInternalOutput, MaterializeReport, RetryDisposition, RunUsage, TokenUsage,
+    ValidationFailureContext,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -1034,16 +1036,20 @@ where
 pub fn parse_validate_and_create_output<T>(
     raw_response: String,
     usage: Option<TokenUsage>,
-) -> std::result::Result<
-    MaterializeInternalOutput<T>,
-    (RStructorError, Option<ValidationFailureContext>),
->
+) -> std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>
 where
     T: Instructor + DeserializeOwned,
 {
-    let result = parse_and_validate_response::<T>(&raw_response)?;
-    info!("Successfully generated and validated structured data");
-    Ok(MaterializeInternalOutput::new(result, raw_response, usage))
+    match parse_and_validate_response::<T>(&raw_response) {
+        Ok(result) => {
+            info!("Successfully generated and validated structured data");
+            Ok(MaterializeInternalOutput::new(result, raw_response, usage))
+        }
+        Err((error, Some(context))) => {
+            Err(MaterializeAttemptError::semantic(error, context, usage))
+        }
+        Err((error, None)) => Err(MaterializeAttemptError::transport_with_usage(error, usage)),
+    }
 }
 
 /// Convert a reqwest error to a RStructorError, handling timeout errors specially.
@@ -1058,6 +1064,23 @@ pub fn handle_http_error(e: reqwest::Error, provider_name: &str) -> RStructorErr
         RStructorError::Timeout
     } else {
         RStructorError::HttpError(e)
+    }
+}
+
+/// Classify an error returned while sending a materialization request.
+///
+/// Reqwest builder errors happen before a request can reach the network, so
+/// they are preflight failures rather than provider attempts.
+pub(crate) fn materialize_request_error(
+    error: reqwest::Error,
+    provider_name: &str,
+) -> MaterializeAttemptError {
+    let is_builder_error = error.is_builder();
+    let error = handle_http_error(error, provider_name);
+    if is_builder_error {
+        MaterializeAttemptError::preflight(error)
+    } else {
+        MaterializeAttemptError::transport(error)
     }
 }
 
@@ -1264,10 +1287,7 @@ pub async fn generate_with_retry_with_history<F, Fut, T>(
 where
     F: FnMut(Vec<ChatMessage>) -> Fut,
     Fut: std::future::Future<
-            Output = std::result::Result<
-                MaterializeInternalOutput<T>,
-                (RStructorError, Option<ValidationFailureContext>),
-            >,
+            Output = std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>,
         >,
 {
     generate_with_retry_with_initial_messages(
@@ -1284,28 +1304,89 @@ where
 /// This is primarily used for multimodal prompts where the initial user message
 /// may contain attached media in addition to text.
 pub async fn generate_with_retry_with_initial_messages<F, Fut, T>(
-    mut generate_fn: F,
+    generate_fn: F,
     initial_messages: Vec<ChatMessage>,
     max_retries: Option<usize>,
 ) -> Result<MaterializeInternalOutput<T>>
 where
     F: FnMut(Vec<ChatMessage>) -> Fut,
     Fut: std::future::Future<
-            Output = std::result::Result<
-                MaterializeInternalOutput<T>,
-                (RStructorError, Option<ValidationFailureContext>),
-            >,
+            Output = std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>,
         >,
 {
-    let Some(max_retries) = max_retries.filter(|&n| n > 0) else {
-        // No retries configured - just run once with the provided initial messages
-        return generate_fn(initial_messages).await.map_err(|(err, _)| err);
-    };
+    let successful_run = run_materialize_attempts(generate_fn, initial_messages, max_retries)
+        .await
+        .map_err(MaterializeFailure::into_error)?;
+    Ok(MaterializeInternalOutput::new(
+        successful_run.report.data,
+        successful_run.raw_response,
+        successful_run.report.final_usage,
+    ))
+}
 
-    let max_attempts = max_retries + 1; // +1 for initial attempt
+/// Execute structured generation and retain the complete retry ledger.
+///
+/// Unlike [`generate_with_retry_with_history`], exhaustion returns a
+/// [`MaterializeFailure`] containing cumulative usage and every failed attempt.
+pub async fn generate_with_retry_attempts_with_history<F, Fut, T>(
+    generate_fn: F,
+    prompt: &str,
+    max_retries: Option<usize>,
+) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>,
+        >,
+{
+    run_materialize_attempts(generate_fn, vec![ChatMessage::user(prompt)], max_retries)
+        .await
+        .map(|success| success.report)
+}
 
-    // Initialize conversation history with the provided starting messages.
+/// Execute structured generation with media and retain the complete retry ledger.
+pub async fn materialize_with_media_and_attempts_with_retry<F, Fut, T>(
+    generate_fn: F,
+    prompt: &str,
+    media: &[crate::backend::client::MediaFile],
+    max_retries: Option<usize>,
+) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>,
+        >,
+{
+    run_materialize_attempts(
+        generate_fn,
+        vec![ChatMessage::user_with_media(prompt, media.to_vec())],
+        max_retries,
+    )
+    .await
+    .map(|success| success.report)
+}
+
+struct MaterializeRunSuccess<T> {
+    report: MaterializeReport<T>,
+    raw_response: String,
+}
+
+async fn run_materialize_attempts<F, Fut, T>(
+    mut generate_fn: F,
+    initial_messages: Vec<ChatMessage>,
+    max_retries: Option<usize>,
+) -> std::result::Result<MaterializeRunSuccess<T>, MaterializeFailure>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>,
+        >,
+{
+    let max_attempts = max_retries.unwrap_or(0).saturating_add(1);
+
     let mut messages = initial_messages;
+    let mut attempts = Vec::with_capacity(max_attempts.min(16));
+    let mut cumulative_usage: Option<RunUsage> = None;
 
     trace!(
         "Starting structured generation with conversation history: max_attempts={}",
@@ -1321,9 +1402,16 @@ where
             "Generation attempt with conversation history"
         );
 
-        // Attempt to generate structured data
         match generate_fn(messages.clone()).await {
             Ok(result) => {
+                let final_usage = result.usage;
+                if let Some(usage) = final_usage.clone() {
+                    cumulative_usage
+                        .get_or_insert_with(RunUsage::new)
+                        .record(usage);
+                }
+                attempts.push(AttemptRecord::succeeded(attempt + 1, final_usage.clone()));
+
                 if attempt > 0 {
                     info!(
                         attempts_used = attempt + 1,
@@ -1333,78 +1421,129 @@ where
                 } else {
                     debug!("Successfully generated on first attempt");
                 }
-                return Ok(result);
+                return Ok(MaterializeRunSuccess {
+                    report: MaterializeReport::new(
+                        result.data,
+                        final_usage,
+                        cumulative_usage,
+                        attempts,
+                    ),
+                    raw_response: result.raw_response,
+                });
             }
-            Err((err, validation_ctx)) => {
+            Err(MaterializeAttemptError::Preflight(error)) => {
+                return Err(MaterializeFailure::new(*error, cumulative_usage, attempts));
+            }
+            Err(MaterializeAttemptError::Semantic {
+                error: attempt_error,
+                context,
+                usage,
+            }) => {
                 let is_last_attempt = attempt >= max_attempts - 1;
-
-                // A validation failure — whether a schema/parse error or a custom
-                // validator returning ANY error variant — carries a
-                // `ValidationFailureContext` with the raw response. Reask with
-                // feedback whenever that context is present, rather than keying off
-                // a specific error variant (a validator that returns, say, a
-                // `SchemaError` should still trigger a retry).
-                if let Some(ctx) = validation_ctx {
-                    if !is_last_attempt {
-                        warn!(
-                            attempt = attempt + 1,
-                            error = %ctx.error_message,
-                            "Validation error in generation attempt"
-                        );
-
-                        // Build conversation history for retry with error feedback.
-                        // Add the failed assistant response to history.
-                        messages.push(ChatMessage::assistant(&ctx.raw_response));
-
-                        // Add user message with error feedback
-                        let error_feedback = validation_retry_feedback(&ctx.error_message);
-                        messages.push(ChatMessage::user(error_feedback));
-
-                        debug!(
-                            history_len = messages.len(),
-                            "Updated conversation history for retry"
-                        );
-
-                        // Wait briefly before retrying
-                        sleep(Duration::from_millis(500)).await;
-                        continue;
-                    } else {
-                        error!(
-                            attempts = max_attempts,
-                            error = %ctx.error_message,
-                            "Failed after maximum retry attempts with validation errors"
-                        );
-                    }
+                let disposition = if is_last_attempt {
+                    RetryDisposition::BudgetExhausted
+                } else {
+                    RetryDisposition::Retried
+                };
+                if let Some(response_usage) = usage.clone() {
+                    cumulative_usage
+                        .get_or_insert_with(RunUsage::new)
+                        .record(response_usage);
                 }
-                // Handle retryable API errors (rate limits, transient failures)
-                else if err.is_retryable() && !is_last_attempt {
-                    let delay = err.retry_delay().unwrap_or(Duration::from_secs(1));
+                attempts.push(AttemptRecord::failed(
+                    attempt + 1,
+                    AttemptKind::Semantic,
+                    &attempt_error,
+                    disposition,
+                    usage,
+                ));
+
+                if disposition == RetryDisposition::Retried {
                     warn!(
                         attempt = attempt + 1,
-                        error = ?err,
+                        error = %context.error_message,
+                        "Validation error in generation attempt"
+                    );
+                    messages.push(ChatMessage::assistant(&context.raw_response));
+                    messages.push(ChatMessage::user(validation_retry_feedback(
+                        &context.error_message,
+                    )));
+                    debug!(
+                        history_len = messages.len(),
+                        "Updated conversation history for retry"
+                    );
+                    sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+
+                error!(
+                    attempts = max_attempts,
+                    error = %context.error_message,
+                    "Failed after maximum retry attempts with validation errors"
+                );
+                return Err(MaterializeFailure::new(
+                    *attempt_error,
+                    cumulative_usage,
+                    attempts,
+                ));
+            }
+            Err(MaterializeAttemptError::Transport {
+                error: attempt_error,
+                usage,
+            }) => {
+                let is_last_attempt = attempt >= max_attempts - 1;
+                let retryable = attempt_error.is_retryable();
+                let disposition = if !retryable {
+                    RetryDisposition::NonRetryable
+                } else if is_last_attempt {
+                    RetryDisposition::BudgetExhausted
+                } else {
+                    RetryDisposition::Retried
+                };
+                if let Some(response_usage) = usage.clone() {
+                    cumulative_usage
+                        .get_or_insert_with(RunUsage::new)
+                        .record(response_usage);
+                }
+                attempts.push(AttemptRecord::failed(
+                    attempt + 1,
+                    AttemptKind::Transport,
+                    &attempt_error,
+                    disposition,
+                    usage,
+                ));
+
+                if disposition == RetryDisposition::Retried {
+                    let delay = attempt_error
+                        .retry_delay()
+                        .unwrap_or(Duration::from_secs(1));
+                    warn!(
+                        attempt = attempt + 1,
+                        error = ?attempt_error,
                         delay_ms = delay.as_millis(),
                         "Retryable API error, waiting before retry"
                     );
-                    // For API errors, we don't modify the conversation history
-                    // Just retry with the same messages
                     sleep(delay).await;
                     continue;
                 }
-                // Non-retryable errors or last attempt
-                else if is_last_attempt {
+
+                if is_last_attempt {
                     error!(
                         attempts = max_attempts,
-                        error = ?err,
+                        error = ?attempt_error,
                         "Failed after maximum retry attempts"
                     );
                 } else {
                     error!(
-                        error = ?err,
+                        error = ?attempt_error,
                         "Non-retryable error occurred during generation"
                     );
                 }
-
-                return Err(err);
+                return Err(MaterializeFailure::new(
+                    *attempt_error,
+                    cumulative_usage,
+                    attempts,
+                ));
             }
         }
     }
@@ -1425,10 +1564,7 @@ pub async fn materialize_with_media_with_retry<F, Fut, T>(
 where
     F: FnMut(Vec<ChatMessage>) -> Fut,
     Fut: std::future::Future<
-            Output = std::result::Result<
-                MaterializeInternalOutput<T>,
-                (RStructorError, Option<ValidationFailureContext>),
-            >,
+            Output = std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>,
         >,
 {
     let initial_messages = vec![ChatMessage::user_with_media(prompt, media.to_vec())];
@@ -1522,12 +1658,14 @@ macro_rules! impl_client_builder_methods {
                 self
             }
 
-            /// Set the maximum number of retry attempts for validation errors.
+            /// Set the shared materialization retry budget.
             ///
-            /// When `materialize` encounters a validation error, it will automatically
-            /// retry up to this many times, including the validation error message in subsequent attempts.
+            /// Semantic decode/validation failures re-ask with error feedback.
+            /// Retryable transport/provider failures retry the same history
+            /// after their classified delay. Both consume this one budget.
             ///
-            /// The default is 3 retries. Use `.no_retries()` to disable retries entirely.
+            /// The default is 3 retries (4 total attempts). Use
+            /// `.no_retries()` to make exactly one attempt.
             ///
             /// # Arguments
             ///
@@ -1554,10 +1692,11 @@ macro_rules! impl_client_builder_methods {
                 self
             }
 
-            /// Disable automatic retries on validation errors.
+            /// Disable automatic materialization retries.
             ///
-            /// By default, the client retries up to 3 times when validation errors occur.
-            /// Use this method to disable retries and fail immediately on the first error.
+            /// By default, the client retries semantic and retryable transport
+            /// failures up to 3 times. Use this method to stop after the first
+            /// failed attempt.
             ///
             /// # Examples
             ///
@@ -1565,7 +1704,7 @@ macro_rules! impl_client_builder_methods {
             /// # use rstructor::OpenAIClient;
             /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
             /// let client = OpenAIClient::new("api-key")?
-            ///     .no_retries();  // Fail immediately on validation errors
+            ///     .no_retries();  // Stop after the first failed attempt
             /// # Ok(())
             /// # }
             /// ```
@@ -1585,6 +1724,14 @@ macro_rules! impl_client_builder_methods {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    type ScriptedAttempts<T> = std::sync::Arc<
+        std::sync::Mutex<
+            std::collections::VecDeque<
+                std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>,
+            >,
+        >,
+    >;
 
     #[test]
     fn test_add_additional_properties_simple_object() {
@@ -2575,12 +2722,13 @@ mod tests {
                 attempts += 1;
                 async move {
                     if attempts == 1 {
-                        Err((
+                        Err(MaterializeAttemptError::semantic(
                             RStructorError::ValidationError("schema validation failed".to_string()),
-                            Some(ValidationFailureContext::new(
+                            ValidationFailureContext::new(
                                 "missing required field: summary",
                                 "{\"subject\":\"rust\"}",
-                            )),
+                            ),
+                            None,
                         ))
                     } else {
                         assert_eq!(messages.len(), 3);
@@ -2618,13 +2766,11 @@ mod tests {
                 attempts += 1;
                 async move {
                     if attempts == 1 {
-                        Err((
+                        Err(MaterializeAttemptError::semantic(
                             // NOT a ValidationError on purpose.
                             RStructorError::SchemaError("custom validator rejected".to_string()),
-                            Some(ValidationFailureContext::new(
-                                "value out of range",
-                                "{\"n\":-1}",
-                            )),
+                            ValidationFailureContext::new("value out of range", "{\"n\":-1}"),
+                            None,
                         ))
                     } else {
                         // Reask appended the failed response + feedback to history.
@@ -3129,12 +3275,13 @@ mod tests {
             |_messages: Vec<ChatMessage>| {
                 attempts += 1;
                 async move {
-                    Err((
+                    Err(MaterializeAttemptError::semantic(
                         RStructorError::ValidationError(format!("error #{}", attempts)),
-                        Some(ValidationFailureContext::new(
+                        ValidationFailureContext::new(
                             format!("context #{}", attempts),
                             "{\"partial\":true}",
-                        )),
+                        ),
+                        None,
                     ))
                 }
             },
@@ -3160,14 +3307,13 @@ mod tests {
             |_messages: Vec<ChatMessage>| {
                 attempts += 1;
                 async move {
-                    Err((
+                    Err(MaterializeAttemptError::transport(
                         RStructorError::api_error(
                             "TestProvider",
                             ApiErrorKind::RateLimited {
                                 retry_after: Some(Duration::from_secs(0)),
                             },
                         ),
-                        None,
                     ))
                 }
             },
@@ -3203,14 +3349,13 @@ mod tests {
                 attempts += 1;
                 async move {
                     match attempts {
-                        1 => Err((
+                        1 => Err(MaterializeAttemptError::transport(
                             RStructorError::api_error(
                                 "TestProvider",
                                 ApiErrorKind::RateLimited {
                                     retry_after: Some(Duration::from_secs(0)),
                                 },
                             ),
-                            None,
                         )),
                         2 => {
                             // 429 must not have grown the history.
@@ -3220,12 +3365,13 @@ mod tests {
                                 "retryable error should not modify conversation history"
                             );
                             assert_eq!(messages[0].role, crate::backend::ChatRole::User);
-                            Err((
+                            Err(MaterializeAttemptError::semantic(
                                 RStructorError::ValidationError("missing field".to_string()),
-                                Some(ValidationFailureContext::new(
+                                ValidationFailureContext::new(
                                     "missing required field: name",
                                     "{\"partial\":true}",
-                                )),
+                                ),
+                                None,
                             ))
                         }
                         _ => {
@@ -3951,5 +4097,238 @@ mod tests {
         let value = serde_json::to_value(&rf).expect("serialize ResponseFormat");
         assert_eq!(value["json_schema"]["description"], "A movie");
         assert_eq!(value["json_schema"]["strict"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn attempt_ledger_preserves_mixed_retry_order_history_and_usage() {
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+
+        let responses: ScriptedAttempts<String> = Arc::new(Mutex::new(VecDeque::from([
+            Err(MaterializeAttemptError::semantic(
+                RStructorError::SchemaError("position quantity was textual".into()),
+                ValidationFailureContext::new(
+                    "position quantity was textual",
+                    r#"{"portfolio_id":"HF-ALPHA-001","positions":[{"symbol":"ESU6","quantity":"short 240"}]}"#,
+                ),
+                Some(TokenUsage::new("risk-model-v1", 100, 20)),
+            )),
+            Err(MaterializeAttemptError::transport(
+                RStructorError::api_error(
+                    "OpenAI",
+                    ApiErrorKind::RateLimited {
+                        retry_after: Some(Duration::ZERO),
+                    },
+                ),
+            )),
+            Ok(MaterializeInternalOutput::new(
+                "HF-ALPHA-001".to_string(),
+                r#"{"portfolio_id":"HF-ALPHA-001","positions":[{"symbol":"ESU6","quantity":-240}]}"#
+                    .to_string(),
+                Some(TokenUsage::new("risk-model-v2", 140, 30)),
+            )),
+        ])));
+        let history_lengths = Arc::new(Mutex::new(Vec::new()));
+
+        let report = generate_with_retry_attempts_with_history(
+            {
+                let responses = Arc::clone(&responses);
+                let history_lengths = Arc::clone(&history_lengths);
+                move |messages| {
+                    history_lengths.lock().unwrap().push(messages.len());
+                    let response = responses.lock().unwrap().pop_front().unwrap();
+                    async move { response }
+                }
+            },
+            "reconcile the futures book",
+            Some(2),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.data, "HF-ALPHA-001");
+        assert_eq!(*history_lengths.lock().unwrap(), vec![1, 3, 3]);
+        assert_eq!(report.attempts.len(), 3);
+        assert_eq!(report.attempts[0].kind, AttemptKind::Semantic);
+        assert_eq!(report.attempts[1].kind, AttemptKind::Transport);
+        assert_eq!(report.attempts[2].kind, AttemptKind::Semantic);
+        assert!(matches!(
+            report.attempts[0].outcome,
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::Retried,
+                ..
+            }
+        ));
+        assert!(matches!(
+            report.attempts[1].outcome,
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::Retried,
+                ..
+            }
+        ));
+        assert_eq!(report.attempts[2].outcome, crate::AttemptOutcome::Succeeded);
+
+        let usage = report.cumulative_usage.unwrap();
+        assert_eq!(usage.reported_attempts, 2);
+        assert_eq!(usage.total_tokens(), 290);
+        assert_eq!(usage.by_model["risk-model-v1"].total_tokens(), 120);
+        assert_eq!(usage.by_model["risk-model-v2"].total_tokens(), 170);
+    }
+
+    #[tokio::test]
+    async fn semantic_exhaustion_preserves_every_attempt_and_exact_final_error() {
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+
+        let responses: ScriptedAttempts<()> = Arc::new(Mutex::new(VecDeque::from([
+            Err(MaterializeAttemptError::semantic(
+                RStructorError::ValidationError("gross exposure too high".into()),
+                ValidationFailureContext::new(
+                    "gross exposure too high",
+                    r#"{"gross_exposure":2.7}"#,
+                ),
+                Some(TokenUsage::new("risk-model", 80, 10)),
+            )),
+            Err(MaterializeAttemptError::semantic(
+                RStructorError::SchemaError("missing net exposure".into()),
+                ValidationFailureContext::new("missing net exposure", r#"{"gross_exposure":1.4}"#),
+                Some(TokenUsage::new("risk-model", 110, 12)),
+            )),
+        ])));
+
+        let failure = generate_with_retry_attempts_with_history(
+            {
+                let responses = Arc::clone(&responses);
+                move |_| {
+                    let response = responses.lock().unwrap().pop_front().unwrap();
+                    async move { response }
+                }
+            },
+            "calculate exposure",
+            Some(1),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            failure.error(),
+            RStructorError::SchemaError(message) if message == "missing net exposure"
+        ));
+        assert_eq!(failure.attempts.len(), 2);
+        assert!(matches!(
+            failure.attempts[0].outcome,
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::Retried,
+                ..
+            }
+        ));
+        assert!(matches!(
+            failure.attempts[1].outcome,
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::BudgetExhausted,
+                ..
+            }
+        ));
+        assert_eq!(
+            failure.cumulative_usage.as_ref().unwrap().total_tokens(),
+            212
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_failure_records_no_provider_attempt() {
+        let failure = generate_with_retry_attempts_with_history(
+            |_| async {
+                Err::<MaterializeInternalOutput<()>, _>(MaterializeAttemptError::preflight(
+                    RStructorError::SchemaError("unsupported recursive dialect".into()),
+                ))
+            },
+            "extract",
+            Some(3),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(failure.attempts.is_empty());
+        assert!(failure.cumulative_usage.is_none());
+        assert!(matches!(failure.error(), RStructorError::SchemaError(_)));
+    }
+
+    #[tokio::test]
+    async fn zero_retry_budget_records_one_unretried_transport_attempt() {
+        let failure = generate_with_retry_attempts_with_history(
+            |_| async {
+                Err::<MaterializeInternalOutput<()>, _>(MaterializeAttemptError::transport(
+                    RStructorError::Timeout,
+                ))
+            },
+            "extract",
+            Some(0),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(failure.attempts.len(), 1);
+        assert_eq!(failure.attempts[0].number, 1);
+        assert_eq!(failure.attempts[0].kind, AttemptKind::Transport);
+        assert!(matches!(
+            failure.attempts[0].outcome,
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::BudgetExhausted,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn missing_usage_and_non_retryable_transport_stop_are_accounted_conservatively() {
+        use std::collections::VecDeque;
+        use std::sync::{Arc, Mutex};
+
+        let responses: ScriptedAttempts<()> = Arc::new(Mutex::new(VecDeque::from([
+            Err(MaterializeAttemptError::semantic(
+                RStructorError::ValidationError("missing strategy id".into()),
+                ValidationFailureContext::new("missing strategy id", r#"{"nav":125000000}"#),
+                None,
+            )),
+            Err(MaterializeAttemptError::transport_with_usage(
+                RStructorError::api_error("OpenAI", ApiErrorKind::AuthenticationFailed),
+                Some(TokenUsage::new("risk-model", 50, 0)),
+            )),
+        ])));
+
+        let failure = generate_with_retry_attempts_with_history(
+            {
+                let responses = Arc::clone(&responses);
+                move |_| {
+                    let response = responses.lock().unwrap().pop_front().unwrap();
+                    async move { response }
+                }
+            },
+            "extract the NAV",
+            Some(3),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(failure.attempts.len(), 2);
+        assert!(matches!(
+            failure.attempts[0].outcome,
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::Retried,
+                ..
+            }
+        ));
+        assert!(matches!(
+            failure.attempts[1].outcome,
+            crate::AttemptOutcome::Failed {
+                disposition: crate::RetryDisposition::NonRetryable,
+                ..
+            }
+        ));
+        let usage = failure.cumulative_usage.unwrap();
+        assert_eq!(usage.reported_attempts, 1);
+        assert_eq!(usage.total_tokens(), 50);
+        assert!(responses.lock().unwrap().is_empty());
     }
 }

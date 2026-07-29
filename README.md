@@ -181,7 +181,7 @@ fn validate_movie(movie: &Movie) -> Result<()> {
     Ok(())
 }
 
-// Retries are enabled by default (3 attempts with error feedback)
+// Retries are enabled by default (3 retries, 4 total attempts)
 // To increase retries:
 let client = OpenAIClient::from_env()?.max_retries(5);
 
@@ -515,6 +515,9 @@ let client = OpenAIClient::from_env()?
 
 ## Token Usage
 
+`materialize_with_metadata` preserves its original behavior: `usage` describes
+only the final successful provider response.
+
 ```rust
 let result = client.materialize_with_metadata::<Movie>("...").await?;
 println!("Movie: {}", result.data.title);
@@ -522,6 +525,41 @@ if let Some(usage) = result.usage {
     println!("Tokens: {} in, {} out", usage.input_tokens, usage.output_tokens);
 }
 ```
+
+Use `materialize_with_attempts` when retry cost or failure observability matters.
+It returns an ordered ledger plus cumulative known usage, including provider
+responses that failed decoding or validation:
+
+```rust
+match client.materialize_with_attempts::<Portfolio>("Reconcile the fund book").await {
+    Ok(report) => {
+        println!("Portfolio: {:?}", report.data);
+        println!("Provider attempts: {}", report.attempts.len());
+        if let Some(usage) = report.cumulative_usage {
+            println!("Known run tokens: {}", usage.total_tokens());
+            for (model, model_usage) in usage.by_model {
+                println!("{model}: {} tokens", model_usage.total_tokens());
+            }
+        }
+    }
+    Err(failure) => {
+        eprintln!("Final error: {}", failure.error());
+        eprintln!("Attempts made: {}", failure.attempts.len());
+        if let Some(usage) = failure.cumulative_usage {
+            eprintln!("Known tokens before failure: {}", usage.total_tokens());
+        }
+    }
+}
+```
+
+Usage is conservative: attempts remain in the ledger when a provider omits
+token metadata, while cumulative totals include only responses with reported
+usage. Local schema/media preflight failures record zero provider attempts.
+Built-in clients and `MockClient` set `attempts_complete` to `true`; the default
+implementation for custom clients sets it to `false` rather than inventing
+provider attempts it cannot observe.
+See `examples/retry_attempt_ledger.rs` for a complete success-and-failure
+example.
 
 ## Error Handling
 
@@ -703,11 +741,13 @@ async fn extracts_a_movie() {
 
 Script multiple responses with `with_response`/`with_responses` (a FIFO queue), branch
 on the request with `with_responder`, simulate the validation re-ask loop with
-`with_retries`, attach token usage with `with_usage`, and assert on captured requests via
-`requests()` / `last_request()`. The `mock` feature pulls in only the lightweight
-path-aware decoder and works without the HTTP client; streaming and tool-loop mocking
-light up when the `streaming` / `tools` features are also enabled. See
-`examples/mock_testing_example.rs`.
+`with_retries`, attach final/default token usage with `with_usage`, or attach
+per-attempt usage with `with_response_and_usage`. Assert on captured requests via
+`requests()` / `last_request()`. `RequestKind` is non-exhaustive, so downstream
+matches should include a wildcard arm as new client terminals are added. The `mock`
+feature pulls in only the lightweight path-aware decoder and works without the HTTP
+client; streaming and tool-loop mocking light up when the `streaming` / `tools`
+features are also enabled. See `examples/mock_testing_example.rs`.
 
 ## Feature Flags
 
@@ -743,6 +783,7 @@ cargo run --example nested_objects_example
 cargo run --example enum_with_data_example
 cargo run --example serde_rename_example
 cargo run --example gemini_multimodal_example
+cargo run --example retry_attempt_ledger --features openai
 ```
 
 ## For Python Developers

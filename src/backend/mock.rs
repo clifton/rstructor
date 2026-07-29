@@ -58,7 +58,10 @@ use serde_json::Value;
 
 use crate::backend::ModelInfo;
 use crate::backend::client::{LLMClient, MediaFile};
-use crate::backend::usage::{GenerateResult, MaterializeResult, TokenUsage};
+use crate::backend::usage::{
+    AttemptKind, AttemptRecord, GenerateResult, MaterializeFailure, MaterializeReport,
+    MaterializeResult, RetryDisposition, RunUsage, TokenUsage,
+};
 use crate::error::{RStructorError, Result};
 use crate::model::Instructor;
 use crate::schema::SchemaType;
@@ -166,14 +169,44 @@ impl Clone for MockResponse {
     }
 }
 
+#[derive(Clone)]
+struct ScriptedResponse {
+    response: MockResponse,
+    usage: Option<TokenUsage>,
+    counts_as_attempt: bool,
+}
+
+impl ScriptedResponse {
+    fn new(response: MockResponse) -> Self {
+        Self {
+            response,
+            usage: None,
+            counts_as_attempt: true,
+        }
+    }
+
+    fn preflight(response: MockResponse) -> Self {
+        Self {
+            response,
+            usage: None,
+            counts_as_attempt: false,
+        }
+    }
+}
+
 /// Which [`LLMClient`](crate::LLMClient) (or extension) method produced a
 /// [`RecordedRequest`].
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestKind {
     /// [`LLMClient::materialize`](crate::LLMClient::materialize)
     Materialize,
     /// [`LLMClient::materialize_with_metadata`](crate::LLMClient::materialize_with_metadata)
     MaterializeWithMetadata,
+    /// [`LLMClient::materialize_with_attempts`](crate::LLMClient::materialize_with_attempts)
+    MaterializeWithAttempts,
+    /// [`LLMClient::materialize_with_media_and_attempts`](crate::LLMClient::materialize_with_media_and_attempts)
+    MaterializeWithMediaAndAttempts,
     /// [`LLMClient::materialize_with_media`](crate::LLMClient::materialize_with_media)
     MaterializeWithMedia,
     /// [`LLMClient::generate`](crate::LLMClient::generate)
@@ -267,11 +300,11 @@ impl<'a> MockRequestView<'a> {
 type Responder = Box<dyn Fn(&MockRequestView) -> Option<MockResponse> + Send + Sync>;
 
 struct MockState {
-    queue: Mutex<VecDeque<MockResponse>>,
+    queue: Mutex<VecDeque<ScriptedResponse>>,
     responder: Mutex<Option<Responder>>,
     log: Mutex<Vec<RecordedRequest>>,
     models: Mutex<Vec<ModelInfo>>,
-    default_response: Mutex<MockResponse>,
+    default_response: Mutex<ScriptedResponse>,
     default_usage: Mutex<Option<TokenUsage>>,
     /// Extra parse+validate attempts on failure (simulates the provider re-ask
     /// loop): on a failed `materialize`, consume the next queued response.
@@ -292,9 +325,11 @@ impl Default for MockState {
                 name: Some("Mock Model".to_string()),
                 description: Some("In-memory mock model".to_string()),
             }]),
-            default_response: Mutex::new(MockResponse::Error(RStructorError::Unsupported(
-                "MockClient: no scripted response configured (use .with_response/.with_responder/.with_default_response)"
-                    .to_string(),
+            default_response: Mutex::new(ScriptedResponse::preflight(MockResponse::Error(
+                RStructorError::Unsupported(
+                    "MockClient: no scripted response configured (use .with_response/.with_responder/.with_default_response)"
+                        .to_string(),
+                ),
             ))),
             default_usage: Mutex::new(None),
             retries: Mutex::new(0),
@@ -351,7 +386,26 @@ impl MockClient {
     /// Queue a response (FIFO). Chainable.
     #[must_use]
     pub fn with_response(self, resp: impl Into<MockResponse>) -> Self {
-        self.inner.queue.lock().unwrap().push_back(resp.into());
+        self.inner
+            .queue
+            .lock()
+            .unwrap()
+            .push_back(ScriptedResponse::new(resp.into()));
+        self
+    }
+
+    /// Queue a response with usage specific to that provider attempt.
+    #[must_use]
+    pub fn with_response_and_usage(self, resp: impl Into<MockResponse>, usage: TokenUsage) -> Self {
+        self.inner
+            .queue
+            .lock()
+            .unwrap()
+            .push_back(ScriptedResponse {
+                response: resp.into(),
+                usage: Some(usage),
+                counts_as_attempt: true,
+            });
         self
     }
 
@@ -364,7 +418,7 @@ impl MockClient {
     {
         let mut q = self.inner.queue.lock().unwrap();
         for r in resps {
-            q.push_back(r.into());
+            q.push_back(ScriptedResponse::new(r.into()));
         }
         drop(q);
         self
@@ -389,7 +443,11 @@ impl MockClient {
 
     /// Queue a response after construction (e.g. on a shared `Arc<MockClient>` clone).
     pub fn push_response(&self, resp: impl Into<MockResponse>) {
-        self.inner.queue.lock().unwrap().push_back(resp.into());
+        self.inner
+            .queue
+            .lock()
+            .unwrap()
+            .push_back(ScriptedResponse::new(resp.into()));
     }
 
     /// Queue an error response after construction.
@@ -433,7 +491,7 @@ impl MockClient {
     /// Set the response used when the queue and responder are both empty.
     #[must_use]
     pub fn with_default_response(self, resp: impl Into<MockResponse>) -> Self {
-        *self.inner.default_response.lock().unwrap() = resp.into();
+        *self.inner.default_response.lock().unwrap() = ScriptedResponse::new(resp.into());
         self
     }
 
@@ -550,12 +608,16 @@ impl MockClient {
 
     /// Pick a response without recording: responder closure, then queue, then default.
     fn pick_response(&self, view: &MockRequestView) -> MockResponse {
+        self.pick_scripted_response(view).response
+    }
+
+    fn pick_scripted_response(&self, view: &MockRequestView) -> ScriptedResponse {
         {
             let guard = self.inner.responder.lock().unwrap();
             if let Some(f) = guard.as_ref()
                 && let Some(r) = f(view)
             {
-                return r;
+                return ScriptedResponse::new(r);
             }
         }
         if let Some(r) = self.inner.queue.lock().unwrap().pop_front() {
@@ -568,21 +630,91 @@ impl MockClient {
     where
         T: Instructor + DeserializeOwned,
     {
+        self.resolve_materialize_with_attempts(view)
+            .map(|report| report.data)
+            .map_err(MaterializeFailure::into_error)
+    }
+
+    fn resolve_materialize_with_attempts<T>(
+        &self,
+        view: &MockRequestView,
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned,
+    {
         let attempts = 1 + *self.inner.retries.lock().unwrap();
-        let mut last_err: Option<RStructorError> = None;
-        for _ in 0..attempts {
-            match self.pick_response(view) {
-                MockResponse::Text(s) => match parse_and_validate::<T>(&s) {
-                    Ok(v) => return Ok(v),
-                    Err(e) => last_err = Some(e),
-                },
+        let default_usage = self.inner.default_usage.lock().unwrap().clone();
+        let mut ledger = Vec::with_capacity(attempts);
+        let mut cumulative_usage: Option<RunUsage> = None;
+
+        for attempt in 0..attempts {
+            let scripted = self.pick_scripted_response(view);
+            let usage = scripted.usage.or_else(|| default_usage.clone());
+
+            match scripted.response {
+                MockResponse::Text(raw) => {
+                    if let Some(response_usage) = usage.clone() {
+                        cumulative_usage
+                            .get_or_insert_with(RunUsage::new)
+                            .record(response_usage);
+                    }
+
+                    match parse_and_validate::<T>(&raw) {
+                        Ok(data) => {
+                            ledger.push(AttemptRecord::succeeded(attempt + 1, usage.clone()));
+                            return Ok(MaterializeReport::new(
+                                data,
+                                usage,
+                                cumulative_usage,
+                                ledger,
+                            ));
+                        }
+                        Err(error) => {
+                            let disposition = if attempt + 1 < attempts {
+                                RetryDisposition::Retried
+                            } else {
+                                RetryDisposition::BudgetExhausted
+                            };
+                            ledger.push(AttemptRecord::failed(
+                                attempt + 1,
+                                AttemptKind::Semantic,
+                                &error,
+                                disposition,
+                                usage,
+                            ));
+                            if disposition != RetryDisposition::Retried {
+                                return Err(MaterializeFailure::new(
+                                    error,
+                                    cumulative_usage,
+                                    ledger,
+                                ));
+                            }
+                        }
+                    }
+                }
                 // An explicitly scripted error is returned verbatim (not retried).
-                MockResponse::Error(e) => return Err(e),
+                MockResponse::Error(error) => {
+                    if !scripted.counts_as_attempt {
+                        return Err(MaterializeFailure::new(error, cumulative_usage, ledger));
+                    }
+                    if let Some(response_usage) = usage.clone() {
+                        cumulative_usage
+                            .get_or_insert_with(RunUsage::new)
+                            .record(response_usage);
+                    }
+                    ledger.push(AttemptRecord::failed(
+                        attempt + 1,
+                        AttemptKind::Transport,
+                        &error,
+                        RetryDisposition::NonRetryable,
+                        usage,
+                    ));
+                    return Err(MaterializeFailure::new(error, cumulative_usage, ledger));
+                }
             }
         }
-        Err(last_err.unwrap_or_else(|| {
-            RStructorError::Unsupported("MockClient: no scripted response configured".to_string())
-        }))
+
+        unreachable!("a mock materialization always returns within its configured attempt budget")
     }
 }
 
@@ -635,9 +767,43 @@ impl LLMClient for MockClient {
         view.schema = Some(&schema);
         view.schema_name = schema_name.as_deref();
         self.record(&view);
-        let data = self.resolve_materialize::<T>(&view)?;
-        let usage = self.inner.default_usage.lock().unwrap().clone();
-        Ok(MaterializeResult { data, usage })
+        self.resolve_materialize_with_attempts::<T>(&view)
+            .map(MaterializeReport::into_result)
+            .map_err(MaterializeFailure::into_error)
+    }
+
+    async fn materialize_with_attempts<T>(
+        &self,
+        prompt: &str,
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let schema = <T as SchemaType>::schema().to_json();
+        let schema_name = <T as SchemaType>::schema_name();
+        let mut view = MockRequestView::bare(RequestKind::MaterializeWithAttempts, prompt);
+        view.schema = Some(&schema);
+        view.schema_name = schema_name.as_deref();
+        self.record(&view);
+        self.resolve_materialize_with_attempts::<T>(&view)
+    }
+
+    async fn materialize_with_media_and_attempts<T>(
+        &self,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let schema = <T as SchemaType>::schema().to_json();
+        let schema_name = <T as SchemaType>::schema_name();
+        let mut view = MockRequestView::bare(RequestKind::MaterializeWithMediaAndAttempts, prompt);
+        view.schema = Some(&schema);
+        view.schema_name = schema_name.as_deref();
+        view.media = media;
+        self.record(&view);
+        self.resolve_materialize_with_attempts::<T>(&view)
     }
 
     async fn generate(&self, prompt: &str) -> Result<String> {

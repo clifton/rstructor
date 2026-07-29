@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 
 use crate::backend::ModelInfo;
-use crate::backend::usage::{GenerateResult, MaterializeResult};
+use crate::backend::usage::{
+    GenerateResult, MaterializeFailure, MaterializeReport, MaterializeResult,
+};
 use crate::error::Result;
 use crate::model::Instructor;
 
@@ -274,6 +276,77 @@ pub trait LLMClient {
     async fn materialize_with_metadata<T>(&self, prompt: &str) -> Result<MaterializeResult<T>>
     where
         T: Instructor + DeserializeOwned + Send + 'static;
+
+    /// Materialize a structured object with a complete attempt ledger.
+    ///
+    /// Built-in clients retain each successful, semantic-failed, or transport
+    /// attempt together with per-response and cumulative usage. Local preflight
+    /// failures have an empty ledger because no provider attempt occurred.
+    /// Custom clients receive final-only success metadata or the original
+    /// failure with `attempts_complete == false` unless they override this
+    /// method with richer information.
+    ///
+    /// This method returns [`MaterializeFailure`] on error so callers can inspect
+    /// usage and attempts even when every retry fails. [`materialize`](Self::materialize)
+    /// and [`materialize_with_metadata`](Self::materialize_with_metadata) keep
+    /// returning the original final [`RStructorError`](crate::RStructorError).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{Instructor, LLMClient, OpenAIClient};
+    /// # use serde::{Deserialize, Serialize};
+    /// # #[derive(Instructor, Serialize, Deserialize)]
+    /// # struct Position { symbol: String, quantity: i64 }
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// let report = client
+    ///     .materialize_with_attempts::<Position>("AAPL: 1,000 shares")
+    ///     .await?;
+    ///
+    /// println!("Attempts: {}", report.attempts.len());
+    /// if let Some(usage) = report.cumulative_usage {
+    ///     println!("Total tokens: {}", usage.total_tokens());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn materialize_with_attempts<T>(
+        &self,
+        prompt: &str,
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        self.materialize_with_metadata(prompt)
+            .await
+            .map(MaterializeReport::from_result)
+            .map_err(MaterializeFailure::from_error)
+    }
+
+    /// Materialize with media and retain cumulative usage and every provider attempt.
+    ///
+    /// Built-in providers use the same ledger semantics as
+    /// [`materialize_with_attempts`](Self::materialize_with_attempts). The
+    /// default implementation preserves compatibility for custom clients but
+    /// cannot recover per-attempt metadata hidden by their existing media method.
+    async fn materialize_with_media_and_attempts<T>(
+        &self,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        if media.is_empty() {
+            self.materialize_with_attempts(prompt).await
+        } else {
+            self.materialize_with_media(prompt, media)
+                .await
+                .map(|data| MaterializeReport::from_result(MaterializeResult::from_data(data)))
+                .map_err(MaterializeFailure::from_error)
+        }
+    }
 
     /// Raw completion without structure (returns plain text).
     ///

@@ -23,7 +23,7 @@
 
 use serde::de::DeserializeOwned;
 
-use crate::backend::{LLMClient, MediaFile};
+use crate::backend::{LLMClient, MaterializeFailure, MaterializeReport, MediaFile};
 #[cfg(feature = "streaming")]
 use crate::error::RStructorError;
 use crate::error::Result;
@@ -113,6 +113,24 @@ impl<C: LLMClient + Sync + ?Sized> Request<'_, C> {
         } else {
             self.client
                 .materialize_with_media(&prompt, &self.media)
+                .await
+        }
+    }
+
+    /// Materialize a structured `T` with cumulative usage and every provider attempt.
+    pub async fn materialize_with_attempts<T>(
+        self,
+        prompt: &str,
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let prompt = self.combined(prompt);
+        if self.media.is_empty() {
+            self.client.materialize_with_attempts(&prompt).await
+        } else {
+            self.client
+                .materialize_with_media_and_attempts(&prompt, &self.media)
                 .await
         }
     }

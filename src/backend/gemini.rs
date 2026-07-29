@@ -7,9 +7,11 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
-    ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeInternalOutput,
-    MaterializeResult, ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext,
-    build_http_client, check_response_status, generate_with_retry_with_history, handle_http_error,
+    ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeAttemptError,
+    MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
+    ThinkingLevel, TokenUsage, build_http_client, check_response_status,
+    generate_with_retry_attempts_with_history, generate_with_retry_with_history, handle_http_error,
+    materialize_request_error, materialize_with_media_and_attempts_with_retry,
     materialize_with_media_with_retry, parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
@@ -180,9 +182,9 @@ struct UsageMetadata {
 #[derive(Debug, Deserialize)]
 struct GenerateContentResponse {
     candidates: Vec<Candidate>,
-    #[serde(rename = "usageMetadata", default)]
+    #[serde(rename = "usageMetadata")]
     usage_metadata: Option<UsageMetadata>,
-    #[serde(rename = "modelVersion", default)]
+    #[serde(rename = "modelVersion")]
     model_version: Option<String>,
 }
 
@@ -352,10 +354,7 @@ impl GeminiClient {
     async fn materialize_internal<T>(
         &self,
         messages: &[ChatMessage],
-    ) -> std::result::Result<
-        MaterializeInternalOutput<T>,
-        (RStructorError, Option<ValidationFailureContext>),
-    >
+    ) -> std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -389,7 +388,7 @@ impl GeminiClient {
         // preserving supported typed-map constraints.
         let gemini_schema =
             crate::backend::utils::prepare_gemini_schema(&schema, "structured output")
-                .map_err(|error| (error, None))?;
+                .map_err(MaterializeAttemptError::preflight)?;
         let generation_config = GenerationConfig {
             temperature: self.config.temperature,
             max_output_tokens: self.config.max_tokens,
@@ -427,32 +426,20 @@ impl GeminiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| (handle_http_error(e, "Gemini"), None))?;
+            .map_err(|error| materialize_request_error(error, "Gemini"))?;
 
         let response = check_response_status(response, "Gemini")
             .await
-            .map_err(|e| (e, None))?;
+            .map_err(MaterializeAttemptError::transport)?;
 
         debug!("Successfully received response from Gemini API");
         let completion: GenerateContentResponse = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse JSON response from Gemini API");
-            (RStructorError::from(e), None)
+            MaterializeAttemptError::transport(RStructorError::from(e))
         })?;
 
-        if completion.candidates.is_empty() {
-            error!("Gemini API returned empty candidates array");
-            return Err((
-                RStructorError::api_error(
-                    "Gemini",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No completion candidates returned".to_string(),
-                    },
-                ),
-                None,
-            ));
-        }
-
-        // Extract usage info
+        // Extract usage before validating the envelope so protocol failures can
+        // still report provider-billed tokens.
         let model_name = completion
             .model_version
             .clone()
@@ -464,6 +451,19 @@ impl GeminiClient {
                 u.candidates_token_count,
             )
         });
+
+        if completion.candidates.is_empty() {
+            error!("Gemini API returned empty candidates array");
+            return Err(MaterializeAttemptError::transport_with_usage(
+                RStructorError::api_error(
+                    "Gemini",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No completion candidates returned".to_string(),
+                    },
+                ),
+                usage,
+            ));
+        }
 
         let candidate = &completion.candidates[0];
         trace!(finish_reason = ?candidate.finish_reason, "Completion finish reason");
@@ -495,14 +495,14 @@ impl GeminiClient {
         }
 
         error!("No text content in Gemini response");
-        Err((
+        Err(MaterializeAttemptError::transport_with_usage(
             RStructorError::api_error(
                 "Gemini",
                 ApiErrorKind::UnexpectedResponse {
                     details: "No text content in response".to_string(),
                 },
             ),
-            None,
+            usage,
         ))
     }
 
@@ -867,6 +867,63 @@ impl LLMClient for GeminiClient {
         )
         .await?;
         Ok(MaterializeResult::new(output.data, output.usage))
+    }
+
+    #[instrument(
+        name = "gemini_materialize_with_attempts",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn materialize_with_attempts<T>(
+        &self,
+        prompt: &str,
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        generate_with_retry_attempts_with_history(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            self.config.max_retries,
+        )
+        .await
+    }
+
+    #[instrument(
+        name = "gemini_materialize_with_media_and_attempts",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media_and_attempts<T>(
+        &self,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        materialize_with_media_and_attempts_with_retry(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            media,
+            self.config.max_retries,
+        )
+        .await
     }
 
     #[instrument(

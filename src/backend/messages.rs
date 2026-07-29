@@ -154,3 +154,58 @@ impl ValidationFailureContext {
         }
     }
 }
+
+/// Internal classification of one provider call before the retry policy is applied.
+#[cfg(feature = "_client")]
+#[derive(Debug)]
+pub(crate) enum MaterializeAttemptError {
+    /// Failure before any provider request was made.
+    Preflight(Box<crate::RStructorError>),
+    /// A provider request did not yield structured output suitable for validation.
+    Transport {
+        error: Box<crate::RStructorError>,
+        usage: Option<crate::backend::TokenUsage>,
+    },
+    /// Structured output reached decoding or custom validation and failed there.
+    Semantic {
+        error: Box<crate::RStructorError>,
+        context: ValidationFailureContext,
+        usage: Option<crate::backend::TokenUsage>,
+    },
+}
+
+#[cfg(feature = "_client")]
+impl MaterializeAttemptError {
+    pub(crate) fn preflight(error: crate::RStructorError) -> Self {
+        Self::Preflight(Box::new(error))
+    }
+
+    pub(crate) fn transport(error: crate::RStructorError) -> Self {
+        Self::Transport {
+            error: Box::new(error),
+            usage: None,
+        }
+    }
+
+    pub(crate) fn transport_with_usage(
+        error: crate::RStructorError,
+        usage: Option<crate::backend::TokenUsage>,
+    ) -> Self {
+        Self::Transport {
+            error: Box::new(error),
+            usage,
+        }
+    }
+
+    pub(crate) fn semantic(
+        error: crate::RStructorError,
+        context: ValidationFailureContext,
+        usage: Option<crate::backend::TokenUsage>,
+    ) -> Self {
+        Self::Semantic {
+            error: Box::new(error),
+            context,
+            usage,
+        }
+    }
+}

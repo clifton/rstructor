@@ -103,6 +103,10 @@ required-features = ["tools", "openai"]
 name = "mock_testing_example"
 required-features = ["mock"]
 
+[[example]]
+name = "retry_attempt_ledger"
+required-features = ["openai"]
+
 [dev-dependencies]
 # Used only by examples and tests (date/time fields, custom types); not part of
 # the public dependency closure.

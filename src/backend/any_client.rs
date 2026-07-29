@@ -10,7 +10,9 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 
-use crate::backend::usage::{GenerateResult, MaterializeResult};
+use crate::backend::usage::{
+    GenerateResult, MaterializeFailure, MaterializeReport, MaterializeResult,
+};
 use crate::backend::{LLMClient, MediaFile, ModelInfo};
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -203,6 +205,27 @@ impl LLMClient for AnyClient {
         T: Instructor + DeserializeOwned + Send + 'static,
     {
         dispatch!(self, c => c.materialize_with_metadata(prompt).await)
+    }
+
+    async fn materialize_with_attempts<T>(
+        &self,
+        prompt: &str,
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        dispatch!(self, c => c.materialize_with_attempts(prompt).await)
+    }
+
+    async fn materialize_with_media_and_attempts<T>(
+        &self,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        dispatch!(self, c => c.materialize_with_media_and_attempts(prompt, media).await)
     }
 
     async fn generate(&self, prompt: &str) -> Result<String> {

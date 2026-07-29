@@ -5,11 +5,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
-    ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeInternalOutput,
-    MaterializeResult, ModelInfo, OpenAICompatibleChatCompletionRequest,
-    OpenAICompatibleChatCompletionResponse, ResponseFormat, StrictSchemaProvider, TokenUsage,
-    ValidationFailureContext, build_http_client, check_response_status, compile_strict_schema,
-    convert_openai_compatible_chat_messages, generate_with_retry_with_history, handle_http_error,
+    ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeAttemptError,
+    MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
+    OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse, ResponseFormat,
+    StrictSchemaProvider, TokenUsage, build_http_client, check_response_status,
+    compile_strict_schema, convert_openai_compatible_chat_messages,
+    generate_with_retry_attempts_with_history, generate_with_retry_with_history, handle_http_error,
+    materialize_request_error, materialize_with_media_and_attempts_with_retry,
     materialize_with_media_with_retry, parse_validate_and_create_output,
 };
 #[cfg(feature = "streaming")]
@@ -184,10 +186,7 @@ impl GrokClient {
     async fn materialize_internal<T>(
         &self,
         messages: &[ChatMessage],
-    ) -> std::result::Result<
-        MaterializeInternalOutput<T>,
-        (RStructorError, Option<ValidationFailureContext>),
-    >
+    ) -> std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
@@ -202,12 +201,12 @@ impl GrokClient {
         // silently narrow them to empty objects.
         let schema_json =
             compile_strict_schema(&schema, StrictSchemaProvider::Grok, "structured output")
-                .map_err(|error| (error, None))?;
+                .map_err(MaterializeAttemptError::preflight)?;
 
         // Build API messages from conversation history
         // With native structured outputs, we don't need to include schema instructions in the prompt
-        let api_messages =
-            convert_openai_compatible_chat_messages(messages, "Grok").map_err(|e| (e, None))?;
+        let api_messages = convert_openai_compatible_chat_messages(messages, "Grok")
+            .map_err(MaterializeAttemptError::preflight)?;
 
         // Create response format for native structured outputs
         let response_format = ResponseFormat::json_schema(schema_name.clone(), schema_json, None);
@@ -240,33 +239,21 @@ impl GrokClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| (handle_http_error(e, "Grok"), None))?;
+            .map_err(|error| materialize_request_error(error, "Grok"))?;
 
         let response = check_response_status(response, "Grok")
             .await
-            .map_err(|e| (e, None))?;
+            .map_err(MaterializeAttemptError::transport)?;
 
         debug!("Successfully received response from Grok API");
         let completion: OpenAICompatibleChatCompletionResponse =
             response.json().await.map_err(|e| {
                 error!(error = %e, "Failed to parse JSON response from Grok API");
-                (RStructorError::from(e), None)
+                MaterializeAttemptError::transport(RStructorError::from(e))
             })?;
 
-        if completion.choices.is_empty() {
-            error!("Grok API returned empty choices array");
-            return Err((
-                RStructorError::api_error(
-                    "Grok",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No completion choices returned".to_string(),
-                    },
-                ),
-                None,
-            ));
-        }
-
-        // Extract usage info
+        // Extract usage before validating the envelope so protocol failures can
+        // still report provider-billed tokens.
         let model_name = completion
             .model
             .clone()
@@ -275,6 +262,19 @@ impl GrokClient {
             .usage
             .as_ref()
             .map(|u| TokenUsage::new(model_name.clone(), u.prompt_tokens, u.completion_tokens));
+
+        if completion.choices.is_empty() {
+            error!("Grok API returned empty choices array");
+            return Err(MaterializeAttemptError::transport_with_usage(
+                RStructorError::api_error(
+                    "Grok",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No completion choices returned".to_string(),
+                    },
+                ),
+                usage,
+            ));
+        }
 
         let message = &completion.choices[0].message;
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
@@ -292,14 +292,14 @@ impl GrokClient {
             parse_validate_and_create_output(raw_response, usage)
         } else {
             error!("No content in Grok API response");
-            Err((
+            Err(MaterializeAttemptError::transport_with_usage(
                 RStructorError::api_error(
                     "Grok",
                     ApiErrorKind::UnexpectedResponse {
                         details: "No content in response".to_string(),
                     },
                 ),
-                None,
+                usage,
             ))
         }
     }
@@ -589,6 +589,63 @@ impl LLMClient for GrokClient {
         )
         .await?;
         Ok(MaterializeResult::new(output.data, output.usage))
+    }
+
+    #[instrument(
+        name = "grok_materialize_with_attempts",
+        skip(self, prompt),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len()
+        )
+    )]
+    async fn materialize_with_attempts<T>(
+        &self,
+        prompt: &str,
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        generate_with_retry_attempts_with_history(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            self.config.max_retries,
+        )
+        .await
+    }
+
+    #[instrument(
+        name = "grok_materialize_with_media_and_attempts",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media_and_attempts<T>(
+        &self,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        materialize_with_media_and_attempts_with_retry(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            prompt,
+            media,
+            self.config.max_retries,
+        )
+        .await
     }
 
     #[instrument(

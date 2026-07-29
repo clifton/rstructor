@@ -68,7 +68,6 @@ pub(crate) struct OpenAICompatibleUsageInfo {
 #[derive(Debug, Deserialize)]
 pub(crate) struct OpenAICompatibleChatCompletionResponse {
     pub choices: Vec<OpenAICompatibleChatCompletionChoice>,
-    #[serde(default)]
     pub usage: Option<OpenAICompatibleUsageInfo>,
     pub model: Option<String>,
 }
