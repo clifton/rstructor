@@ -9,6 +9,8 @@
 
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
+use std::fmt;
+use std::str::FromStr;
 
 use crate::backend::usage::{
     GenerateResult, MaterializeFailure, MaterializeReport, MaterializeResult,
@@ -37,12 +39,95 @@ pub enum Provider {
     /// Anthropic (reads `ANTHROPIC_API_KEY`).
     #[cfg(feature = "anthropic")]
     Anthropic,
+    /// Google Gemini (reads `GEMINI_API_KEY`, then `GOOGLE_API_KEY`).
+    #[cfg(feature = "gemini")]
+    Gemini,
     /// xAI / Grok (reads `XAI_API_KEY`).
     #[cfg(feature = "grok")]
     Grok,
-    /// Google Gemini (reads `GEMINI_API_KEY`).
-    #[cfg(feature = "gemini")]
-    Gemini,
+}
+
+impl FromStr for Provider {
+    type Err = RStructorError;
+
+    /// Parse a case-insensitive provider name.
+    ///
+    /// `xai` is accepted as an alias for `grok`. A recognized provider whose
+    /// Cargo feature is disabled returns an error naming the feature to enable.
+    fn from_str(name: &str) -> Result<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "openai" => {
+                #[cfg(feature = "openai")]
+                {
+                    Ok(Self::OpenAI)
+                }
+                #[cfg(not(feature = "openai"))]
+                {
+                    Err(provider_feature_disabled("openai", "openai"))
+                }
+            }
+            "anthropic" => {
+                #[cfg(feature = "anthropic")]
+                {
+                    Ok(Self::Anthropic)
+                }
+                #[cfg(not(feature = "anthropic"))]
+                {
+                    Err(provider_feature_disabled("anthropic", "anthropic"))
+                }
+            }
+            "gemini" => {
+                #[cfg(feature = "gemini")]
+                {
+                    Ok(Self::Gemini)
+                }
+                #[cfg(not(feature = "gemini"))]
+                {
+                    Err(provider_feature_disabled("gemini", "gemini"))
+                }
+            }
+            "grok" | "xai" => {
+                #[cfg(feature = "grok")]
+                {
+                    Ok(Self::Grok)
+                }
+                #[cfg(not(feature = "grok"))]
+                {
+                    Err(provider_feature_disabled(name, "grok"))
+                }
+            }
+            _ => Err(RStructorError::Unsupported(format!(
+                "unknown provider `{name}`; valid providers: openai, anthropic, gemini, grok (alias: xai)"
+            ))),
+        }
+    }
+}
+
+impl fmt::Display for Provider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            #[cfg(feature = "openai")]
+            Self::OpenAI => formatter.write_str("openai"),
+            #[cfg(feature = "anthropic")]
+            Self::Anthropic => formatter.write_str("anthropic"),
+            #[cfg(feature = "gemini")]
+            Self::Gemini => formatter.write_str("gemini"),
+            #[cfg(feature = "grok")]
+            Self::Grok => formatter.write_str("grok"),
+        }
+    }
+}
+
+#[cfg(any(
+    not(feature = "openai"),
+    not(feature = "anthropic"),
+    not(feature = "gemini"),
+    not(feature = "grok")
+))]
+fn provider_feature_disabled(provider: &str, feature: &str) -> RStructorError {
+    RStructorError::Unsupported(format!(
+        "provider `{provider}` is disabled; enable the `{feature}` Cargo feature"
+    ))
 }
 
 /// A provider-agnostic client chosen at runtime.
@@ -242,8 +327,9 @@ impl LLMClient for AnyClient {
 
     /// Auto-detect a provider from the environment.
     ///
-    /// Enabled providers are tried in order (OpenAI, Anthropic, Grok, Gemini)
-    /// and the first one whose API-key variable is set is used. For deterministic
+    /// Enabled providers are tried in order: `OPENAI_API_KEY`,
+    /// `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, then
+    /// `XAI_API_KEY`. The first configured provider wins. For deterministic
     /// selection, prefer [`AnyClient::from_env_for`].
     ///
     /// # Errors
@@ -259,13 +345,13 @@ impl LLMClient for AnyClient {
         if std::env::var("ANTHROPIC_API_KEY").is_ok() {
             return Ok(Self::Anthropic(AnthropicClient::from_env()?));
         }
+        #[cfg(feature = "gemini")]
+        if std::env::var("GEMINI_API_KEY").is_ok() || std::env::var("GOOGLE_API_KEY").is_ok() {
+            return Ok(Self::Gemini(GeminiClient::from_env()?));
+        }
         #[cfg(feature = "grok")]
         if std::env::var("XAI_API_KEY").is_ok() {
             return Ok(Self::Grok(GrokClient::from_env()?));
-        }
-        #[cfg(feature = "gemini")]
-        if std::env::var("GEMINI_API_KEY").is_ok() {
-            return Ok(Self::Gemini(GeminiClient::from_env()?));
         }
         Err(RStructorError::api_error(
             "AnyClient",
