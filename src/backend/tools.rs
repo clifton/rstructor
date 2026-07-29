@@ -330,9 +330,13 @@ pub(crate) async fn run_openai_compatible_tools(
             body["reasoning_effort"] = json!(effort);
         }
 
-        let response = client
-            .post(url)
-            .header("Authorization", format!("Bearer {api_key}"))
+        let request = client.post(url);
+        let request = if api_key.is_empty() {
+            request
+        } else {
+            request.bearer_auth(api_key)
+        };
+        let response = request
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
