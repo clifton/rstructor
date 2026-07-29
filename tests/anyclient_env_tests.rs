@@ -26,14 +26,14 @@ const ENV_KEYS: [&str; 5] = [
 /// assertion panics partway through, so a failure here cannot poison other test
 /// binaries or the developer's shell session.
 struct EnvGuard {
-    saved: Vec<(&'static str, Option<String>)>,
+    saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
 }
 
 impl EnvGuard {
     fn capture() -> Self {
         let saved = ENV_KEYS
             .iter()
-            .map(|&key| (key, std::env::var(key).ok()))
+            .map(|&key| (key, std::env::var_os(key)))
             .collect();
         EnvGuard { saved }
     }

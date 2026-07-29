@@ -7,10 +7,11 @@
 //! ("choose a provider at runtime and keep it in a single type") by wrapping each
 //! concrete client in an enum that itself implements [`LLMClient`].
 
-use async_trait::async_trait;
-use serde::de::DeserializeOwned;
 use std::fmt;
 use std::str::FromStr;
+
+use async_trait::async_trait;
+use serde::de::DeserializeOwned;
 
 use crate::backend::usage::{
     GenerateResult, MaterializeFailure, MaterializeReport, MaterializeResult,
