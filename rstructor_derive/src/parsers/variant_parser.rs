@@ -7,6 +7,10 @@ pub struct VariantAttributes {
     pub description: Option<String>,
     /// Variant rename from #[serde(rename = "...")]
     pub serde_rename: Option<String>,
+    /// Case rule for named fields inside this variant.
+    pub serde_rename_all: Option<String>,
+    /// Whether Serde excludes this variant from deserialization.
+    pub serde_skip_deserializing: bool,
 }
 
 /// Parse a single enum variant's llm and serde attributes
@@ -32,8 +36,11 @@ pub fn parse_variant_attributes(variant: &Variant) -> syn::Result<VariantAttribu
         })?;
     }
 
+    let serde = parse_serde_attributes(&variant.attrs);
     Ok(VariantAttributes {
         description,
-        serde_rename: parse_serde_attributes(&variant.attrs).rename,
+        serde_rename: serde.rename,
+        serde_rename_all: serde.rename_all,
+        serde_skip_deserializing: serde.skip_deserializing,
     })
 }

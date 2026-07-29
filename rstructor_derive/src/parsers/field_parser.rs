@@ -15,6 +15,8 @@ pub struct FieldAttributes {
     pub examples_array: Vec<TokenStream>,
     /// Field rename from `#[serde(rename = "...")]`.
     pub serde_rename: Option<String>,
+    /// Whether Serde excludes this field from deserialization.
+    pub serde_skip_deserializing: bool,
 }
 
 /// Parse a single field's `llm` attributes and the schema-relevant subset of
@@ -57,11 +59,13 @@ pub fn parse_field_attributes(field: &Field) -> syn::Result<FieldAttributes> {
         })?;
     }
 
+    let serde = parse_serde_attributes(&field.attrs);
     Ok(FieldAttributes {
         description,
         example_value,
         examples_array,
-        serde_rename: parse_serde_attributes(&field.attrs).rename,
+        serde_rename: serde.rename,
+        serde_skip_deserializing: serde.skip_deserializing,
     })
 }
 

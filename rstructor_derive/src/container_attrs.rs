@@ -13,6 +13,9 @@ pub struct ContainerAttributes {
     /// Serde rename_all case style (from serde attribute)
     pub serde_rename_all: Option<String>,
 
+    /// Serde rename_all_fields case style for enum struct-variant fields
+    pub serde_rename_all_fields: Option<String>,
+
     /// Custom validation function path (e.g., "validate_product" or "my_module::validate")
     pub validate: Option<syn::Path>,
 
@@ -33,6 +36,7 @@ pub struct ContainerAttributesBuilder {
     title: Option<String>,
     examples: Vec<proc_macro2::TokenStream>,
     serde_rename_all: Option<String>,
+    serde_rename_all_fields: Option<String>,
     validate: Option<syn::Path>,
     serde_tag: Option<String>,
     serde_content: Option<String>,
@@ -57,6 +61,11 @@ impl ContainerAttributesBuilder {
 
     pub fn serde_rename_all(mut self, rename_all: Option<String>) -> Self {
         self.serde_rename_all = rename_all;
+        self
+    }
+
+    pub fn serde_rename_all_fields(mut self, rename_all_fields: Option<String>) -> Self {
+        self.serde_rename_all_fields = rename_all_fields;
         self
     }
 
@@ -86,6 +95,7 @@ impl ContainerAttributesBuilder {
             title: self.title,
             examples: self.examples,
             serde_rename_all: self.serde_rename_all,
+            serde_rename_all_fields: self.serde_rename_all_fields,
             validate: self.validate,
             serde_tag: self.serde_tag,
             serde_content: self.serde_content,
@@ -108,6 +118,7 @@ impl ContainerAttributes {
             && self.title.is_none()
             && self.examples.is_empty()
             && self.serde_rename_all.is_none()
+            && self.serde_rename_all_fields.is_none()
             && self.validate.is_none()
             && self.serde_tag.is_none()
             && self.serde_content.is_none()

@@ -1,7 +1,7 @@
 //! Example demonstrating serde rename attribute support.
 //!
-//! rstructor respects `#[serde(rename)]` and `#[serde(rename_all)]` attributes,
-//! ensuring the generated JSON schema matches serde's serialization behavior.
+//! rstructor follows Serde's deserialization-facing `rename`, `rename_all`,
+//! `rename_all_fields`, `skip`, and `skip_deserializing` behavior.
 
 use rstructor::{Instructor, SchemaType};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,21 @@ enum StatusCode {
     NotFound,
     InternalError,
     BadRequest,
+}
+
+/// Directional metadata demonstrates that schemas describe accepted input,
+/// rather than serialized output.
+#[derive(Instructor, Serialize, Deserialize, Debug)]
+#[serde(rename_all(serialize = "snake_case", deserialize = "camelCase"))]
+struct BrokerOrder {
+    #[serde(skip_deserializing)]
+    server_timestamp: String,
+
+    #[serde(skip_serializing)]
+    client_order_id: String,
+
+    #[serde(rename(serialize = "symbol", deserialize = "ticker"))]
+    instrument: String,
 }
 
 fn main() {
@@ -125,4 +140,16 @@ fn main() {
         "\nSerialized StatusCode::NotFound: {}",
         serde_json::to_string(&status).unwrap()
     );
+
+    println!("\n=== BrokerOrder (deserialization contract) ===");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&BrokerOrder::schema().to_json()).unwrap()
+    );
+    let order: BrokerOrder = serde_json::from_value(serde_json::json!({
+        "clientOrderId": "co-123",
+        "ticker": "AAPL"
+    }))
+    .unwrap();
+    println!("Deserialized BrokerOrder: {order:?}");
 }

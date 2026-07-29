@@ -155,9 +155,17 @@ use syn::{Data, DeriveInput, Fields, parse_macro_input};
 ///
 /// ### Serde Integration
 ///
-/// - Respects `#[serde(rename_all = "...")]` for transforming property names
-///   - Supported values: "lowercase", "UPPERCASE", "camelCase", "PascalCase", "snake_case"
-///   - Example: With `#[serde(rename_all = "camelCase")]`, a field `user_id` becomes `userId` in the schema
+/// Supported Serde name and skip metadata is interpreted from the
+/// deserialization side of the wire contract:
+///
+/// - Respects `rename`, `rename_all`, and `rename_all_fields`
+/// - Uses `deserialize = "..."` when names differ by direction
+/// - Omits fields and variants marked `skip` or `skip_deserializing`
+/// - Keeps `skip_serializing` fields because they remain valid inputs
+///
+/// Supported case transformations include "lowercase", "UPPERCASE",
+/// "camelCase", "PascalCase", and "snake_case". For example, with
+/// `#[serde(rename_all = "camelCase")]`, `user_id` becomes `userId`.
 #[proc_macro_derive(Instructor, attributes(llm))]
 pub fn derive_instructor(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -419,6 +427,7 @@ fn extract_container_attributes(attrs: &[syn::Attribute]) -> syn::Result<Contain
         .title(title)
         .examples(examples)
         .serde_rename_all(serde.rename_all)
+        .serde_rename_all_fields(serde.rename_all_fields)
         .validate(validate)
         .serde_tag(serde.tag)
         .serde_content(serde.content)
