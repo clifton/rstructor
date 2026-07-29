@@ -475,7 +475,7 @@ async fn retryable_provider_error_is_a_transport_attempt_without_history_mutatio
 }
 
 #[tokio::test]
-async fn malformed_envelope_retains_usage_as_an_unretried_transport_attempt() {
+async fn empty_envelope_retains_usage_as_an_unretried_transport_attempt() {
     let mut server = mockito::Server::new_async().await;
     let malformed = server
         .mock("POST", "/chat/completions")
@@ -483,7 +483,7 @@ async fn malformed_envelope_retains_usage_as_an_unretried_transport_attempt() {
         .with_header("content-type", "application/json")
         .with_body(
             json!({
-                "choices": { "unexpected": "object instead of array" },
+                "choices": [],
                 "usage": {
                     "prompt_tokens": 55,
                     "completion_tokens": 3,
@@ -524,6 +524,75 @@ async fn malformed_envelope_retains_usage_as_an_unretried_transport_attempt() {
         58
     );
     malformed.assert_async().await;
+}
+
+#[tokio::test]
+async fn malformed_usage_with_valid_content_preserves_legacy_fail_fast_error() {
+    let mut server = mockito::Server::new_async().await;
+    let response = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": r#"{"title":"Dune","year":2021}"#,
+                    },
+                    "finish_reason": "stop",
+                }],
+                "usage": "not-an-object",
+                "model": "gpt-4o-mini",
+            })
+            .to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    let error = client(&server)
+        .materialize::<Movie>("a film")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, RStructorError::HttpError(_)));
+    response.assert_async().await;
+}
+
+#[tokio::test]
+async fn malformed_usage_with_invalid_content_is_not_reclassified_as_retryable() {
+    let mut server = mockito::Server::new_async().await;
+    let invalid = include_str!("fixtures/structured/portfolio_invalid_quantity.json");
+    let response = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            json!({
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": invalid,
+                    },
+                    "finish_reason": "stop",
+                }],
+                "usage": "not-an-object",
+                "model": "risk-router",
+            })
+            .to_string(),
+        )
+        .expect(1)
+        .create_async()
+        .await;
+
+    let error = client(&server)
+        .materialize::<Portfolio>("reconcile the futures book")
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, RStructorError::HttpError(_)));
+    response.assert_async().await;
 }
 
 #[tokio::test]

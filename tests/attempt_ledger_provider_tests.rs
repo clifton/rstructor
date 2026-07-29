@@ -178,7 +178,7 @@ async fn anthropic_protocol_failure_keeps_reported_usage() {
         .with_header("content-type", "application/json")
         .with_body(
             json!({
-                "content": { "unexpected": "object instead of array" },
+                "content": [],
                 "model": "claude-risk-router",
                 "usage": { "input_tokens": 50, "output_tokens": 2 },
             })
@@ -324,7 +324,7 @@ async fn gemini_protocol_failure_keeps_reported_usage() {
         .with_header("content-type", "application/json")
         .with_body(
             json!({
-                "candidates": { "unexpected": "object instead of array" },
+                "candidates": [],
                 "usageMetadata": {
                     "promptTokenCount": 45,
                     "candidatesTokenCount": 3,
@@ -460,7 +460,7 @@ async fn grok_protocol_failure_keeps_reported_usage() {
         .with_header("content-type", "application/json")
         .with_body(
             json!({
-                "choices": { "unexpected": "object instead of array" },
+                "choices": [],
                 "usage": {
                     "prompt_tokens": 40,
                     "completion_tokens": 4,

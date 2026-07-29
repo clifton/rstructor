@@ -6,8 +6,8 @@ use crate::backend::{
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 use reqwest::Response;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -47,21 +47,6 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(300);
 /// assert_eq!(DEFAULT_CONNECT_TIMEOUT, Duration::from_secs(30));
 /// ```
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Deserialize a provider-envelope field conservatively.
-///
-/// A malformed envelope should not prevent other independently valid fields,
-/// especially provider-reported usage, from being accounted for. Invalid or
-/// missing fields are treated as their default and validated by the caller as
-/// a protocol failure.
-pub(crate) fn deserialize_or_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: DeserializeOwned + Default,
-{
-    let value = Value::deserialize(deserializer)?;
-    Ok(serde_json::from_value(value).unwrap_or_default())
-}
 
 /// Build the reqwest client used by all provider clients.
 ///

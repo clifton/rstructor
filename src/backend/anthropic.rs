@@ -181,20 +181,8 @@ struct UsageInfo {
 
 #[derive(Debug, Deserialize)]
 struct CompletionResponse {
-    #[serde(
-        default,
-        deserialize_with = "crate::backend::utils::deserialize_or_default"
-    )]
     content: Vec<ContentBlock>,
-    #[serde(
-        default,
-        deserialize_with = "crate::backend::utils::deserialize_or_default"
-    )]
     model: Option<String>,
-    #[serde(
-        default,
-        deserialize_with = "crate::backend::utils::deserialize_or_default"
-    )]
     usage: Option<UsageInfo>,
 }
 

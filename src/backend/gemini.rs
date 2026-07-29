@@ -181,22 +181,10 @@ struct UsageMetadata {
 
 #[derive(Debug, Deserialize)]
 struct GenerateContentResponse {
-    #[serde(
-        default,
-        deserialize_with = "crate::backend::utils::deserialize_or_default"
-    )]
     candidates: Vec<Candidate>,
-    #[serde(
-        rename = "usageMetadata",
-        default,
-        deserialize_with = "crate::backend::utils::deserialize_or_default"
-    )]
+    #[serde(rename = "usageMetadata")]
     usage_metadata: Option<UsageMetadata>,
-    #[serde(
-        rename = "modelVersion",
-        default,
-        deserialize_with = "crate::backend::utils::deserialize_or_default"
-    )]
+    #[serde(rename = "modelVersion")]
     model_version: Option<String>,
 }
 
