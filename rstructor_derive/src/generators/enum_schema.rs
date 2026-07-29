@@ -41,14 +41,24 @@ pub fn generate_enum_schema(
 }
 
 /// Clone the enum's generics, additionally binding every type parameter by
-/// `SchemaType` — the generated code calls `<T as SchemaType>::schema()` for
-/// type-parameter fields inside variants. Use with `split_for_impl()` to emit
+/// `SchemaType` — generated code composes type-parameter fields through
+/// `SchemaType::schema_in`. Use with `split_for_impl()` to emit
 /// the `impl ... SchemaType for ...` header.
 fn schema_bounded_generics(generics: &syn::Generics) -> syn::Generics {
-    crate::type_utils::generics_with_bounds(
-        generics,
-        &[syn::parse_quote!(::rstructor::schema::SchemaType)],
-    )
+    let mut bounds = vec![syn::parse_quote!(::rstructor::schema::SchemaType)];
+    if generics.lifetimes().next().is_none() {
+        bounds.push(syn::parse_quote!('static));
+    }
+    crate::type_utils::generics_with_bounds(generics, &bounds)
+}
+
+fn schema_for_method(generics: &syn::Generics) -> Ident {
+    let method = if generics.lifetimes().next().is_some() {
+        "schema_for_named"
+    } else {
+        "schema_for"
+    };
+    Ident::new(method, proc_macro2::Span::call_site())
 }
 
 fn deserialization_name(
@@ -138,25 +148,34 @@ fn generate_simple_enum_schema(
 
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
-                // Create array of enum values
-                let enum_values: Vec<::serde_json::Value> = vec![
-                    #(::serde_json::Value::String(#variant_values.to_string())),*
-                ];
+                let mut context = ::rstructor::schema::__private::SchemaBuildContext::new();
+                let root = <Self as ::rstructor::schema::SchemaType>::schema_in(&mut context);
+                ::rstructor::schema::Schema::new(context.finish(root))
+            }
 
-                let mut schema_obj = ::serde_json::json!({
-                    "type": "string",
-                    "enum": enum_values,
-                    "title": stringify!(#name)
-                });
+            fn schema_in(
+                __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
+            ) -> ::serde_json::Value {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
+                    let _ = __rstructor_context;
+                    let enum_values: Vec<::serde_json::Value> = vec![
+                        #(::serde_json::Value::String(#variant_values.to_string())),*
+                    ];
 
-                // Add container attributes if available
-                #container_setter
+                    let mut schema_obj = ::serde_json::json!({
+                        "type": "string",
+                        "enum": enum_values,
+                        "title": stringify!(#name)
+                    });
 
-                ::rstructor::schema::Schema::new(schema_obj)
+                    #container_setter
+                    schema_obj
+                })
             }
 
             fn schema_name() -> Option<String> {
@@ -473,24 +492,32 @@ fn generate_externally_tagged_enum_schema(
     // Generate the final schema implementation
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
-                // Create oneOf schema for enum variants
-                let variant_schemas = vec![
-                    #(#variant_schemas),*
-                ];
+                let mut context = ::rstructor::schema::__private::SchemaBuildContext::new();
+                let root = <Self as ::rstructor::schema::SchemaType>::schema_in(&mut context);
+                ::rstructor::schema::Schema::new(context.finish(root))
+            }
 
-                let mut schema_obj = ::serde_json::json!({
-                    "anyOf": variant_schemas,
-                    "title": stringify!(#name)
-                });
+            fn schema_in(
+                __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
+            ) -> ::serde_json::Value {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
+                    let variant_schemas = vec![
+                        #(#variant_schemas),*
+                    ];
 
-                // Add container attributes if available
-                #container_setter
+                    let mut schema_obj = ::serde_json::json!({
+                        "anyOf": variant_schemas,
+                        "title": stringify!(#name)
+                    });
 
-                ::rstructor::schema::Schema::new(schema_obj)
+                    #container_setter
+                    schema_obj
+                })
             }
 
             fn schema_name() -> Option<String> {
@@ -537,9 +564,9 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                         "type": "object",
                         #desc_prop
                     });
-                    let value_schema = <#val_ty as ::rstructor::schema::SchemaType>::schema();
+                    let value_schema = <#val_ty as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context);
                     if let ::serde_json::Value::Object(map) = &mut schema {
-                        map.insert("additionalProperties".to_string(), value_schema.to_json());
+                        map.insert("additionalProperties".to_string(), value_schema);
                     }
                     schema
                 }
@@ -625,7 +652,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                 let elem_schema_type = get_schema_type_from_rust_type(elem_ty);
                 if elem_schema_type == "object" {
                     quote! {
-                        <#elem_ty as ::rstructor::schema::SchemaType>::schema().to_json()
+                        <#elem_ty as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context)
                     }
                 } else {
                     quote! {
@@ -709,7 +736,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
                 // For arrays of complex types
                 return quote! {
                     {
-                        let items_schema = <#inner_type as ::rstructor::schema::SchemaType>::schema().to_json();
+                        let items_schema = <#inner_type as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context);
                         ::serde_json::json!({
                             "type": "array",
                             #desc_prop
@@ -750,7 +777,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
             let desc_str = desc.clone();
             return quote! {
                 {
-                    let mut obj = <#type_path as ::rstructor::schema::SchemaType>::schema().to_json().clone();
+                    let mut obj = <#type_path as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context);
                     if let ::serde_json::Value::Object(map) = &mut obj {
                         map.insert("description".to_string(), ::serde_json::Value::String(#desc_str.to_string()));
                     }
@@ -759,7 +786,7 @@ fn generate_field_schema(field_type: &Type, description: &Option<String>) -> Tok
             };
         } else {
             return quote! {
-                <#type_path as ::rstructor::schema::SchemaType>::schema().to_json()
+                <#type_path as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context)
             };
         }
     }
@@ -933,60 +960,23 @@ fn generate_internally_tagged_enum_schema(
 
                     variant_schemas.push(quote! {
                         {
-                            let inner_schema = <#schema_ty as ::rstructor::schema::SchemaType>::schema().to_json();
-
-                            let mut properties = ::serde_json::Map::new();
-                            properties.insert(#tag_name_str.to_string(), ::serde_json::json!({
-                                "type": "string",
-                                "enum": [#variant_name_str]
-                            }));
-
-                            let mut required = vec![::serde_json::Value::String(#tag_name_str.to_string())];
-                            let mut defs = ::serde_json::Map::new();
-
-                            if let Some(inner_obj) = inner_schema.as_object() {
-                                let resolved_obj = if inner_obj.get("properties").is_some() {
-                                    Some(inner_obj)
-                                } else {
-                                    inner_obj
-                                        .get("$ref")
-                                        .and_then(|r| r.as_str())
-                                        .and_then(|r| r.strip_prefix("#/$defs/"))
-                                        .and_then(|def_name| inner_obj.get("$defs").and_then(|defs| defs.get(def_name)))
-                                        .and_then(|def_schema| def_schema.as_object())
-                                };
-
-                                if let Some(::serde_json::Value::Object(inner_defs)) = inner_obj.get("$defs") {
-                                    for (k, v) in inner_defs {
-                                        defs.insert(k.clone(), v.clone());
-                                    }
-                                }
-
-                                if let Some(resolved_obj) = resolved_obj {
-                                    if let Some(::serde_json::Value::Object(inner_props)) = resolved_obj.get("properties") {
-                                        for (k, v) in inner_props {
-                                            properties.insert(k.clone(), v.clone());
-                                        }
-                                    }
-                                    if let Some(::serde_json::Value::Array(inner_req)) = resolved_obj.get("required") {
-                                        for r in inner_req {
-                                            required.push(r.clone());
-                                        }
-                                    }
-                                }
-                            }
+                            let inner_schema = <#schema_ty as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context);
 
                             let mut schema_obj = ::serde_json::Map::new();
                             schema_obj.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
-                            schema_obj.insert("properties".to_string(), ::serde_json::Value::Object(properties));
-                            schema_obj.insert("required".to_string(), ::serde_json::Value::Array(required));
+                            schema_obj.insert("properties".to_string(), ::serde_json::json!({
+                                #tag_name_str: {
+                                    "type": "string",
+                                    "enum": [#variant_name_str]
+                                }
+                            }));
+                            schema_obj.insert("required".to_string(), ::serde_json::json!([#tag_name_str]));
                             schema_obj.insert("description".to_string(), ::serde_json::Value::String(#description_str.to_string()));
                             schema_obj.insert("additionalProperties".to_string(), ::serde_json::Value::Bool(false));
-                            if !defs.is_empty() {
-                                schema_obj.insert("$defs".to_string(), ::serde_json::Value::Object(defs));
-                            }
-
-                            ::serde_json::Value::Object(schema_obj)
+                            __rstructor_context.flatten_into_object(
+                                ::serde_json::Value::Object(schema_obj),
+                                inner_schema,
+                            )
                         }
                     });
                 } else {
@@ -1022,22 +1012,32 @@ fn generate_internally_tagged_enum_schema(
 
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
-                let variant_schemas = vec![
-                    #(#variant_schemas),*
-                ];
+                let mut context = ::rstructor::schema::__private::SchemaBuildContext::new();
+                let root = <Self as ::rstructor::schema::SchemaType>::schema_in(&mut context);
+                ::rstructor::schema::Schema::new(context.finish(root))
+            }
 
-                let mut schema_obj = ::serde_json::json!({
-                    "anyOf": variant_schemas,
-                    "title": stringify!(#name)
-                });
+            fn schema_in(
+                __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
+            ) -> ::serde_json::Value {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
+                    let variant_schemas = vec![
+                        #(#variant_schemas),*
+                    ];
 
-                #container_setter
+                    let mut schema_obj = ::serde_json::json!({
+                        "anyOf": variant_schemas,
+                        "title": stringify!(#name)
+                    });
 
-                ::rstructor::schema::Schema::new(schema_obj)
+                    #container_setter
+                    schema_obj
+                })
             }
 
             fn schema_name() -> Option<String> {
@@ -1359,22 +1359,32 @@ fn generate_adjacently_tagged_enum_schema(
 
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
-                let variant_schemas = vec![
-                    #(#variant_schemas),*
-                ];
+                let mut context = ::rstructor::schema::__private::SchemaBuildContext::new();
+                let root = <Self as ::rstructor::schema::SchemaType>::schema_in(&mut context);
+                ::rstructor::schema::Schema::new(context.finish(root))
+            }
 
-                let mut schema_obj = ::serde_json::json!({
-                    "anyOf": variant_schemas,
-                    "title": stringify!(#name)
-                });
+            fn schema_in(
+                __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
+            ) -> ::serde_json::Value {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
+                    let variant_schemas = vec![
+                        #(#variant_schemas),*
+                    ];
 
-                #container_setter
+                    let mut schema_obj = ::serde_json::json!({
+                        "anyOf": variant_schemas,
+                        "title": stringify!(#name)
+                    });
 
-                ::rstructor::schema::Schema::new(schema_obj)
+                    #container_setter
+                    schema_obj
+                })
             }
 
             fn schema_name() -> Option<String> {
@@ -1545,22 +1555,32 @@ fn generate_untagged_enum_schema(
 
     let schema_generics = schema_bounded_generics(generics);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
+    let schema_for_method = schema_for_method(generics);
 
     Ok(quote! {
         impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
             fn schema() -> ::rstructor::schema::Schema {
-                let variant_schemas = vec![
-                    #(#variant_schemas),*
-                ];
+                let mut context = ::rstructor::schema::__private::SchemaBuildContext::new();
+                let root = <Self as ::rstructor::schema::SchemaType>::schema_in(&mut context);
+                ::rstructor::schema::Schema::new(context.finish(root))
+            }
 
-                let mut schema_obj = ::serde_json::json!({
-                    "anyOf": variant_schemas,
-                    "title": stringify!(#name)
-                });
+            fn schema_in(
+                __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
+            ) -> ::serde_json::Value {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
+                    let variant_schemas = vec![
+                        #(#variant_schemas),*
+                    ];
 
-                #container_setter
+                    let mut schema_obj = ::serde_json::json!({
+                        "anyOf": variant_schemas,
+                        "title": stringify!(#name)
+                    });
 
-                ::rstructor::schema::Schema::new(schema_obj)
+                    #container_setter
+                    schema_obj
+                })
             }
 
             fn schema_name() -> Option<String> {

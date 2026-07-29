@@ -7,8 +7,7 @@ use crate::parsers::field_parser::parse_field_attributes;
 use crate::type_utils::{
     generics_with_bounds, get_array_inner_type, get_box_inner_type, get_map_types,
     get_option_inner_type, get_schema_type_from_rust_type, get_tuple_element_types, get_type_name,
-    is_array_type, is_box_type, is_json_value_type, is_map_type, is_option_type, is_self_reference,
-    is_tuple_type,
+    is_array_type, is_box_type, is_json_value_type, is_map_type, is_option_type, is_tuple_type,
 };
 
 /// Generate the schema implementation for a struct
@@ -20,8 +19,6 @@ pub fn generate_struct_schema(
 ) -> syn::Result<TokenStream> {
     let mut property_setters = Vec::new();
     let mut required_setters = Vec::new();
-    let mut has_self_reference = false;
-    let struct_name_str = name.to_string();
 
     match &data_struct.fields {
         Fields::Named(fields) => {
@@ -31,10 +28,6 @@ pub fn generate_struct_schema(
                 if attrs.serde_skip_deserializing {
                     continue;
                 }
-                if is_self_reference(&field.ty, &struct_name_str) {
-                    has_self_reference = true;
-                }
-
                 let original_field_name = field
                     .ident
                     .as_ref()
@@ -102,9 +95,9 @@ pub fn generate_struct_schema(
                         // preferring the type's own SchemaType impl when present
                         let probed = {
                             #[allow(unused_imports)]
-                            use ::rstructor::schema::__private::SchemaProbeFallback as _;
+                            use ::rstructor::schema::__private::SchemaProbeContextFallback as _;
                             ::rstructor::schema::__private::SchemaProbe::<#actual_type>::new()
-                                .rstructor_schema_or(#fallback)
+                                .rstructor_schema_in_or(__rstructor_context, #fallback)
                         };
                         let mut props = if let ::serde_json::Value::Object(m) = probed {
                             m
@@ -127,7 +120,7 @@ pub fn generate_struct_schema(
                     if let Some(inner_type) = get_array_inner_type(actual_array_type) {
                         // Generate the items schema, recursing into nested
                         // collections so e.g. Vec<Vec<i32>> keeps its inner items
-                        let items_expr = generate_array_items_schema(inner_type, &struct_name_str);
+                        let items_expr = generate_array_items_schema(inner_type);
                         quote! {
                             // Create property for this array field
                             let mut props = ::serde_json::Map::new();
@@ -167,19 +160,19 @@ pub fn generate_struct_schema(
                         &field.ty
                     };
                     if let Some((key_ty, val_ty)) = get_map_types(actual_type) {
-                        // Use SchemaType::schema() for all value types to get complete schema
+                        // Use the shared schema context for all value types.
                         // This ensures arrays get proper `items`, objects get properties, etc.
                         // For enum keys, extract the enum variants and add them to description
                         // so that Gemini can use the correct keys instead of generic placeholders
                         quote! {
                             let mut props = ::serde_json::Map::new();
                             props.insert("type".to_string(), ::serde_json::Value::String("object".to_string()));
-                            let value_schema = <#val_ty as ::rstructor::schema::SchemaType>::schema();
-                            props.insert("additionalProperties".to_string(), value_schema.to_json());
+                            let value_schema = <#val_ty as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context);
+                            props.insert("additionalProperties".to_string(), value_schema);
 
                             // Try to extract enum keys from key type schema (for enum keys)
-                            let key_schema = <#key_ty as ::rstructor::schema::SchemaType>::schema();
-                            if let Some(enum_values) = key_schema.to_json().get("enum")
+                            let key_schema = <#key_ty as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context);
+                            if let Some(enum_values) = key_schema.get("enum")
                                 .and_then(|e| e.as_array())
                             {
                                 let keys: Vec<String> = enum_values
@@ -216,22 +209,11 @@ pub fn generate_struct_schema(
                     };
                     if let Some(inner_ty) = get_box_inner_type(actual_type) {
                         let inner_schema_type = get_schema_type_from_rust_type(inner_ty);
-                        if is_self_reference(inner_ty, &struct_name_str) {
-                            // Self-referential type (e.g. Option<Box<Self>>): use $ref
-                            // to prevent infinite recursion at schema() time, mirroring
-                            // the guard in the array branch. The root schema places the
-                            // struct's definition under $defs in this case.
-                            quote! {
-                                let mut props = ::serde_json::Map::new();
-                                props.insert("$ref".to_string(),
-                                    ::serde_json::Value::String(format!("#/$defs/{}", #struct_name_str)));
-                            }
-                        } else if inner_schema_type == "object" {
+                        if inner_schema_type == "object" {
                             // Inner type is a complex type, use its schema
                             quote! {
-                                let nested_schema = <#inner_ty as ::rstructor::schema::SchemaType>::schema();
-                                let props_json = nested_schema.to_json();
-                                let mut props = if let ::serde_json::Value::Object(m) = props_json {
+                                let nested_schema = <#inner_ty as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context);
+                                let mut props = if let ::serde_json::Value::Object(m) = nested_schema {
                                     m
                                 } else {
                                     let mut m = ::serde_json::Map::new();
@@ -271,7 +253,7 @@ pub fn generate_struct_schema(
                                 let elem_schema_type = get_schema_type_from_rust_type(elem_ty);
                                 if elem_schema_type == "object" {
                                     quote! {
-                                        <#elem_ty as ::rstructor::schema::SchemaType>::schema().to_json()
+                                        <#elem_ty as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context)
                                     }
                                 } else {
                                     quote! {
@@ -308,8 +290,7 @@ pub fn generate_struct_schema(
                     };
                     quote! {
                         // Get the nested type's schema directly
-                        let nested_schema = <#actual_type as ::rstructor::schema::SchemaType>::schema();
-                        let props_json = nested_schema.to_json();
+                        let props_json = <#actual_type as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context);
                         // Convert to a mutable map so we can add to it
                         let mut props = if let ::serde_json::Value::Object(m) = props_json {
                             m
@@ -437,58 +418,33 @@ pub fn generate_struct_schema(
     };
 
     // Emit a generics-aware impl: every type parameter is additionally bound
-    // by SchemaType, since the generated code calls <T as SchemaType>::schema()
+    // by SchemaType, since the generated code composes each nested T's schema.
     // for type-parameter fields.
-    let schema_generics = generics_with_bounds(
-        generics,
-        &[syn::parse_quote!(::rstructor::schema::SchemaType)],
-    );
+    let mut schema_bounds = vec![syn::parse_quote!(::rstructor::schema::SchemaType)];
+    let has_lifetime_parameters = generics.lifetimes().next().is_some();
+    if !has_lifetime_parameters {
+        schema_bounds.push(syn::parse_quote!('static));
+    }
+    let schema_generics = generics_with_bounds(generics, &schema_bounds);
     let (impl_generics, ty_generics, where_clause) = schema_generics.split_for_impl();
-
-    // Generate implementation with $defs support for recursive types
-    if has_self_reference {
-        Ok(quote! {
-            impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
-                fn schema() -> ::rstructor::schema::Schema {
-                    // Create base schema object (properties will be added to $defs)
-                    let mut schema_obj = ::serde_json::json!({
-                        "type": "object",
-                        "title": stringify!(#name),
-                        "properties": {}
-                    });
-
-                    // Add container attributes if available
-                    #container_setter
-
-                    // Fill properties
-                    #(#property_setters)*
-
-                    // Add required fields
-                    let mut required = Vec::new();
-                    #(#required_setters)*
-                    schema_obj["required"] = ::serde_json::Value::Array(required);
-
-                    // Create root schema with $defs for recursive types
-                    let struct_name = stringify!(#name);
-                    let root_schema = ::serde_json::json!({
-                        "$defs": {
-                            struct_name: schema_obj
-                        },
-                        "$ref": format!("#/$defs/{}", struct_name)
-                    });
-
-                    ::rstructor::schema::Schema::new(root_schema)
-                }
-
-                fn schema_name() -> Option<String> {
-                    Some(stringify!(#name).to_string())
-                }
-            }
-        })
+    let schema_for_method = if has_lifetime_parameters {
+        Ident::new("schema_for_named", proc_macro2::Span::call_site())
     } else {
-        Ok(quote! {
-            impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
-                fn schema() -> ::rstructor::schema::Schema {
+        Ident::new("schema_for", proc_macro2::Span::call_site())
+    };
+
+    Ok(quote! {
+        impl #impl_generics ::rstructor::schema::SchemaType for #name #ty_generics #where_clause {
+            fn schema() -> ::rstructor::schema::Schema {
+                let mut context = ::rstructor::schema::__private::SchemaBuildContext::new();
+                let root = <Self as ::rstructor::schema::SchemaType>::schema_in(&mut context);
+                ::rstructor::schema::Schema::new(context.finish(root))
+            }
+
+            fn schema_in(
+                __rstructor_context: &mut ::rstructor::schema::__private::SchemaBuildContext
+            ) -> ::serde_json::Value {
+                __rstructor_context.#schema_for_method::<Self, _>(stringify!(#name), |__rstructor_context| {
                     // Create base schema object
                     let mut schema_obj = ::serde_json::json!({
                         "type": "object",
@@ -507,15 +463,15 @@ pub fn generate_struct_schema(
                     #(#required_setters)*
                     schema_obj["required"] = ::serde_json::Value::Array(required);
 
-                    ::rstructor::schema::Schema::new(schema_obj)
-                }
-
-                fn schema_name() -> Option<String> {
-                    Some(stringify!(#name).to_string())
-                }
+                    schema_obj
+                })
             }
-        })
-    }
+
+            fn schema_name() -> Option<String> {
+                Some(stringify!(#name).to_string())
+            }
+        }
+    })
 }
 
 /// Generate an expression evaluating to the sniffed fallback schema for a
@@ -553,14 +509,14 @@ fn sniffed_fallback_schema(is_datetime: bool, is_date_only: bool) -> TokenStream
 /// array whose element type is `inner_type`.
 ///
 /// Recurses into nested collections (`Vec<Vec<i32>>`, `Vec<HashSet<String>>`,
-/// ...) so every nesting level carries its own `items` schema, and emits a
-/// `$ref` for self-referential element types to prevent infinite recursion.
-fn generate_array_items_schema(inner_type: &Type, struct_name_str: &str) -> TokenStream {
+/// ...) so every nesting level carries its own `items` schema. Complex element
+/// types share the build context, which emits references when it finds a cycle.
+fn generate_array_items_schema(inner_type: &Type) -> TokenStream {
     // Nested collections: recurse so the inner `items` schema is preserved
     if is_array_type(inner_type)
         && let Some(next_inner) = get_array_inner_type(inner_type)
     {
-        let nested_items = generate_array_items_schema(next_inner, struct_name_str);
+        let nested_items = generate_array_items_schema(next_inner);
         return quote! {
             {
                 let mut items_schema = ::serde_json::Map::new();
@@ -568,16 +524,6 @@ fn generate_array_items_schema(inner_type: &Type, struct_name_str: &str) -> Toke
                 items_schema.insert("items".to_string(), #nested_items);
                 ::serde_json::Value::Object(items_schema)
             }
-        };
-    }
-
-    // Self-referential element types use $ref to prevent infinite recursion.
-    // This must run before the well-known-name sniff below: a recursive
-    // struct that happens to be named `Date` must still get a $ref, not a
-    // probe that would call its own schema() and never terminate.
-    if is_self_reference(inner_type, struct_name_str) {
-        return quote! {
-            ::serde_json::json!({ "$ref": format!("#/$defs/{}", #struct_name_str) })
         };
     }
 
@@ -598,9 +544,9 @@ fn generate_array_items_schema(inner_type: &Type, struct_name_str: &str) -> Toke
         return quote! {
             {
                 #[allow(unused_imports)]
-                use ::rstructor::schema::__private::SchemaProbeFallback as _;
+                use ::rstructor::schema::__private::SchemaProbeContextFallback as _;
                 ::rstructor::schema::__private::SchemaProbe::<#inner_type>::new()
-                    .rstructor_schema_or(#fallback)
+                    .rstructor_schema_in_or(__rstructor_context, #fallback)
             }
         };
     }
@@ -611,7 +557,7 @@ fn generate_array_items_schema(inner_type: &Type, struct_name_str: &str) -> Toke
         // type's schema directly. This requires the inner type to implement
         // SchemaType.
         quote! {
-            <#inner_type as ::rstructor::schema::SchemaType>::schema().to_json()
+            <#inner_type as ::rstructor::schema::SchemaType>::schema_in(__rstructor_context)
         }
     } else {
         // Standard handling for primitive types

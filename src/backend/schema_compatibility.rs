@@ -271,6 +271,72 @@ mod tests {
     }
 
     #[test]
+    fn mutual_recursion_definitions_receive_the_strict_transform() {
+        let canonical = schema(json!({
+            "$ref": "#/$defs/Fund",
+            "$defs": {
+                "Fund": {
+                    "type": "object",
+                    "properties": {
+                        "lei": { "type": "string" },
+                        "prime_broker": { "$ref": "#/$defs/PrimeBroker" }
+                    },
+                    "required": ["lei"]
+                },
+                "PrimeBroker": {
+                    "type": "object",
+                    "properties": {
+                        "lei": { "type": "string" },
+                        "funds": {
+                            "type": "array",
+                            "items": { "$ref": "#/$defs/Fund" }
+                        }
+                    },
+                    "required": ["lei", "funds"]
+                }
+            }
+        }));
+
+        for provider in [
+            StrictSchemaProvider::OpenAI,
+            StrictSchemaProvider::Anthropic,
+            StrictSchemaProvider::Grok,
+        ] {
+            let compiled =
+                compile_strict_schema(&canonical, provider, "mutually recursive output").unwrap();
+
+            assert_eq!(compiled["$ref"], "#/$defs/Fund");
+            assert_eq!(
+                compiled["$defs"]["Fund"]["properties"]["prime_broker"]["anyOf"][0]["$ref"],
+                "#/$defs/PrimeBroker"
+            );
+            assert_eq!(
+                compiled["$defs"]["PrimeBroker"]["properties"]["funds"]["items"]["$ref"],
+                "#/$defs/Fund"
+            );
+
+            for definition in ["Fund", "PrimeBroker"] {
+                assert_eq!(
+                    compiled["$defs"][definition]["additionalProperties"], false,
+                    "{provider} must close the {definition} definition"
+                );
+                let property_count = compiled["$defs"][definition]["properties"]
+                    .as_object()
+                    .unwrap()
+                    .len();
+                assert_eq!(
+                    compiled["$defs"][definition]["required"]
+                        .as_array()
+                        .unwrap()
+                        .len(),
+                    property_count,
+                    "{provider} must require every strict property in {definition}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn explicitly_closed_additional_properties_is_compatible() {
         let compiled = compile_strict_schema(
             &schema(json!({

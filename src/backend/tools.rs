@@ -52,8 +52,6 @@ pub trait DynTool: Send + Sync {
     /// Provider-specific compatibility checks and transformations are applied
     /// when the toolbox is rendered for a request.
     fn parameters_schema(&self) -> Value;
-    /// The argument schema prepared for Gemini's JSON Schema transport.
-    fn parameters_schema_gemini(&self) -> Value;
     /// Invoke the tool with raw JSON arguments (deserialized into `Args`).
     async fn invoke_json(&self, args: Value) -> Result<Value>;
 }
@@ -70,10 +68,6 @@ impl<T: Tool> DynTool for T {
 
     fn parameters_schema(&self) -> Value {
         <T::Args as SchemaType>::schema().to_json()
-    }
-
-    fn parameters_schema_gemini(&self) -> Value {
-        crate::backend::utils::prepare_gemini_schema(&<T::Args as SchemaType>::schema())
     }
 
     async fn invoke_json(&self, args: Value) -> Result<Value> {
@@ -245,22 +239,30 @@ impl Toolbox {
 
     /// Render the tools as Gemini `tools` JSON (a single `functionDeclarations`).
     #[cfg(feature = "gemini")]
-    fn gemini_tools_json(&self) -> Vec<Value> {
+    fn gemini_tools_json(&self) -> Result<Vec<Value>> {
         if self.tools.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
         let declarations: Vec<Value> = self
             .tools
             .iter()
             .map(|t| {
-                serde_json::json!({
-                    "name": t.name(),
+                let name = t.name();
+                let schema = crate::schema::Schema::new(t.parameters_schema());
+                let parameters = crate::backend::utils::prepare_gemini_schema(
+                    &schema,
+                    format!("tool `{name}` arguments"),
+                )?;
+                Ok(serde_json::json!({
+                    "name": name,
                     "description": t.description(),
-                    "parametersJsonSchema": t.parameters_schema_gemini(),
-                })
+                    "parametersJsonSchema": parameters,
+                }))
             })
-            .collect();
-        vec![serde_json::json!({ "functionDeclarations": declarations })]
+            .collect::<Result<_>>()?;
+        Ok(vec![
+            serde_json::json!({ "functionDeclarations": declarations }),
+        ])
     }
 }
 
@@ -546,7 +548,7 @@ pub(crate) async fn run_gemini_tools(
     use serde_json::json;
     use tracing::debug;
 
-    let tools_json = toolbox.gemini_tools_json();
+    let tools_json = toolbox.gemini_tools_json()?;
     let url = format!("{base_url}/models/{model}:generateContent");
     // Attach any media to the initial user turn, mirroring the materialize path:
     // inline base64 data becomes `inlineData`, URI references become `fileData`.
@@ -691,6 +693,12 @@ mod tests {
     #[derive(crate::Instructor, Serialize, Deserialize)]
     struct ScenarioPriceArgs {
         scenario_prices: HashMap<String, f64>,
+    }
+
+    #[derive(crate::Instructor, Serialize, Deserialize)]
+    struct RecursiveToolArgs {
+        account_id: String,
+        children: Vec<RecursiveToolArgs>,
     }
 
     fn scenario_price_tool()
@@ -900,14 +908,19 @@ mod tests {
     #[test]
     fn gemini_tools_json_empty_returns_empty_vec() {
         let toolbox = Toolbox::new();
-        assert!(toolbox.gemini_tools_json().is_empty());
+        assert!(
+            toolbox
+                .gemini_tools_json()
+                .expect("empty toolbox rendering")
+                .is_empty()
+        );
     }
 
     #[cfg(feature = "gemini")]
     #[test]
     fn gemini_tools_json_wraps_declarations() {
         let toolbox = Toolbox::new().with(add_tool());
-        let rendered = toolbox.gemini_tools_json();
+        let rendered = toolbox.gemini_tools_json().expect("acyclic tool schema");
         // Populated toolbox yields a single wrapper object.
         assert_eq!(rendered.len(), 1);
 
@@ -937,7 +950,9 @@ mod tests {
     #[test]
     fn gemini_tool_preserves_typed_dynamic_map() {
         let toolbox = Toolbox::new().with(scenario_price_tool());
-        let rendered = toolbox.gemini_tools_json();
+        let rendered = toolbox
+            .gemini_tools_json()
+            .expect("typed dynamic map schema");
         let declaration = &rendered[0]["functionDeclarations"][0];
         let map = &declaration["parametersJsonSchema"]["properties"]["scenario_prices"];
 
@@ -945,5 +960,31 @@ mod tests {
         assert_eq!(map["additionalProperties"]["type"], "number");
         assert!(map.get("properties").is_none());
         assert!(declaration.get("parameters").is_none());
+    }
+
+    #[cfg(feature = "gemini")]
+    #[test]
+    fn gemini_tool_rejects_recursive_arguments_with_tool_context() {
+        let tool = FnTool::new(
+            "reconcile_accounts",
+            "Reconcile a recursive account hierarchy",
+            |args: RecursiveToolArgs| std::future::ready(Ok(json!({"root": args.account_id}))),
+        );
+        let error = Toolbox::new()
+            .with(tool)
+            .gemini_tools_json()
+            .expect_err("Gemini must reject recursive tool arguments");
+
+        assert!(matches!(
+            error,
+            RStructorError::SchemaCompatibilityError {
+                provider,
+                context,
+                message,
+                ..
+            } if provider.as_ref() == "Gemini"
+                && context.as_ref() == "tool `reconcile_accounts` arguments"
+                && message.contains("finite-depth expansion")
+        ));
     }
 }

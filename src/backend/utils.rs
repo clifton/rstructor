@@ -463,136 +463,166 @@ pub fn transform_internally_to_adjacently_tagged(
 ///
 /// # Returns
 ///
-/// A new schema Value with unsupported keywords removed
-pub fn prepare_gemini_schema(schema: &crate::schema::Schema) -> Value {
+/// A new schema value with unsupported keywords removed, or a local
+/// compatibility error when preserving the canonical schema is impossible.
+pub fn prepare_gemini_schema(
+    schema: &crate::schema::Schema,
+    context: impl Into<String>,
+) -> Result<Value> {
     let mut schema_json = schema.to_json();
-    strip_gemini_unsupported_keywords(&mut schema_json);
-    schema_json
+    let context = context.into();
+    strip_gemini_unsupported_keywords(&mut schema_json, &context)?;
+    Ok(schema_json)
 }
 
 /// Recursively removes keywords unsupported by Gemini's structured outputs.
-fn strip_gemini_unsupported_keywords(schema: &mut Value) {
-    // First, resolve any $ref references by inlining definitions
-    resolve_refs_for_gemini(schema);
-
+fn strip_gemini_unsupported_keywords(schema: &mut Value, context: &str) -> Result<()> {
+    resolve_refs_for_gemini(schema, context)?;
     strip_gemini_unsupported_keywords_recursive(schema);
+    Ok(())
 }
 
 /// Resolves $ref references by inlining definitions for Gemini compatibility.
-/// This handles recursive schemas by inlining to a limited depth.
-fn resolve_refs_for_gemini(schema: &mut Value) {
-    // Extract $defs if present
-    let defs = if let Some(obj) = schema.as_object_mut() {
-        obj.remove("$defs").or_else(|| obj.remove("definitions"))
-    } else {
-        None
-    };
+///
+/// Acyclic local references are losslessly inlined. Recursive references are
+/// rejected before any HTTP request because Gemini's schema transport cannot
+/// preserve an unbounded cycle, and finite-depth expansion would silently
+/// widen the accepted values at the cutoff.
+fn resolve_refs_for_gemini(schema: &mut Value, context: &str) -> Result<()> {
+    let definitions = schema
+        .get("$defs")
+        .or_else(|| schema.get("definitions"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
 
-    if let Some(defs) = defs {
-        // If schema has $ref at root, replace with the referenced definition
-        if let Some(obj) = schema.as_object_mut()
-            && let Some(ref_value) = obj.remove("$ref")
-            && let Some(ref_str) = ref_value.as_str()
-            && let Some(def_name) = ref_str
-                .strip_prefix("#/$defs/")
-                .or_else(|| ref_str.strip_prefix("#/definitions/"))
-            && let Some(defs_obj) = defs.as_object()
-            && let Some(definition) = defs_obj.get(def_name)
-        {
-            // Replace schema with the definition
-            *schema = definition.clone();
+    let mut expanded = schema.clone();
+    if let Some(object) = expanded.as_object_mut() {
+        object.remove("$defs");
+        object.remove("definitions");
+    }
+    inline_refs_for_gemini(&mut expanded, &definitions, context, "$", &mut Vec::new())?;
+    *schema = expanded;
+    Ok(())
+}
 
-            // Recursively inline refs in the new schema (with depth limit)
-            inline_refs_recursive(schema, &defs, 3);
+fn inline_refs_for_gemini(
+    schema: &mut Value,
+    definitions: &serde_json::Map<String, Value>,
+    context: &str,
+    path: &str,
+    active_references: &mut Vec<String>,
+) -> Result<()> {
+    match schema {
+        Value::Object(object) => {
+            if let Some(reference) = object
+                .get("$ref")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+            {
+                if active_references.contains(&reference) {
+                    return Err(gemini_schema_compatibility_error(
+                        context,
+                        path,
+                        format!(
+                            "recursive reference `{reference}` cannot be represented without \
+                             changing the schema; Gemini compilation does not apply a lossy \
+                             finite-depth expansion"
+                        ),
+                    ));
+                }
+
+                let Some(mut target) = referenced_definition(&reference, definitions) else {
+                    return Err(gemini_schema_compatibility_error(
+                        context,
+                        path,
+                        format!(
+                            "local reference `{reference}` does not resolve from the schema \
+                             document root"
+                        ),
+                    ));
+                };
+
+                let mut siblings = std::mem::take(object);
+                siblings.remove("$ref");
+                if !siblings.is_empty() {
+                    target = serde_json::json!({
+                        "allOf": [target, Value::Object(siblings)]
+                    });
+                }
+
+                active_references.push(reference);
+                inline_refs_for_gemini(&mut target, definitions, context, path, active_references)?;
+                active_references.pop();
+                *schema = target;
+                return Ok(());
+            }
+
+            for (key, child) in object {
+                inline_refs_for_gemini(
+                    child,
+                    definitions,
+                    context,
+                    &append_json_path(path, key),
+                    active_references,
+                )?;
+            }
         }
+        Value::Array(array) => {
+            for (index, child) in array.iter_mut().enumerate() {
+                inline_refs_for_gemini(
+                    child,
+                    definitions,
+                    context,
+                    &format!("{path}[{index}]"),
+                    active_references,
+                )?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn referenced_definition(
+    reference: &str,
+    definitions: &serde_json::Map<String, Value>,
+) -> Option<Value> {
+    let pointer = reference
+        .strip_prefix("#/$defs/")
+        .or_else(|| reference.strip_prefix("#/definitions/"))?;
+    let (encoded_key, suffix) = pointer
+        .split_once('/')
+        .map_or((pointer, None), |(key, suffix)| (key, Some(suffix)));
+    let key = encoded_key.replace("~1", "/").replace("~0", "~");
+    let definition = definitions.get(&key)?;
+    suffix.map_or_else(
+        || Some(definition.clone()),
+        |suffix| definition.pointer(&format!("/{suffix}")).cloned(),
+    )
+}
+
+fn append_json_path(path: &str, key: &str) -> String {
+    let mut characters = key.chars();
+    let is_identifier = matches!(
+        characters.next(),
+        Some(first) if first == '_' || first.is_ascii_alphabetic()
+    ) && characters
+        .all(|character| character == '_' || character.is_ascii_alphanumeric());
+    if is_identifier {
+        format!("{path}.{key}")
+    } else {
+        let quoted = serde_json::to_string(key).expect("serializing a string cannot fail");
+        format!("{path}[{quoted}]")
     }
 }
 
-/// Recursively inlines $ref references with a depth limit to prevent infinite recursion.
-fn inline_refs_recursive(schema: &mut Value, defs: &Value, depth: usize) {
-    if depth == 0 {
-        // At max depth, replace self-references with a simple object schema
-        if let Some(obj) = schema.as_object_mut()
-            && obj.contains_key("$ref")
-        {
-            obj.remove("$ref");
-            obj.insert("type".to_string(), Value::String("object".to_string()));
-            obj.insert(
-                "description".to_string(),
-                Value::String("Recursive reference (depth limit reached)".to_string()),
-            );
-        }
-        return;
-    }
-
-    if let Some(obj) = schema.as_object_mut() {
-        // Replace $ref with inline definition
-        if let Some(ref_value) = obj.remove("$ref")
-            && let Some(ref_str) = ref_value.as_str()
-            && let Some(def_name) = ref_str
-                .strip_prefix("#/$defs/")
-                .or_else(|| ref_str.strip_prefix("#/definitions/"))
-            && let Some(defs_obj) = defs.as_object()
-            && let Some(definition) = defs_obj.get(def_name)
-        {
-            // Replace with inline definition
-            *schema = definition.clone();
-            // Continue recursively with reduced depth
-            inline_refs_recursive(schema, defs, depth - 1);
-            return;
-        }
-
-        // Process nested schemas
-        if let Some(properties) = obj.get_mut("properties")
-            && let Some(props_obj) = properties.as_object_mut()
-        {
-            for prop_schema in props_obj.values_mut() {
-                inline_refs_recursive(prop_schema, defs, depth);
-            }
-        }
-
-        if let Some(items) = obj.get_mut("items") {
-            inline_refs_recursive(items, defs, depth);
-        }
-
-        if let Some(prefix_items) = obj.get_mut("prefixItems")
-            && let Some(arr) = prefix_items.as_array_mut()
-        {
-            for item in arr.iter_mut() {
-                inline_refs_recursive(item, defs, depth);
-            }
-        }
-
-        if let Some(one_of) = obj.get_mut("oneOf")
-            && let Some(arr) = one_of.as_array_mut()
-        {
-            for item in arr.iter_mut() {
-                inline_refs_recursive(item, defs, depth);
-            }
-        }
-
-        if let Some(any_of) = obj.get_mut("anyOf")
-            && let Some(arr) = any_of.as_array_mut()
-        {
-            for item in arr.iter_mut() {
-                inline_refs_recursive(item, defs, depth);
-            }
-        }
-
-        if let Some(all_of) = obj.get_mut("allOf")
-            && let Some(arr) = all_of.as_array_mut()
-        {
-            for item in arr.iter_mut() {
-                inline_refs_recursive(item, defs, depth);
-            }
-        }
-
-        // Handle additionalProperties if it's a schema object (for maps)
-        if let Some(additional) = obj.get_mut("additionalProperties")
-            && additional.is_object()
-        {
-            inline_refs_recursive(additional, defs, depth);
-        }
+fn gemini_schema_compatibility_error(context: &str, path: &str, message: String) -> RStructorError {
+    RStructorError::SchemaCompatibilityError {
+        provider: "Gemini".into(),
+        context: context.into(),
+        path: path.into(),
+        message: message.into_boxed_str(),
     }
 }
 
@@ -782,7 +812,10 @@ fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
         obj.remove("default");
         obj.remove("$defs");
         obj.remove("definitions");
-        obj.remove("$ref"); // Should be resolved by now, but remove if any remain
+        debug_assert!(
+            !obj.contains_key("$ref"),
+            "all references must be resolved before Gemini keyword stripping"
+        );
 
         // `x-enum-keys` is a rstructor hint, not part of Gemini's schema dialect.
         obj.remove("x-enum-keys");
@@ -2225,7 +2258,7 @@ mod tests {
             }]
         }));
 
-        let gemini_schema = prepare_gemini_schema(&schema);
+        let gemini_schema = prepare_gemini_schema(&schema, "test output").expect("acyclic schema");
 
         // Verify examples is stripped
         assert!(
@@ -2275,7 +2308,7 @@ mod tests {
             }]
         }));
 
-        let gemini_schema = prepare_gemini_schema(&schema);
+        let gemini_schema = prepare_gemini_schema(&schema, "test output").expect("acyclic schema");
 
         // Verify examples is stripped at root
         assert!(
@@ -2302,7 +2335,8 @@ mod tests {
             "additionalProperties": false
         });
 
-        strip_gemini_unsupported_keywords(&mut schema_json);
+        strip_gemini_unsupported_keywords(&mut schema_json, "test output")
+            .expect("reference-free schema");
 
         assert_eq!(schema_json["additionalProperties"], false);
     }
@@ -2321,7 +2355,8 @@ mod tests {
             }
         });
 
-        strip_gemini_unsupported_keywords(&mut schema_json);
+        strip_gemini_unsupported_keywords(&mut schema_json, "test output")
+            .expect("reference-free schema");
 
         assert!(
             schema_json.get("$schema").is_none(),
@@ -3235,7 +3270,7 @@ mod tests {
                 }
             }
         });
-        strip_gemini_unsupported_keywords(&mut schema);
+        strip_gemini_unsupported_keywords(&mut schema, "test output").expect("acyclic reference");
 
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["properties"]["name"]["type"], "string");
@@ -3256,7 +3291,8 @@ mod tests {
                 }
             }
         });
-        strip_gemini_unsupported_keywords(&mut schema);
+        strip_gemini_unsupported_keywords(&mut schema, "test output")
+            .expect("acyclic legacy reference");
 
         assert_eq!(schema["type"], "object");
         assert_eq!(schema["properties"]["id"]["type"], "integer");
@@ -3265,15 +3301,7 @@ mod tests {
     }
 
     #[test]
-    fn gemini_recursive_ref_inlining_is_depth_limited() {
-        // A self-referential Node schema. Inlining is depth-limited (depth 3 from
-        // the root), and no `$ref` survives anywhere after stripping. The full
-        // public pipeline does NOT emit the "depth limit reached" placeholder for
-        // an object whose self-reference lives in a `child` *property* (the
-        // placeholder branch only fires for a bare `{$ref}` schema at depth 0 —
-        // see `inline_refs_recursive_depth_zero_emits_placeholder`). Here the
-        // innermost `child` is left as an empty object once the dangling $ref is
-        // stripped. This pins the observable behavior of the public path.
+    fn gemini_recursive_ref_is_rejected_instead_of_widened() {
         let mut schema = serde_json::json!({
             "$ref": "#/$defs/Node",
             "$defs": {
@@ -3287,58 +3315,122 @@ mod tests {
                 }
             }
         });
-        strip_gemini_unsupported_keywords(&mut schema);
+        let error = strip_gemini_unsupported_keywords(&mut schema, "file tree output")
+            .expect_err("recursive schemas must not be widened");
 
-        // No $ref or $defs should survive anywhere in the serialized schema.
-        let serialized = serde_json::to_string(&schema).unwrap();
-        assert!(
-            !serialized.contains("$ref"),
-            "no $ref should remain after depth-limited inlining: {}",
-            serialized
-        );
-        assert!(!serialized.contains("$defs"));
-
-        // Root is the inlined Node.
-        assert_eq!(schema["type"], "object");
-        assert_eq!(schema["properties"]["value"]["type"], "integer");
-
-        // Walk the child chain (each level is `properties.child`): it terminates
-        // after a finite number of levels in an empty object (the stripped
-        // innermost self-reference).
-        let mut node = &schema;
-        let mut depth = 0;
-        while let Some(child) = node.get("properties").and_then(|p| p.get("child")) {
-            depth += 1;
-            if child.as_object().map(|o| o.is_empty()).unwrap_or(false) {
-                // Reached the stripped innermost self-reference.
-                break;
-            }
-            node = child;
-            assert!(depth < 10, "child chain should be depth-limited");
-        }
-        assert!(depth >= 1, "expected at least one inlined child level");
+        assert!(matches!(
+            error,
+            RStructorError::SchemaCompatibilityError {
+                provider,
+                context,
+                path,
+                message,
+            } if provider.as_ref() == "Gemini"
+                && context.as_ref() == "file tree output"
+                && path.as_ref() == "$.properties.child"
+                && message.contains("finite-depth expansion")
+        ));
     }
 
     #[test]
-    fn inline_refs_recursive_depth_zero_emits_placeholder() {
-        // Directly exercise the depth-limit placeholder branch: a bare `{$ref}`
-        // schema processed at depth 0 is replaced with a placeholder object
-        // carrying the "depth limit reached" description.
-        let defs = serde_json::json!({
-            "Node": {
-                "type": "object",
-                "properties": { "value": { "type": "integer" } }
+    fn gemini_mutual_recursion_is_rejected_instead_of_widened() {
+        let mut schema = serde_json::json!({
+            "$ref": "#/$defs/Fund",
+            "$defs": {
+                "Fund": {
+                    "type": "object",
+                    "properties": {
+                        "lei": { "type": "string" },
+                        "prime_broker": { "$ref": "#/$defs/PrimeBroker" }
+                    },
+                    "required": ["lei"]
+                },
+                "PrimeBroker": {
+                    "type": "object",
+                    "properties": {
+                        "lei": { "type": "string" },
+                        "funds": {
+                            "type": "array",
+                            "items": { "$ref": "#/$defs/Fund" }
+                        }
+                    },
+                    "required": ["lei", "funds"]
+                }
             }
         });
-        let mut schema = serde_json::json!({ "$ref": "#/$defs/Node" });
-        inline_refs_recursive(&mut schema, &defs, 0);
 
-        assert_eq!(schema["type"], "object");
-        assert_eq!(
-            schema["description"],
-            "Recursive reference (depth limit reached)"
+        let error = strip_gemini_unsupported_keywords(&mut schema, "fund ownership output")
+            .expect_err("mutual recursion must not be widened");
+
+        assert!(matches!(
+            error,
+            RStructorError::SchemaCompatibilityError {
+                provider,
+                context,
+                path,
+                message,
+            } if provider.as_ref() == "Gemini"
+                && context.as_ref() == "fund ownership output"
+                && path.as_ref()
+                    == "$.properties.prime_broker.properties.funds.items"
+                && message.contains("#/$defs/Fund")
+        ));
+    }
+
+    #[test]
+    fn gemini_acyclic_refs_decode_json_pointer_escapes() {
+        let mut schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "slash": {"$ref": "#/$defs/a~1b"},
+                "tilde": {"$ref": "#/$defs/a~0b"}
+            },
+            "$defs": {
+                "a/b": {
+                    "type": "string",
+                    "description": "slash key"
+                },
+                "a~b": {
+                    "type": "integer",
+                    "description": "tilde key"
+                }
+            }
+        });
+        strip_gemini_unsupported_keywords(&mut schema, "escaped definition output")
+            .expect("escaped acyclic references must resolve");
+
+        assert_eq!(schema["properties"]["slash"]["type"], "string");
+        assert_eq!(schema["properties"]["tilde"]["type"], "integer");
+        assert!(schema.get("$defs").is_none());
+    }
+
+    #[test]
+    fn gemini_ref_siblings_remain_conjunctive() {
+        let mut schema = serde_json::json!({
+            "$ref": "#/$defs/CounterpartyCode",
+            "minLength": 5,
+            "$defs": {
+                "CounterpartyCode": {
+                    "type": "string",
+                    "minLength": 10
+                }
+            }
+        });
+        strip_gemini_unsupported_keywords(&mut schema, "counterparty code output")
+            .expect("acyclic reference with validation sibling");
+
+        let all_of = schema["allOf"]
+            .as_array()
+            .expect("$ref siblings must compile as a conjunction");
+        assert_eq!(all_of.len(), 2);
+        assert!(
+            all_of.iter().any(|branch| branch["minLength"] == 10),
+            "the referenced constraint must be preserved: {schema:#}"
         );
-        assert!(schema.get("$ref").is_none());
+        assert!(
+            all_of.iter().any(|branch| branch["minLength"] == 5),
+            "the sibling constraint must be preserved: {schema:#}"
+        );
     }
 
     #[test]
@@ -3439,7 +3531,8 @@ mod tests {
             serde_json::json!(false)
         );
 
-        strip_gemini_unsupported_keywords(&mut schema);
+        strip_gemini_unsupported_keywords(&mut schema, "test output")
+            .expect("reference-free schema");
 
         assert_eq!(schema["additionalProperties"], serde_json::json!(false));
         assert_eq!(
@@ -3528,19 +3621,30 @@ mod tests {
     }
 
     #[test]
-    fn gemini_orphan_ref_without_defs_is_stripped() {
-        // A $ref with no matching $defs cannot be resolved, but the dangling
-        // $ref keyword is removed during stripping.
+    fn gemini_orphan_ref_without_defs_is_rejected() {
         let mut schema = serde_json::json!({
             "type": "object",
             "properties": {
                 "x": { "$ref": "#/$defs/Missing" }
             }
         });
-        strip_gemini_unsupported_keywords(&mut schema);
-        assert!(
-            schema["properties"]["x"].get("$ref").is_none(),
-            "orphan $ref should be stripped"
+        let original = schema.clone();
+        let error = strip_gemini_unsupported_keywords(&mut schema, "orphan ref output")
+            .expect_err("orphan references must not be stripped");
+        assert!(matches!(
+            error,
+            RStructorError::SchemaCompatibilityError {
+                provider,
+                path,
+                message,
+                ..
+            } if provider.as_ref() == "Gemini"
+                && path.as_ref() == "$.properties.x"
+                && message.contains("does not resolve")
+        ));
+        assert_eq!(
+            schema, original,
+            "failed resolution must leave the canonical schema untouched"
         );
     }
 
@@ -3554,7 +3658,8 @@ mod tests {
                 "name": { "type": "string", "default": "anon" }
             }
         });
-        strip_gemini_unsupported_keywords(&mut schema);
+        strip_gemini_unsupported_keywords(&mut schema, "test output")
+            .expect("reference-free schema");
         assert!(schema.get("$id").is_none(), "$id should be stripped");
         assert!(
             schema.get("default").is_none(),

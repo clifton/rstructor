@@ -1,9 +1,10 @@
 // tests/recursive_structures_tests.rs
 #[cfg(test)]
 mod recursive_tests {
-    use rstructor::{GeminiClient, GeminiModel, Instructor, LLMClient};
+    #[cfg(feature = "streaming")]
+    use futures_util::StreamExt;
+    use rstructor::{GeminiClient, GeminiModel, Instructor, LLMClient, RStructorError};
     use serde::{Deserialize, Serialize};
-    use std::env;
 
     #[derive(Instructor, Serialize, Deserialize, Debug)]
     #[llm(description = "A node in a file system tree")]
@@ -19,25 +20,55 @@ mod recursive_tests {
     }
 
     #[tokio::test]
-    async fn test_gemini_recursive_schema() {
-        let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
-        let client = GeminiClient::new(api_key)
+    async fn test_gemini_recursive_schema_is_rejected_before_http() {
+        let client = GeminiClient::new("offline-test-key")
             .unwrap()
             .model(GeminiModel::Gemini31ProPreview)
             .temperature(0.0)
-            .no_retries();
+            .no_retries()
+            .base_url("http://127.0.0.1:9");
 
         let prompt = "Represent a small directory structure: A root folder 'src' containing a file 'lib.rs' (500 bytes) and a subfolder 'backend' which is empty.";
         let result: rstructor::Result<FileNode> = client.materialize(prompt).await;
 
-        // Recursive schemas often fail if the generator doesn't handle $ref or creates infinite loops
-        assert!(
-            result.is_ok(),
-            "Recursive FileNode failed: {:?}",
-            result.err()
-        );
-        let root = result.unwrap();
-        assert_eq!(root.name, "src");
-        assert_eq!(root.children.unwrap().len(), 2);
+        assert!(matches!(
+            result,
+            Err(RStructorError::SchemaCompatibilityError {
+                provider,
+                context,
+                message,
+                ..
+            }) if provider.as_ref() == "Gemini"
+                && context.as_ref() == "structured output"
+                && message.contains("finite-depth expansion")
+        ));
+    }
+
+    #[cfg(feature = "streaming")]
+    #[tokio::test]
+    async fn test_gemini_recursive_stream_is_rejected_before_http() {
+        let client = GeminiClient::new("offline-test-key")
+            .unwrap()
+            .model(GeminiModel::Gemini31ProPreview)
+            .no_retries()
+            .base_url("http://127.0.0.1:9");
+
+        let mut stream = client.materialize_stream::<FileNode>("Extract a recursive file tree");
+        let error = stream
+            .next()
+            .await
+            .expect("compatibility error item")
+            .expect_err("recursive stream must fail locally");
+
+        assert!(matches!(
+            error,
+            RStructorError::SchemaCompatibilityError {
+                provider,
+                context,
+                ..
+            } if provider.as_ref() == "Gemini"
+                && context.as_ref() == "structured output"
+        ));
+        assert!(stream.next().await.is_none());
     }
 }

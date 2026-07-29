@@ -215,14 +215,15 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     // supertraits, so for generic types every type parameter must be bound by
     // those traits for the impl to typecheck (mirroring serde's own derive,
     // which bounds type parameters by `Serialize`/`Deserialize`).
-    let instructor_generics = type_utils::generics_with_bounds(
-        &input.generics,
-        &[
-            syn::parse_quote!(::rstructor::schema::SchemaType),
-            syn::parse_quote!(::serde::Serialize),
-            syn::parse_quote!(::serde::de::DeserializeOwned),
-        ],
-    );
+    let mut instructor_bounds = vec![
+        syn::parse_quote!(::rstructor::schema::SchemaType),
+        syn::parse_quote!(::serde::Serialize),
+        syn::parse_quote!(::serde::de::DeserializeOwned),
+    ];
+    if input.generics.lifetimes().next().is_none() {
+        instructor_bounds.push(syn::parse_quote!('static));
+    }
+    let instructor_generics = type_utils::generics_with_bounds(&input.generics, &instructor_bounds);
     let (impl_generics, ty_generics, where_clause) = instructor_generics.split_for_impl();
     let instructor_impl = quote::quote! {
         impl #impl_generics ::rstructor::model::Instructor for #name #ty_generics #where_clause {

@@ -387,7 +387,9 @@ impl GeminiClient {
 
         // Prepare schema for Gemini by stripping unsupported metadata while
         // preserving supported typed-map constraints.
-        let gemini_schema = crate::backend::utils::prepare_gemini_schema(&schema);
+        let gemini_schema =
+            crate::backend::utils::prepare_gemini_schema(&schema, "structured output")
+                .map_err(|error| (error, None))?;
         let generation_config = GenerationConfig {
             temperature: self.config.temperature,
             max_output_tokens: self.config.max_tokens,
@@ -939,7 +941,11 @@ impl LLMClient for GeminiClient {
         // final buffer can be transformed back before deserializing into `T`.
         let adjacently_tagged_info =
             crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
-        let gemini_schema = crate::backend::utils::prepare_gemini_schema(&schema);
+        let gemini_schema =
+            match crate::backend::utils::prepare_gemini_schema(&schema, "structured output") {
+                Ok(schema) => schema,
+                Err(error) => return crate::backend::streaming::error_stream(error),
+            };
         let body = self.stream_body(prompt, Some(gemini_schema));
 
         let finalize = move |raw: &str| -> Result<T> {
@@ -973,7 +979,11 @@ impl LLMClient for GeminiClient {
         let schema = T::schema();
         let adjacently_tagged_info =
             crate::backend::utils::extract_adjacently_tagged_info(&schema.to_json());
-        let item_schema = crate::backend::utils::prepare_gemini_schema(&schema);
+        let item_schema =
+            match crate::backend::utils::prepare_gemini_schema(&schema, "streamed list item") {
+                Ok(schema) => schema,
+                Err(error) => return crate::backend::streaming::error_stream(error),
+            };
         let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, false);
         let body = self.stream_body(prompt, Some(wrapper));
 
