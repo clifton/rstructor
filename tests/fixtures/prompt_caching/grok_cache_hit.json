@@ -1,0 +1,24 @@
+{
+  "id": "chatcmpl-cache-hit",
+  "object": "chat.completion",
+  "created": 1785326400,
+  "model": "grok-4.1-fast",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Risk is within limits."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 3072,
+    "completion_tokens": 125,
+    "total_tokens": 3197,
+    "prompt_tokens_details": {
+      "cached_tokens": 2048
+    }
+  }
+}

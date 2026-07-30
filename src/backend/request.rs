@@ -57,9 +57,14 @@ impl<'a, C: ?Sized> Request<'a, C> {
         }
     }
 
-    /// Attach system/context instructions, prepended to the prompt (for
-    /// `materialize`/`generate`) or sent as the provider's system prompt (for
-    /// tool `run`).
+    /// Attach system/context instructions.
+    ///
+    /// Built-in provider clients send this through the provider's first-class
+    /// system field or message role for every terminal. This keeps the static
+    /// instruction prefix separate from the dynamic user prompt, which also
+    /// improves provider prompt-cache reuse. Custom [`LLMClient`]
+    /// implementations inherit a backwards-compatible concatenation fallback
+    /// unless they override the request hooks on that trait.
     #[must_use]
     pub fn system(mut self, system: impl Into<String>) -> Self {
         self.system = Some(system.into());
@@ -91,14 +96,6 @@ impl<'a, C: ?Sized> Request<'a, C> {
         self.max_iterations = max_iterations;
         self
     }
-
-    /// Prompt with the system context prepended, if any.
-    fn combined(&self, prompt: &str) -> String {
-        match &self.system {
-            Some(system) => format!("{system}\n\n{prompt}"),
-            None => prompt.to_string(),
-        }
-    }
 }
 
 impl<C: LLMClient + Sync + ?Sized> Request<'_, C> {
@@ -107,14 +104,9 @@ impl<C: LLMClient + Sync + ?Sized> Request<'_, C> {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let prompt = self.combined(prompt);
-        if self.media.is_empty() {
-            self.client.materialize(&prompt).await
-        } else {
-            self.client
-                .materialize_with_media(&prompt, &self.media)
-                .await
-        }
+        self.client
+            .materialize_request(self.system.as_deref(), prompt, &self.media)
+            .await
     }
 
     /// Materialize a structured `T` with cumulative usage and every provider attempt.
@@ -125,31 +117,23 @@ impl<C: LLMClient + Sync + ?Sized> Request<'_, C> {
     where
         T: Instructor + DeserializeOwned + Send + 'static,
     {
-        let prompt = self.combined(prompt);
-        if self.media.is_empty() {
-            self.client.materialize_with_attempts(&prompt).await
-        } else {
-            self.client
-                .materialize_with_media_and_attempts(&prompt, &self.media)
-                .await
-        }
+        self.client
+            .materialize_request_with_attempts(self.system.as_deref(), prompt, &self.media)
+            .await
     }
 
     /// Generate raw text, applying any attached system context and media.
     pub async fn generate(self, prompt: &str) -> Result<String> {
-        let prompt = self.combined(prompt);
-        if self.media.is_empty() {
-            self.client.generate(&prompt).await
-        } else {
-            self.client.generate_with_media(&prompt, &self.media).await
-        }
+        self.client
+            .generate_request(self.system.as_deref(), prompt, &self.media)
+            .await
     }
 }
 
 #[cfg(feature = "streaming")]
 impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
     /// Stream a **list** of structured `T`, yielding each item as soon as it is
-    /// fully generated and validated, with any attached system context prepended.
+    /// fully generated and validated, with any attached system context applied.
     ///
     /// If media is attached, the stream yields one
     /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) and
@@ -163,18 +147,11 @@ impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
                 STREAMING_MEDIA_UNSUPPORTED.to_string(),
             ));
         }
-        use futures_util::StreamExt;
-        let combined = self.combined(prompt);
-        let client = self.client;
-        Box::pin(async_stream::try_stream! {
-            let mut inner = client.materialize_iter::<T>(&combined);
-            while let Some(item) = inner.next().await {
-                yield item?;
-            }
-        })
+        self.client
+            .materialize_iter_request::<T>(self.system, prompt.to_string())
     }
 
-    /// Stream raw text deltas, with any attached system context prepended.
+    /// Stream raw text deltas, with any attached system context applied.
     ///
     /// If media is attached, the stream yields one
     /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) and
@@ -185,19 +162,12 @@ impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
                 STREAMING_MEDIA_UNSUPPORTED.to_string(),
             ));
         }
-        use futures_util::StreamExt;
-        let combined = self.combined(prompt);
-        let client = self.client;
-        Box::pin(async_stream::try_stream! {
-            let mut inner = client.generate_stream(&combined);
-            while let Some(chunk) = inner.next().await {
-                yield chunk?;
-            }
-        })
+        self.client
+            .generate_stream_request(self.system, prompt.to_string())
     }
 
     /// Stream a single structured object as its JSON fills in, with any attached
-    /// system context prepended.
+    /// system context applied.
     ///
     /// If media is attached, the stream yields one
     /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) and
@@ -214,15 +184,8 @@ impl<'a, C: LLMClient + Sync + ?Sized> Request<'a, C> {
                 STREAMING_MEDIA_UNSUPPORTED.to_string(),
             ));
         }
-        use futures_util::StreamExt;
-        let combined = self.combined(prompt);
-        let client = self.client;
-        Box::pin(async_stream::try_stream! {
-            let mut inner = client.materialize_stream::<T>(&combined);
-            while let Some(obj) = inner.next().await {
-                yield obj?;
-            }
-        })
+        self.client
+            .materialize_stream_request::<T>(self.system, prompt.to_string())
     }
 }
 
@@ -246,12 +209,9 @@ impl<C: crate::backend::tools::ToolRunner + LLMClient + Sync + ?Sized> Request<'
                     .await
             }
             None => {
-                let prompt = self.combined(prompt);
-                if self.media.is_empty() {
-                    self.client.generate(&prompt).await
-                } else {
-                    self.client.generate_with_media(&prompt, &self.media).await
-                }
+                self.client
+                    .generate_request(self.system.as_deref(), prompt, &self.media)
+                    .await
             }
         }
     }

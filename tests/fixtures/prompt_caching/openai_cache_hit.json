@@ -1,0 +1,25 @@
+{
+  "id": "chatcmpl-cache-hit",
+  "object": "chat.completion",
+  "created": 1785326400,
+  "model": "gpt-5.6",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Risk is within limits."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2048,
+    "completion_tokens": 125,
+    "total_tokens": 2173,
+    "prompt_tokens_details": {
+      "cached_tokens": 1024,
+      "cache_write_tokens": 768
+    }
+  }
+}

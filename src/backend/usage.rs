@@ -20,6 +20,7 @@ use crate::error::RStructorError;
 /// if let Some(usage) = &result.usage {
 ///     println!("Model: {}", usage.model);
 ///     println!("Input tokens: {}", usage.input_tokens);
+///     println!("Cached input tokens: {}", usage.cached_input_tokens);
 ///     println!("Output tokens: {}", usage.output_tokens);
 /// }
 /// # Ok(())
@@ -31,6 +32,15 @@ pub struct TokenUsage {
     pub model: String,
     /// Number of tokens in the input/prompt
     pub input_tokens: u64,
+    /// Input tokens served from a provider prompt cache.
+    ///
+    /// This is a subset of `input_tokens`, not an additional token count.
+    pub cached_input_tokens: u64,
+    /// Input tokens written to a provider prompt cache.
+    ///
+    /// This is a subset of `input_tokens`, not an additional token count.
+    /// Providers that perform implicit cache writes may not report this value.
+    pub cache_write_input_tokens: u64,
     /// Number of tokens in the output/completion
     pub output_tokens: u64,
 }
@@ -41,8 +51,22 @@ impl TokenUsage {
         Self {
             model: model.into(),
             input_tokens,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
             output_tokens,
         }
+    }
+
+    /// Attach provider-reported prompt-cache token counts.
+    #[must_use]
+    pub fn with_cache_tokens(
+        mut self,
+        cached_input_tokens: u64,
+        cache_write_input_tokens: u64,
+    ) -> Self {
+        self.cached_input_tokens = cached_input_tokens;
+        self.cache_write_input_tokens = cache_write_input_tokens;
+        self
     }
 
     /// Total tokens used (input + output)
@@ -67,6 +91,14 @@ pub struct RunUsage {
     pub reported_attempts: usize,
     /// Cumulative input tokens across all reported responses.
     pub input_tokens: u64,
+    /// Cumulative input tokens served from provider prompt caches.
+    ///
+    /// This is a subset of `input_tokens`.
+    pub cached_input_tokens: u64,
+    /// Cumulative input tokens written to provider prompt caches.
+    ///
+    /// This is a subset of `input_tokens`.
+    pub cache_write_input_tokens: u64,
     /// Cumulative output tokens across all reported responses.
     pub output_tokens: u64,
     /// Cumulative usage grouped by reported model, or configured-model fallback.
@@ -104,6 +136,16 @@ impl RunUsage {
         };
         self.input_tokens =
             saturating_add(&mut self.overflowed, self.input_tokens, usage.input_tokens);
+        self.cached_input_tokens = saturating_add(
+            &mut self.overflowed,
+            self.cached_input_tokens,
+            usage.cached_input_tokens,
+        );
+        self.cache_write_input_tokens = saturating_add(
+            &mut self.overflowed,
+            self.cache_write_input_tokens,
+            usage.cache_write_input_tokens,
+        );
         self.output_tokens = saturating_add(
             &mut self.overflowed,
             self.output_tokens,
@@ -118,6 +160,16 @@ impl RunUsage {
             &mut self.overflowed,
             model_usage.input_tokens,
             usage.input_tokens,
+        );
+        model_usage.cached_input_tokens = saturating_add(
+            &mut self.overflowed,
+            model_usage.cached_input_tokens,
+            usage.cached_input_tokens,
+        );
+        model_usage.cache_write_input_tokens = saturating_add(
+            &mut self.overflowed,
+            model_usage.cache_write_input_tokens,
+            usage.cache_write_input_tokens,
         );
         model_usage.output_tokens = saturating_add(
             &mut self.overflowed,
@@ -450,34 +502,43 @@ mod tests {
     #[test]
     fn run_usage_groups_exact_provider_model_versions() {
         let mut usage = RunUsage::new();
-        usage.record(TokenUsage::new("gpt-5.6-2026-07-01", 120, 30));
-        usage.record(TokenUsage::new("gpt-5.6-2026-07-01", 180, 45));
-        usage.record(TokenUsage::new("gpt-5.6-2026-07-15", 200, 50));
+        usage.record(TokenUsage::new("gpt-5.6-2026-07-01", 120, 30).with_cache_tokens(80, 0));
+        usage.record(TokenUsage::new("gpt-5.6-2026-07-01", 180, 45).with_cache_tokens(100, 20));
+        usage.record(TokenUsage::new("gpt-5.6-2026-07-15", 200, 50).with_cache_tokens(0, 150));
 
         assert_eq!(usage.reported_attempts, 3);
         assert_eq!(usage.input_tokens, 500);
+        assert_eq!(usage.cached_input_tokens, 180);
+        assert_eq!(usage.cache_write_input_tokens, 170);
         assert_eq!(usage.output_tokens, 125);
         assert_eq!(usage.total_tokens(), 625);
         assert!(!usage.overflowed);
         assert_eq!(
             usage.by_model["gpt-5.6-2026-07-01"],
-            TokenUsage::new("gpt-5.6-2026-07-01", 300, 75)
+            TokenUsage::new("gpt-5.6-2026-07-01", 300, 75).with_cache_tokens(180, 20)
         );
         assert_eq!(
             usage.by_model["gpt-5.6-2026-07-15"],
-            TokenUsage::new("gpt-5.6-2026-07-15", 200, 50)
+            TokenUsage::new("gpt-5.6-2026-07-15", 200, 50).with_cache_tokens(0, 150)
         );
     }
 
     #[test]
     fn run_usage_saturates_and_flags_untrusted_counter_overflow() {
         let mut usage = RunUsage::new();
-        usage.record(TokenUsage::new("hostile-compatible-endpoint", u64::MAX, 1));
-        usage.record(TokenUsage::new("hostile-compatible-endpoint", 1, u64::MAX));
+        usage.record(
+            TokenUsage::new("hostile-compatible-endpoint", u64::MAX, 1)
+                .with_cache_tokens(u64::MAX, u64::MAX),
+        );
+        usage.record(
+            TokenUsage::new("hostile-compatible-endpoint", 1, u64::MAX).with_cache_tokens(1, 1),
+        );
 
         assert!(usage.overflowed);
         assert_eq!(usage.reported_attempts, 2);
         assert_eq!(usage.input_tokens, u64::MAX);
+        assert_eq!(usage.cached_input_tokens, u64::MAX);
+        assert_eq!(usage.cache_write_input_tokens, u64::MAX);
         assert_eq!(usage.output_tokens, u64::MAX);
         assert_eq!(usage.total_tokens(), u64::MAX);
         assert_eq!(
@@ -486,6 +547,14 @@ mod tests {
         );
         assert_eq!(
             usage.by_model["hostile-compatible-endpoint"].output_tokens,
+            u64::MAX
+        );
+        assert_eq!(
+            usage.by_model["hostile-compatible-endpoint"].cached_input_tokens,
+            u64::MAX
+        );
+        assert_eq!(
+            usage.by_model["hostile-compatible-endpoint"].cache_write_input_tokens,
             u64::MAX
         );
     }

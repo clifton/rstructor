@@ -10,9 +10,10 @@ use crate::backend::{
     ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeAttemptError,
     MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
     ThinkingLevel, TokenUsage, build_http_client, check_response_status,
-    generate_with_retry_attempts_with_history, generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_attempts_with_history, generate_with_retry_attempts_with_initial_messages,
+    generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
     materialize_request_error, materialize_with_media_and_attempts_with_retry,
-    materialize_with_media_with_retry, parse_validate_and_create_output,
+    materialize_with_media_with_retry, parse_validate_and_create_output, request_messages,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -152,6 +153,8 @@ struct InlineData {
 
 #[derive(Debug, Serialize)]
 struct GenerateContentRequest {
+    #[serde(skip_serializing_if = "Option::is_none", rename = "systemInstruction")]
+    system_instruction: Option<Content>,
     contents: Vec<Content>,
     generation_config: GenerationConfig,
 }
@@ -181,6 +184,15 @@ struct UsageMetadata {
     prompt_token_count: u64,
     #[serde(rename = "candidatesTokenCount", default)]
     candidates_token_count: u64,
+    #[serde(rename = "cachedContentTokenCount", default)]
+    cached_content_token_count: u64,
+}
+
+impl UsageMetadata {
+    fn token_usage(&self, model: impl Into<String>) -> TokenUsage {
+        TokenUsage::new(model, self.prompt_token_count, self.candidates_token_count)
+            .with_cache_tokens(self.cached_content_token_count, 0)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,8 +224,20 @@ struct CandidatePart {
 /// Convert provider-agnostic chat messages into Gemini `contents`, including any
 /// attached media as `inlineData` (base64) or `fileData` (URI) parts. Gemini
 /// passes the MIME type through, so images and PDFs share the same encoding.
-fn chat_messages_to_contents(messages: &[ChatMessage]) -> Vec<Content> {
-    messages
+fn gemini_request_parts(messages: &[ChatMessage]) -> (Option<Content>, Vec<Content>) {
+    let (system_instruction, conversation) = match messages.split_first() {
+        Some((message, rest)) if message.role == crate::backend::ChatRole::System => (
+            Some(Content {
+                role: None,
+                parts: vec![Part::Text {
+                    text: message.content.clone(),
+                }],
+            }),
+            rest,
+        ),
+        _ => (None, messages),
+    };
+    let contents = conversation
         .iter()
         .map(|msg| {
             // Gemini uses "user" and "model" (not "assistant")
@@ -250,7 +274,8 @@ fn chat_messages_to_contents(messages: &[ChatMessage]) -> Vec<Content> {
                 parts,
             }
         })
-        .collect()
+        .collect();
+    (system_instruction, contents)
 }
 
 impl GeminiClient {
@@ -373,7 +398,7 @@ impl GeminiClient {
 
         // Build API contents from conversation history
         // With native responseJsonSchema, we don't need to include schema instructions in the prompt
-        let contents = chat_messages_to_contents(messages);
+        let (system_instruction, contents) = gemini_request_parts(messages);
 
         // Build thinking config only for Gemini 3.x models
         let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
@@ -405,6 +430,7 @@ impl GeminiClient {
         };
 
         let request = GenerateContentRequest {
+            system_instruction,
             contents,
             generation_config,
         };
@@ -451,13 +477,10 @@ impl GeminiClient {
             .model_version
             .clone()
             .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion.usage_metadata.as_ref().map(|u| {
-            TokenUsage::new(
-                model_name.clone(),
-                u.prompt_token_count,
-                u.candidates_token_count,
-            )
-        });
+        let usage = completion
+            .usage_metadata
+            .as_ref()
+            .map(|u| u.token_usage(model_name.clone()));
 
         if completion.candidates.is_empty() {
             error!("Gemini API returned empty candidates array");
@@ -535,8 +558,10 @@ impl GeminiClient {
 
         // Build the request, including any attached media parts
         debug!("Building Gemini API request");
+        let (system_instruction, contents) = gemini_request_parts(messages);
         let request = GenerateContentRequest {
-            contents: chat_messages_to_contents(messages),
+            system_instruction,
+            contents,
             generation_config: GenerationConfig {
                 temperature: self.config.temperature,
                 max_output_tokens: self.config.max_tokens,
@@ -599,7 +624,7 @@ impl GeminiClient {
         let usage = completion
             .usage_metadata
             .as_ref()
-            .map(|u| TokenUsage::new(model_name, u.prompt_token_count, u.candidates_token_count));
+            .map(|u| u.token_usage(model_name));
 
         let candidate = &completion.candidates[0];
         trace!(finish_reason = %candidate.finish_reason, "Completion finish reason");
@@ -702,7 +727,12 @@ impl GeminiClient {
     /// Build the JSON request body for a streaming call, optionally with a
     /// structured-output `responseJsonSchema`. (Gemini streams via the
     /// `:streamGenerateContent?alt=sse` endpoint; the body itself is unchanged.)
-    fn stream_body(&self, prompt: &str, response_json_schema: Option<Value>) -> Value {
+    fn stream_body(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        response_json_schema: Option<Value>,
+    ) -> Value {
         let is_gemini3 = self.config.model.as_str().starts_with("gemini-3");
         let thinking_config = if is_gemini3 {
             self.config.thinking_level.and_then(|level| {
@@ -714,6 +744,12 @@ impl GeminiClient {
             None
         };
         let request = GenerateContentRequest {
+            system_instruction: system.map(|system| Content {
+                role: None,
+                parts: vec![Part::Text {
+                    text: system.to_string(),
+                }],
+            }),
             contents: vec![Content {
                 role: Some("user".to_string()),
                 parts: vec![Part::Text {
@@ -933,6 +969,47 @@ impl LLMClient for GeminiClient {
         .await
     }
 
+    async fn materialize_request<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            request_messages(system, prompt, media),
+            self.config.max_retries,
+        )
+        .await?;
+        Ok(output.data)
+    }
+
+    async fn materialize_request_with_attempts<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        generate_with_retry_attempts_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            request_messages(system, prompt, media),
+            self.config.max_retries,
+        )
+        .await
+    }
+
     #[instrument(
         name = "gemini_generate",
         skip(self, prompt),
@@ -978,12 +1055,36 @@ impl LLMClient for GeminiClient {
         self.generate_internal(&[ChatMessage::user(prompt)]).await
     }
 
+    async fn generate_request(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<String> {
+        let result = self
+            .generate_internal(&request_messages(system, prompt, media))
+            .await?;
+        Ok(result.text)
+    }
+
     #[cfg(feature = "streaming")]
     fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
     where
         Self: Sync,
     {
-        let body = self.stream_body(prompt, None);
+        self.generate_stream_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn generate_stream_request<'a>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        let body = self.stream_body(system.as_deref(), &prompt, None);
         crate::backend::streaming::sse_text_stream(
             self.send_stream(body),
             crate::backend::streaming::gemini_stream_event,
@@ -995,6 +1096,19 @@ impl LLMClient for GeminiClient {
     fn materialize_stream<'a, T>(
         &'a self,
         prompt: &'a str,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        self.materialize_stream_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_stream_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
     ) -> crate::backend::streaming::ObjectStream<'a, T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
@@ -1013,7 +1127,7 @@ impl LLMClient for GeminiClient {
                 Ok(schema) => schema,
                 Err(error) => return crate::backend::streaming::error_stream(error),
             };
-        let body = self.stream_body(prompt, Some(gemini_schema));
+        let body = self.stream_body(system.as_deref(), &prompt, Some(gemini_schema));
 
         let finalize = move |raw: &str| -> Result<T> {
             let mut json = raw.to_string();
@@ -1043,6 +1157,19 @@ impl LLMClient for GeminiClient {
         T: Instructor + DeserializeOwned + Send + 'static,
         Self: Sync,
     {
+        self.materialize_iter_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_iter_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
         let schema = match T::try_schema() {
             Ok(schema) => schema,
             Err(error) => return crate::backend::streaming::error_stream(error),
@@ -1055,7 +1182,7 @@ impl LLMClient for GeminiClient {
                 Err(error) => return crate::backend::streaming::error_stream(error),
             };
         let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, false);
-        let body = self.stream_body(prompt, Some(wrapper));
+        let body = self.stream_body(system.as_deref(), &prompt, Some(wrapper));
 
         // Each streamed array element is a `T`; transform internally-tagged enums
         // back before deserializing.

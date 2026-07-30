@@ -101,6 +101,20 @@ impl ChatMessage {
     }
 }
 
+#[cfg(feature = "_client")]
+pub(crate) fn request_messages(
+    system: Option<&str>,
+    prompt: &str,
+    media: &[MediaFile],
+) -> Vec<ChatMessage> {
+    let mut messages = Vec::with_capacity(usize::from(system.is_some()) + 1);
+    if let Some(system) = system {
+        messages.push(ChatMessage::system(system));
+    }
+    messages.push(ChatMessage::user_with_media(prompt, media.to_vec()));
+    messages
+}
+
 /// Result from a materialize internal call, including the raw response for retry handling.
 ///
 /// This struct captures both the successfully parsed data and the raw response string,

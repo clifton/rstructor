@@ -1344,6 +1344,24 @@ where
         .map(|success| success.report)
 }
 
+/// Execute structured generation from a caller-supplied initial conversation
+/// and retain the complete retry ledger.
+pub async fn generate_with_retry_attempts_with_initial_messages<F, Fut, T>(
+    generate_fn: F,
+    initial_messages: Vec<ChatMessage>,
+    max_retries: Option<usize>,
+) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<MaterializeInternalOutput<T>, MaterializeAttemptError>,
+        >,
+{
+    run_materialize_attempts(generate_fn, initial_messages, max_retries)
+        .await
+        .map(|success| success.report)
+}
+
 /// Execute structured generation with media and retain the complete retry ledger.
 pub async fn materialize_with_media_and_attempts_with_retry<F, Fut, T>(
     generate_fn: F,
@@ -2751,6 +2769,58 @@ mod tests {
 
         assert_eq!(attempts, 2);
         assert_eq!(output.data, "ok");
+    }
+
+    #[tokio::test]
+    async fn retry_history_preserves_the_system_and_user_prefix_exactly() {
+        let initial = vec![
+            ChatMessage::system("Use the fund's reporting policy."),
+            ChatMessage::user("Summarize today's risk."),
+        ];
+        let mut attempts = 0usize;
+
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                attempts += 1;
+                async move {
+                    assert_eq!(
+                        messages[0].role,
+                        crate::backend::ChatRole::System,
+                        "the stable system prefix must remain first"
+                    );
+                    assert_eq!(messages[0].content, "Use the fund's reporting policy.");
+                    assert_eq!(messages[1].role, crate::backend::ChatRole::User);
+                    assert_eq!(messages[1].content, "Summarize today's risk.");
+
+                    if attempts == 1 {
+                        Err(MaterializeAttemptError::semantic(
+                            RStructorError::ValidationError("invalid risk status".to_string()),
+                            ValidationFailureContext::new(
+                                "status must be snake_case",
+                                r#"{"status":"Within Limits"}"#,
+                            ),
+                            None,
+                        ))
+                    } else {
+                        assert_eq!(messages.len(), 4);
+                        assert_eq!(messages[2].role, crate::backend::ChatRole::Assistant);
+                        assert_eq!(messages[3].role, crate::backend::ChatRole::User);
+                        Ok(MaterializeInternalOutput::new(
+                            "within_limits".to_string(),
+                            r#"{"status":"within_limits"}"#.to_string(),
+                            None,
+                        ))
+                    }
+                }
+            },
+            initial,
+            Some(1),
+        )
+        .await
+        .expect("generation should succeed after one correction");
+
+        assert_eq!(attempts, 2);
+        assert_eq!(output.data, "within_limits");
     }
 
     #[tokio::test]
