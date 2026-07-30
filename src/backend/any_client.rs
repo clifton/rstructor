@@ -314,6 +314,30 @@ impl LLMClient for AnyClient {
         dispatch!(self, c => c.materialize_with_media_and_attempts(prompt, media).await)
     }
 
+    async fn materialize_request<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        dispatch!(self, c => c.materialize_request(system, prompt, media).await)
+    }
+
+    async fn materialize_request_with_attempts<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        dispatch!(self, c => c.materialize_request_with_attempts(system, prompt, media).await)
+    }
+
     async fn generate(&self, prompt: &str) -> Result<String> {
         dispatch!(self, c => c.generate(prompt).await)
     }
@@ -324,6 +348,53 @@ impl LLMClient for AnyClient {
 
     async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
         dispatch!(self, c => c.generate_with_metadata(prompt).await)
+    }
+
+    async fn generate_request(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> Result<String> {
+        dispatch!(self, c => c.generate_request(system, prompt, media).await)
+    }
+
+    #[cfg(feature = "streaming")]
+    fn generate_stream_request<'a>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        dispatch!(self, c => c.generate_stream_request(system, prompt))
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_stream_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        dispatch!(self, c => c.materialize_stream_request::<T>(system, prompt))
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_iter_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        dispatch!(self, c => c.materialize_iter_request::<T>(system, prompt))
     }
 
     /// Auto-detect a provider from the environment.

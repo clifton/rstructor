@@ -12,9 +12,10 @@ use crate::backend::{
     MaterializeResult, ModelInfo, StrictSchemaProvider, ThinkingLevel, TokenUsage,
     build_anthropic_message_content, build_http_client, check_response_status,
     compile_strict_schema, generate_with_retry_attempts_with_history,
-    generate_with_retry_with_history, handle_http_error, materialize_request_error,
+    generate_with_retry_attempts_with_initial_messages, generate_with_retry_with_history,
+    generate_with_retry_with_initial_messages, handle_http_error, materialize_request_error,
     materialize_with_media_and_attempts_with_retry, materialize_with_media_with_retry,
-    parse_validate_and_create_output,
+    parse_validate_and_create_output, request_messages,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -114,6 +115,8 @@ struct OutputFormat {
 #[derive(Debug, Serialize)]
 struct CompletionRequest {
     model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
     messages: Vec<AnthropicMessage>,
     temperature: f32,
     max_tokens: u32,
@@ -121,6 +124,32 @@ struct CompletionRequest {
     thinking: Option<ClaudeThinkingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     output_format: Option<OutputFormat>,
+}
+
+fn anthropic_request_parts(
+    messages: &[ChatMessage],
+) -> Result<(Option<String>, Vec<AnthropicMessage>)> {
+    let (system, conversation) = match messages.split_first() {
+        Some((message, rest)) if message.role == crate::backend::ChatRole::System => {
+            if !message.media.is_empty() {
+                return Err(RStructorError::Unsupported(
+                    "Anthropic system instructions cannot contain media".to_string(),
+                ));
+            }
+            (Some(message.content.clone()), rest)
+        }
+        _ => (None, messages),
+    };
+    let messages = conversation
+        .iter()
+        .map(|message| {
+            Ok(AnthropicMessage {
+                role: message.role.as_str().to_string(),
+                content: build_anthropic_message_content(message)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((system, messages))
 }
 
 /// Claude 5 and recent Opus models reject non-default sampling parameters.
@@ -181,8 +210,30 @@ struct ContentBlock {
 
 #[derive(Debug, Deserialize)]
 struct UsageInfo {
+    #[serde(default)]
     input_tokens: u64,
+    #[serde(default)]
     output_tokens: u64,
+    #[serde(default)]
+    cache_creation_input_tokens: u64,
+    #[serde(default)]
+    cache_read_input_tokens: u64,
+}
+
+impl UsageInfo {
+    fn token_usage(&self, model: impl Into<String>) -> TokenUsage {
+        TokenUsage::new(
+            model,
+            self.input_tokens
+                .saturating_add(self.cache_creation_input_tokens)
+                .saturating_add(self.cache_read_input_tokens),
+            self.output_tokens,
+        )
+        .with_cache_tokens(
+            self.cache_read_input_tokens,
+            self.cache_creation_input_tokens,
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -317,16 +368,8 @@ impl AnthropicClient {
 
         // Build API messages from conversation history
         // With native structured outputs, we don't need to include schema instructions in the prompt
-        let api_messages: Vec<AnthropicMessage> = messages
-            .iter()
-            .map(|msg| {
-                Ok(AnthropicMessage {
-                    role: msg.role.as_str().to_string(),
-                    content: build_anthropic_message_content(msg)?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()
-            .map_err(MaterializeAttemptError::preflight)?;
+        let (system, api_messages) =
+            anthropic_request_parts(messages).map_err(MaterializeAttemptError::preflight)?;
 
         // Build thinking config for Claude 4.x models
         let is_thinking_model = self.config.model.as_str().contains("sonnet-4")
@@ -361,6 +404,7 @@ impl AnthropicClient {
         );
         let request = CompletionRequest {
             model: self.config.model.as_str().to_string(),
+            system,
             messages: api_messages,
             temperature: effective_temp,
             max_tokens: effective_max_tokens(self.config.max_tokens, thinking_config.as_ref()),
@@ -412,7 +456,7 @@ impl AnthropicClient {
         let usage = completion
             .usage
             .as_ref()
-            .map(|u| TokenUsage::new(model_name.clone(), u.input_tokens, u.output_tokens));
+            .map(|u| u.token_usage(model_name.clone()));
 
         // Extract the content, assuming the first block is text containing JSON
         let raw_response = match completion
@@ -477,20 +521,13 @@ impl AnthropicClient {
         );
 
         // Build API messages, including any attached media blocks
-        let api_messages: Vec<AnthropicMessage> = messages
-            .iter()
-            .map(|msg| {
-                Ok(AnthropicMessage {
-                    role: msg.role.as_str().to_string(),
-                    content: build_anthropic_message_content(msg)?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let (system, api_messages) = anthropic_request_parts(messages)?;
 
         // Build the request (no output_format for raw text generation)
         debug!("Building Anthropic API request for text generation");
         let request = CompletionRequest {
             model: self.config.model.as_str().to_string(),
+            system,
             messages: api_messages,
             temperature: effective_temp,
             max_tokens: effective_max_tokens(self.config.max_tokens, thinking_config.as_ref()),
@@ -536,10 +573,7 @@ impl AnthropicClient {
             .model
             .clone()
             .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion
-            .usage
-            .as_ref()
-            .map(|u| TokenUsage::new(model_name, u.input_tokens, u.output_tokens));
+        let usage = completion.usage.as_ref().map(|u| u.token_usage(model_name));
 
         // Extract the content
         debug!("Extracting text content from response blocks");
@@ -639,6 +673,7 @@ impl AnthropicClient {
     /// optionally with a structured-output `output_format`.
     fn stream_body(
         &self,
+        system: Option<&str>,
         prompt: &str,
         output_format: Option<serde_json::Value>,
     ) -> serde_json::Value {
@@ -671,6 +706,9 @@ impl AnthropicClient {
         if let Some(tc) = thinking_config {
             body["thinking"] =
                 serde_json::json!({ "type": tc.thinking_type, "budget_tokens": tc.budget_tokens });
+        }
+        if let Some(system) = system {
+            body["system"] = serde_json::json!(system);
         }
         if let Some(of) = output_format {
             body["output_format"] = of;
@@ -881,6 +919,47 @@ impl LLMClient for AnthropicClient {
         .await
     }
 
+    async fn materialize_request<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            request_messages(system, prompt, media),
+            self.config.max_retries,
+        )
+        .await?;
+        Ok(output.data)
+    }
+
+    async fn materialize_request_with_attempts<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        generate_with_retry_attempts_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            request_messages(system, prompt, media),
+            self.config.max_retries,
+        )
+        .await
+    }
+
     #[instrument(
         name = "anthropic_generate",
         skip(self, prompt),
@@ -926,12 +1005,36 @@ impl LLMClient for AnthropicClient {
         self.generate_internal(&[ChatMessage::user(prompt)]).await
     }
 
+    async fn generate_request(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<String> {
+        let result = self
+            .generate_internal(&request_messages(system, prompt, media))
+            .await?;
+        Ok(result.text)
+    }
+
     #[cfg(feature = "streaming")]
     fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
     where
         Self: Sync,
     {
-        let body = self.stream_body(prompt, None);
+        self.generate_stream_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn generate_stream_request<'a>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        let body = self.stream_body(system.as_deref(), &prompt, None);
         crate::backend::streaming::sse_text_stream(
             self.send_stream(body),
             crate::backend::streaming::anthropic_stream_event,
@@ -943,6 +1046,19 @@ impl LLMClient for AnthropicClient {
     fn materialize_stream<'a, T>(
         &'a self,
         prompt: &'a str,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        self.materialize_stream_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_stream_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
     ) -> crate::backend::streaming::ObjectStream<'a, T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
@@ -964,7 +1080,7 @@ impl LLMClient for AnthropicClient {
             "type": "json_schema",
             "schema": schema_json,
         });
-        let body = self.stream_body(prompt, Some(output_format));
+        let body = self.stream_body(system.as_deref(), &prompt, Some(output_format));
         crate::backend::streaming::object_stream(
             self.send_stream(body),
             crate::backend::streaming::anthropic_stream_event,
@@ -976,6 +1092,19 @@ impl LLMClient for AnthropicClient {
     fn materialize_iter<'a, T>(
         &'a self,
         prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        self.materialize_iter_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_iter_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
     ) -> crate::backend::streaming::ItemStream<'a, T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
@@ -995,7 +1124,7 @@ impl LLMClient for AnthropicClient {
         };
         let wrapper = crate::backend::streaming::array_wrapper_schema(item_schema, true);
         let output_format = serde_json::json!({ "type": "json_schema", "schema": wrapper });
-        let body = self.stream_body(prompt, Some(output_format));
+        let body = self.stream_body(system.as_deref(), &prompt, Some(output_format));
         crate::backend::streaming::iter_stream(
             self.send_stream(body),
             crate::backend::streaming::anthropic_stream_event,

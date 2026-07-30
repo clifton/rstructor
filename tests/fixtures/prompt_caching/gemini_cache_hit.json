@@ -1,0 +1,23 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "Risk is within limits."
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 3072,
+    "cachedContentTokenCount": 2048,
+    "candidatesTokenCount": 125,
+    "totalTokenCount": 3197
+  },
+  "modelVersion": "gemini-3.1-pro-preview"
+}

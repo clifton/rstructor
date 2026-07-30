@@ -513,6 +513,134 @@ pub trait LLMClient {
         }))
     }
 
+    /// Internal request-builder hook that preserves system instructions for
+    /// clients with first-class message support.
+    ///
+    /// Custom clients inherit the legacy concatenation fallback. Built-in
+    /// clients override this hook and send `system` through the provider's
+    /// native system-instruction field or message role.
+    #[doc(hidden)]
+    async fn materialize_request<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let prompt = combine_system_prompt(system, prompt);
+        if media.is_empty() {
+            self.materialize(&prompt).await
+        } else {
+            self.materialize_with_media(&prompt, media).await
+        }
+    }
+
+    /// Internal attempt-ledger request-builder hook.
+    #[doc(hidden)]
+    async fn materialize_request_with_attempts<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let prompt = combine_system_prompt(system, prompt);
+        if media.is_empty() {
+            self.materialize_with_attempts(&prompt).await
+        } else {
+            self.materialize_with_media_and_attempts(&prompt, media)
+                .await
+        }
+    }
+
+    /// Internal text-generation request-builder hook.
+    #[doc(hidden)]
+    async fn generate_request(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[MediaFile],
+    ) -> Result<String> {
+        let prompt = combine_system_prompt(system, prompt);
+        if media.is_empty() {
+            self.generate(&prompt).await
+        } else {
+            self.generate_with_media(&prompt, media).await
+        }
+    }
+
+    /// Internal streaming request-builder hook for raw text.
+    #[cfg(feature = "streaming")]
+    #[doc(hidden)]
+    fn generate_stream_request<'a>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        use futures_util::StreamExt;
+
+        Box::pin(async_stream::try_stream! {
+            let combined = combine_system_prompt(system.as_deref(), &prompt);
+            let mut inner = self.generate_stream(&combined);
+            while let Some(chunk) = inner.next().await {
+                yield chunk?;
+            }
+        })
+    }
+
+    /// Internal streaming request-builder hook for one structured object.
+    #[cfg(feature = "streaming")]
+    #[doc(hidden)]
+    fn materialize_stream_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        use futures_util::StreamExt;
+
+        Box::pin(async_stream::try_stream! {
+            let combined = combine_system_prompt(system.as_deref(), &prompt);
+            let mut inner = self.materialize_stream::<T>(&combined);
+            while let Some(value) = inner.next().await {
+                yield value?;
+            }
+        })
+    }
+
+    /// Internal streaming request-builder hook for structured list items.
+    #[cfg(feature = "streaming")]
+    #[doc(hidden)]
+    fn materialize_iter_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        use futures_util::StreamExt;
+
+        Box::pin(async_stream::try_stream! {
+            let combined = combine_system_prompt(system.as_deref(), &prompt);
+            let mut inner = self.materialize_iter::<T>(&combined);
+            while let Some(item) = inner.next().await {
+                yield item?;
+            }
+        })
+    }
+
     /// Create a new client by reading the API key from an environment variable.
     ///
     /// This is a required associated function that all `LLMClient` implementations must provide.
@@ -551,4 +679,11 @@ pub trait LLMClient {
     /// # }
     /// ```
     async fn list_models(&self) -> Result<Vec<ModelInfo>>;
+}
+
+fn combine_system_prompt(system: Option<&str>, prompt: &str) -> String {
+    match system {
+        Some(system) => format!("{system}\n\n{prompt}"),
+        None => prompt.to_string(),
+    }
 }

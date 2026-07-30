@@ -63,6 +63,25 @@ pub(crate) struct OpenAICompatibleUsageInfo {
     pub completion_tokens: u64,
     #[serde(default)]
     pub total_tokens: u64,
+    #[serde(default)]
+    pub prompt_tokens_details: OpenAICompatiblePromptTokensDetails,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct OpenAICompatiblePromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
+}
+
+impl OpenAICompatibleUsageInfo {
+    pub(crate) fn token_usage(&self, model: impl Into<String>) -> crate::TokenUsage {
+        crate::TokenUsage::new(model, self.prompt_tokens, self.completion_tokens).with_cache_tokens(
+            self.prompt_tokens_details.cached_tokens,
+            self.prompt_tokens_details.cache_write_tokens,
+        )
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +250,8 @@ mod tests {
         assert_eq!(usage.prompt_tokens, 3);
         assert_eq!(usage.completion_tokens, 5);
         assert_eq!(usage.total_tokens, 0);
+        assert_eq!(usage.prompt_tokens_details.cached_tokens, 0);
+        assert_eq!(usage.prompt_tokens_details.cache_write_tokens, 0);
     }
 
     /// When `total_tokens` is present in the response body it must be preserved
@@ -246,5 +267,25 @@ mod tests {
             serde_json::from_value(json).expect("deserialization should succeed");
 
         assert_eq!(usage.total_tokens, 8);
+    }
+
+    #[test]
+    fn test_usage_info_preserves_prompt_cache_details() {
+        let json = serde_json::json!({
+            "prompt_tokens": 2048,
+            "completion_tokens": 125,
+            "total_tokens": 2173,
+            "prompt_tokens_details": {
+                "cached_tokens": 1024,
+                "cache_write_tokens": 768,
+            },
+        });
+        let usage: OpenAICompatibleUsageInfo =
+            serde_json::from_value(json).expect("deserialization should succeed");
+
+        assert_eq!(
+            usage.token_usage("gpt-5.6"),
+            crate::TokenUsage::new("gpt-5.6", 2048, 125).with_cache_tokens(1024, 768)
+        );
     }
 }

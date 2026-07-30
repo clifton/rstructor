@@ -36,9 +36,9 @@ pub mod openai;
 #[cfg(feature = "_client")]
 pub use any_client::{AnyClient, Provider};
 pub use client::{LLMClient, MediaFile};
-#[cfg(feature = "_client")]
-pub(crate) use messages::MaterializeAttemptError;
 pub use messages::{ChatMessage, ChatRole};
+#[cfg(feature = "_client")]
+pub(crate) use messages::{MaterializeAttemptError, request_messages};
 #[cfg(feature = "_client")]
 pub use messages::{MaterializeInternalOutput, ValidationFailureContext};
 #[cfg(feature = "mock")]
@@ -105,7 +105,8 @@ pub use utils::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
 #[cfg(feature = "_client")]
 pub(crate) use utils::{
     ResponseFormat, build_http_client, check_response_status,
-    generate_with_retry_attempts_with_history, generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_attempts_with_history, generate_with_retry_attempts_with_initial_messages,
+    generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
     materialize_request_error, materialize_with_media_and_attempts_with_retry,
     materialize_with_media_with_retry, parse_validate_and_create_output,
 };

@@ -12,11 +12,12 @@ use crate::backend::{
     ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeAttemptError,
     MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
     OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse, ResponseFormat,
-    StrictSchemaProvider, ThinkingLevel, TokenUsage, build_http_client, check_response_status,
+    StrictSchemaProvider, ThinkingLevel, build_http_client, check_response_status,
     compile_strict_schema, convert_openai_compatible_chat_messages,
-    generate_with_retry_attempts_with_history, generate_with_retry_with_history, handle_http_error,
+    generate_with_retry_attempts_with_history, generate_with_retry_attempts_with_initial_messages,
+    generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
     materialize_request_error, materialize_with_media_and_attempts_with_retry,
-    materialize_with_media_with_retry, parse_validate_and_create_output,
+    materialize_with_media_with_retry, parse_validate_and_create_output, request_messages,
 };
 #[cfg(feature = "streaming")]
 use crate::backend::{OpenAICompatibleChatMessage, OpenAICompatibleMessageContent};
@@ -539,7 +540,7 @@ impl OpenAIClient {
         let usage = completion
             .usage
             .as_ref()
-            .map(|u| TokenUsage::new(model_name.clone(), u.prompt_tokens, u.completion_tokens));
+            .map(|u| u.token_usage(model_name.clone()));
 
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
@@ -657,10 +658,7 @@ impl OpenAIClient {
             .model
             .clone()
             .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion
-            .usage
-            .as_ref()
-            .map(|u| TokenUsage::new(model_name, u.prompt_tokens, u.completion_tokens));
+        let usage = completion.usage.as_ref().map(|u| u.token_usage(model_name));
 
         let message = &completion.choices[0].message;
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
@@ -689,6 +687,7 @@ impl OpenAIClient {
     /// optionally with a structured-output `response_format`.
     fn stream_body(
         &self,
+        system: Option<&str>,
         prompt: &str,
         response_format: Option<ResponseFormat>,
     ) -> serde_json::Value {
@@ -705,12 +704,20 @@ impl OpenAIClient {
         } else {
             self.config.temperature
         };
+        let mut messages = Vec::with_capacity(usize::from(system.is_some()) + 1);
+        if let Some(system) = system {
+            messages.push(OpenAICompatibleChatMessage {
+                role: "system".to_string(),
+                content: OpenAICompatibleMessageContent::Text(system.to_string()),
+            });
+        }
+        messages.push(OpenAICompatibleChatMessage {
+            role: "user".to_string(),
+            content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
+        });
         let request = OpenAICompatibleChatCompletionRequest {
             model: self.config.model.as_str().to_string(),
-            messages: vec![OpenAICompatibleChatMessage {
-                role: "user".to_string(),
-                content: OpenAICompatibleMessageContent::Text(prompt.to_string()),
-            }],
+            messages,
             response_format,
             temperature: effective_temp,
             max_tokens: self.config.max_tokens,
@@ -938,6 +945,47 @@ impl LLMClient for OpenAIClient {
         .await
     }
 
+    async fn materialize_request<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let output = generate_with_retry_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            request_messages(system, prompt, media),
+            self.config.max_retries,
+        )
+        .await?;
+        Ok(output.data)
+    }
+
+    async fn materialize_request_with_attempts<T>(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> std::result::Result<MaterializeReport<T>, MaterializeFailure>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        generate_with_retry_attempts_with_initial_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            request_messages(system, prompt, media),
+            self.config.max_retries,
+        )
+        .await
+    }
+
     #[instrument(
         name = "openai_generate",
         skip(self, prompt),
@@ -983,12 +1031,36 @@ impl LLMClient for OpenAIClient {
         self.generate_internal(&[ChatMessage::user(prompt)]).await
     }
 
+    async fn generate_request(
+        &self,
+        system: Option<&str>,
+        prompt: &str,
+        media: &[super::MediaFile],
+    ) -> Result<String> {
+        let result = self
+            .generate_internal(&request_messages(system, prompt, media))
+            .await?;
+        Ok(result.text)
+    }
+
     #[cfg(feature = "streaming")]
     fn generate_stream<'a>(&'a self, prompt: &'a str) -> crate::backend::streaming::TextStream<'a>
     where
         Self: Sync,
     {
-        let body = self.stream_body(prompt, None);
+        self.generate_stream_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn generate_stream_request<'a>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
+    ) -> crate::backend::streaming::TextStream<'a>
+    where
+        Self: Sync,
+    {
+        let body = self.stream_body(system.as_deref(), &prompt, None);
         crate::backend::streaming::sse_text_stream(
             self.send_stream(body),
             crate::backend::streaming::openai_stream_event,
@@ -1000,6 +1072,19 @@ impl LLMClient for OpenAIClient {
     fn materialize_stream<'a, T>(
         &'a self,
         prompt: &'a str,
+    ) -> crate::backend::streaming::ObjectStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        self.materialize_stream_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_stream_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
     ) -> crate::backend::streaming::ObjectStream<'a, T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
@@ -1023,7 +1108,7 @@ impl LLMClient for OpenAIClient {
             schema_json,
             Some("Output in the specified format. Include ALL required fields and follow the schema exactly.".to_string()),
         );
-        let body = self.stream_body(prompt, Some(response_format));
+        let body = self.stream_body(system.as_deref(), &prompt, Some(response_format));
         crate::backend::streaming::object_stream(
             self.send_stream(body),
             crate::backend::streaming::openai_stream_event,
@@ -1035,6 +1120,19 @@ impl LLMClient for OpenAIClient {
     fn materialize_iter<'a, T>(
         &'a self,
         prompt: &'a str,
+    ) -> crate::backend::streaming::ItemStream<'a, T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+        Self: Sync,
+    {
+        self.materialize_iter_request(None, prompt.to_string())
+    }
+
+    #[cfg(feature = "streaming")]
+    fn materialize_iter_request<'a, T>(
+        &'a self,
+        system: Option<String>,
+        prompt: String,
     ) -> crate::backend::streaming::ItemStream<'a, T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
@@ -1055,7 +1153,7 @@ impl LLMClient for OpenAIClient {
             wrapper,
             Some("Return a JSON object with an `items` array; each element must follow the item schema exactly.".to_string()),
         );
-        let body = self.stream_body(prompt, Some(response_format));
+        let body = self.stream_body(system.as_deref(), &prompt, Some(response_format));
         crate::backend::streaming::iter_stream(
             self.send_stream(body),
             crate::backend::streaming::openai_stream_event,
