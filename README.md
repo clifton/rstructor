@@ -112,7 +112,7 @@ use rstructor::{Instructor, OpenAIClient, RequestExt};
 
 let client = OpenAIClient::from_env()?;
 
-// Add context that is prepended to the prompt, then materialize a struct.
+// Keep stable instructions separate from the dynamic user prompt.
 let movie: Movie = client
     .with_system("Assume USD; format dates as ISO-8601.")
     .materialize("Describe Inception")
@@ -130,6 +130,57 @@ The terminals are `materialize::<T>(prompt)` (structured), `generate(prompt)`
 (text), and — with the `tools` feature — `run(prompt)` (text, calling any
 attached tools in a loop). Builders compose: `with_system`, `with_media`, and
 `with_tools` can be chained in any order before the terminal.
+
+### System prompts and prompt caching
+
+Built-in clients send `with_system(...)` through each provider's native
+instruction channel for every request terminal:
+
+- OpenAI-compatible APIs and xAI receive an initial `system` message.
+- Anthropic receives the top-level `system` field.
+- Gemini receives `systemInstruction`.
+
+This preserves instruction semantics and keeps a stable prefix eligible for the
+provider's prompt cache instead of merging it into each changing user message.
+It applies to structured materialization, raw generation, streaming, media
+requests, retry ledgers, and `run` with or without tools.
+
+Put stable policy and examples in the system prompt, then keep request-specific
+data in the user prompt:
+
+```rust
+use rstructor::{LLMClient, OpenAIClient, RequestExt};
+
+const RISK_POLICY: &str =
+    "Use the fund's base currency. Report exposure as a multiple of NAV.";
+
+let client = OpenAIClient::from_env()?;
+let result = client
+    .with_system(RISK_POLICY)
+    .materialize_with_attempts::<Portfolio>(daily_positions)
+    .await?;
+
+if let Some(usage) = result.cumulative_usage {
+    println!(
+        "{} of {} input tokens came from cache",
+        usage.cached_input_tokens,
+        usage.input_tokens,
+    );
+}
+```
+
+OpenAI, Gemini, and xAI can apply implicit prefix caching when a request meets
+their model and token thresholds. Anthropic requires cache-control configuration
+to create a cache, which rstructor does not enable implicitly because it can
+change billing. Likewise, rstructor does not currently create Gemini explicit
+cache objects or set OpenAI cache-routing keys. Provider-reported cache reads and
+writes are exposed as `cached_input_tokens` and `cache_write_input_tokens`;
+both are subsets of `input_tokens` and are not added again by `total_tokens()`.
+See the official [OpenAI](https://developers.openai.com/api/docs/guides/prompt-caching),
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
+[Gemini](https://ai.google.dev/gemini-api/docs/caching), and
+[xAI](https://docs.x.ai/developers/advanced-api-usage/prompt-caching)
+prompt-caching guides for current eligibility and retention rules.
 
 ## Recipes
 
@@ -626,6 +677,11 @@ let result = client.materialize_with_metadata::<Movie>("...").await?;
 println!("Movie: {}", result.data.title);
 if let Some(usage) = result.usage {
     println!("Tokens: {} in, {} out", usage.input_tokens, usage.output_tokens);
+    println!(
+        "Prompt cache: {} read, {} written",
+        usage.cached_input_tokens,
+        usage.cache_write_input_tokens,
+    );
 }
 ```
 
@@ -658,6 +714,8 @@ match client.materialize_with_attempts::<Portfolio>("Reconcile the fund book").a
 Usage is conservative: attempts remain in the ledger when a provider omits
 token metadata, while cumulative totals include only responses with reported
 usage. Local schema/media preflight failures record zero provider attempts.
+Cache read and write counters are provider-reported subsets of input usage, so
+they provide cache observability without inflating `total_tokens()`.
 Built-in clients and `MockClient` set `attempts_complete` to `true`; the default
 implementation for custom clients sets it to `false` rather than inventing
 provider attempts it cannot observe.

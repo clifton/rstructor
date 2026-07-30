@@ -492,3 +492,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Usage is deliberately conservative: if a provider omits usage for one response,
 the attempt remains in the ledger while cumulative totals include only reported
 tokens. Local preflight failures have an empty ledger.
+
+## Reuse stable instructions with prompt caching
+
+The request builder keeps stable instructions in the provider's native system
+channel while the changing request stays in the user turn. This gives implicit
+prefix caches a reusable prefix and applies equally to `materialize`,
+`generate`, streaming, media, and `run`:
+
+```rust
+use rstructor::{Instructor, LLMClient, OpenAIClient, RequestExt};
+use serde::{Deserialize, Serialize};
+
+const RISK_POLICY: &str = "\
+Report gross exposure as a multiple of NAV.
+Use the portfolio's base currency.
+Return status as within_limits or breached.";
+
+#[derive(Debug, Deserialize, Instructor, Serialize)]
+struct RiskSummary {
+    status: String,
+    gross_exposure: f64,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = OpenAIClient::from_env()?;
+    let report = client
+        .with_system(RISK_POLICY)
+        .materialize_with_attempts::<RiskSummary>(
+            "NAV USD 100mm; long USD 92mm; short USD 50mm",
+        )
+        .await?;
+
+    if let Some(usage) = report.cumulative_usage {
+        println!(
+            "input={} cache_read={} cache_write={}",
+            usage.input_tokens,
+            usage.cached_input_tokens,
+            usage.cache_write_input_tokens,
+        );
+    }
+    println!("{:#?}", report.data);
+    Ok(())
+}
+```
+
+Cache counters are subsets of input tokens, not extra tokens. OpenAI, Gemini,
+and xAI can cache eligible exact prefixes implicitly. Anthropic requires
+cache-control configuration; rstructor does not enable paid cache writes by
+default. Current provider-specific thresholds and retention policies are in the
+official [OpenAI](https://developers.openai.com/api/docs/guides/prompt-caching),
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-caching),
+[Gemini](https://ai.google.dev/gemini-api/docs/caching), and
+[xAI](https://docs.x.ai/developers/advanced-api-usage/prompt-caching)
+documentation.
