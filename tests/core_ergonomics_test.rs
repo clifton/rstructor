@@ -60,6 +60,16 @@ impl LLMClient for NoMediaClient {
 }
 
 #[tokio::test]
+async fn extract_alias_delegates_to_materialize_for_custom_clients() {
+    let client = NoMediaClient;
+    let result = client.extract::<Dummy>("hi").await;
+    assert!(
+        matches!(result, Err(RStructorError::ValidationError(message)) if message == "materialize-called"),
+        "extract() must preserve compatibility with existing custom clients"
+    );
+}
+
+#[tokio::test]
 async fn media_default_passes_through_when_empty() {
     // With no media, the default delegates to `materialize`.
     let client = NoMediaClient;
@@ -167,6 +177,17 @@ mod builder {
         let req = client.last_request().unwrap();
         assert_eq!(req.kind, RequestKind::Materialize);
         assert_eq!(req.prompt, "CTX\n\nhello");
+    }
+
+    #[tokio::test]
+    async fn extract_routes_through_structured_request_with_combined_prompt() {
+        let client = MockClient::new().with_response(r#"{"value":"x"}"#);
+        let value: Dummy = client.with_system("CTX").extract("hello").await.unwrap();
+
+        assert_eq!(value.value, "x");
+        let request = client.last_request().unwrap();
+        assert_eq!(request.kind, RequestKind::Materialize);
+        assert_eq!(request.prompt, "CTX\n\nhello");
     }
 
     #[tokio::test]

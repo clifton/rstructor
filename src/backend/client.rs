@@ -201,9 +201,41 @@ impl MediaFile {
 /// ```
 #[async_trait]
 pub trait LLMClient {
+    /// Extract a structured object of type `T` from a prompt.
+    ///
+    /// This is the primary structured-output entry point. The model is guided
+    /// by the JSON Schema generated for `T`; responses are deserialized and
+    /// validated, and semantic failures are retried according to the client's
+    /// retry policy.
+    ///
+    /// `extract` is a descriptive alias for [`materialize`](Self::materialize),
+    /// which remains available for backwards compatibility.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{Instructor, LLMClient, OpenAIClient};
+    /// # use serde::{Deserialize, Serialize};
+    /// # #[derive(Instructor, Serialize, Deserialize)]
+    /// # struct Movie { title: String }
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// let movie: Movie = client.extract("Describe Inception").await?;
+    /// println!("Title: {}", movie.title);
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn extract<T>(&self, prompt: &str) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        self.materialize(prompt).await
+    }
+
     /// Materialize a structured object of type T from a prompt.
     ///
-    /// This method takes a text prompt and returns the structured object.
+    /// This is the original name for [`extract`](Self::extract). It takes a
+    /// text prompt and returns the structured object.
     /// The LLM is guided to produce output that conforms to the JSON schema defined by T.
     /// If the returned data doesn't match the expected schema or fails validation,
     /// the client will automatically retry up to 3 times (configurable via `.max_retries()`
