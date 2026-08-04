@@ -23,7 +23,10 @@
 
 use serde::de::DeserializeOwned;
 
-use crate::backend::{LLMClient, MaterializeFailure, MaterializeReport, MediaFile};
+use crate::backend::{
+    Extraction, ExtractionError, ExtractionResult, LLMClient, MaterializeFailure,
+    MaterializeReport, MediaFile,
+};
 #[cfg(feature = "streaming")]
 use crate::error::RStructorError;
 use crate::error::Result;
@@ -107,6 +110,18 @@ impl<C: LLMClient + Sync + ?Sized> Request<'_, C> {
         self.materialize(prompt).await
     }
 
+    /// Extract a structured `T` with one report shape on success and failure.
+    pub async fn extract_with_report<T>(self, prompt: &str) -> ExtractionResult<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        self.client
+            .materialize_request_with_attempts(self.system.as_deref(), prompt, &self.media)
+            .await
+            .map(Extraction::from)
+            .map_err(ExtractionError::from)
+    }
+
     /// Materialize a structured `T`, applying any attached system context and media.
     ///
     /// This is the original name for [`extract`](Self::extract).
@@ -120,6 +135,7 @@ impl<C: LLMClient + Sync + ?Sized> Request<'_, C> {
     }
 
     /// Materialize a structured `T` with cumulative usage and every provider attempt.
+    #[doc(hidden)]
     pub async fn materialize_with_attempts<T>(
         self,
         prompt: &str,

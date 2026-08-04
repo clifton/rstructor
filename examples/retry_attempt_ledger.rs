@@ -1,4 +1,4 @@
-//! Inspect every retry plus cumulative known token usage for a materialization run.
+//! Inspect every retry plus cumulative known token usage for an extraction run.
 
 use rstructor::{AttemptOutcome, AttemptRecord, Instructor, LLMClient, OpenAIClient, RunUsage};
 use serde::{Deserialize, Serialize};
@@ -64,16 +64,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         AAPL: long 125,000 shares, market value $29,750,000
     ";
 
-    match client.materialize_with_attempts::<Portfolio>(prompt).await {
-        Ok(report) => {
-            println!("{:#?}", report.data);
-            println!("complete attempt history: {}", report.attempts_complete);
-            print_attempts(&report.attempts, report.cumulative_usage.as_ref());
+    match client.extract_with_report::<Portfolio>(prompt).await {
+        Ok(extraction) => {
+            println!("{:#?}", extraction.data);
+            println!(
+                "complete attempt history: {}",
+                extraction.report.attempts_complete
+            );
+            print_attempts(
+                &extraction.report.attempts,
+                extraction.report.cumulative_usage.as_ref(),
+            );
         }
         Err(failure) => {
-            eprintln!("materialization failed: {}", failure.error());
-            eprintln!("complete attempt history: {}", failure.attempts_complete);
-            print_attempts(&failure.attempts, failure.cumulative_usage.as_ref());
+            eprintln!("extraction failed: {}", failure.error());
+            eprintln!(
+                "complete attempt history: {}",
+                failure.report.attempts_complete
+            );
+            print_attempts(
+                &failure.report.attempts,
+                failure.report.cumulative_usage.as_ref(),
+            );
         }
     }
 

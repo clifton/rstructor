@@ -162,12 +162,12 @@ const RISK_POLICY: &str =
     "Use the fund's base currency. Report exposure as a multiple of NAV.";
 
 let client = OpenAIClient::from_env()?;
-let result = client
+let extraction = client
     .with_system(RISK_POLICY)
-    .materialize_with_attempts::<Portfolio>(daily_positions)
+    .extract_with_report::<Portfolio>(daily_positions)
     .await?;
 
-if let Some(usage) = result.cumulative_usage {
+if let Some(usage) = extraction.report.cumulative_usage {
     println!(
         "{} of {} input tokens came from cache",
         usage.cached_input_tokens,
@@ -642,9 +642,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 `MediaFile::new(uri, mime_type)` is also available for URL/URI-based media input.
-The lower-level `LLMClient::materialize_with_media(prompt, &media)` method does
-the same thing in one call when you do not need the builder. Attached media is
-honored by `materialize`, `generate`, and tool `run` alike.
+Attached media is honored by `extract`, `generate`, and tool `run` alike. The
+request builder is the primary way to combine media with system instructions or
+run reporting.
 
 PDFs are supported too: pass `"application/pdf"` as the MIME type and the
 attachment is routed to each provider's documented document format (OpenAI
@@ -674,34 +674,19 @@ let client = OpenAIClient::from_env()?
 // Levels: Off, Minimal, Low, Medium, High
 ```
 
-## Token Usage
+## Extraction Reports and Token Usage
 
-`materialize_with_metadata` preserves its original behavior: `usage` describes
-only the final successful provider response.
-
-```rust
-let result = client.materialize_with_metadata::<Movie>("...").await?;
-println!("Movie: {}", result.data.title);
-if let Some(usage) = result.usage {
-    println!("Tokens: {} in, {} out", usage.input_tokens, usage.output_tokens);
-    println!(
-        "Prompt cache: {} read, {} written",
-        usage.cached_input_tokens,
-        usage.cache_write_input_tokens,
-    );
-}
-```
-
-Use `materialize_with_attempts` when retry cost or failure observability matters.
-It returns an ordered ledger plus cumulative known usage, including provider
-responses that failed decoding or validation:
+Use `extract_with_report` when retry cost or failure observability matters. The
+same `ExtractionReport` shape is attached to success and failure, including an
+ordered attempt ledger and cumulative known usage from provider responses that
+failed decoding or validation:
 
 ```rust
-match client.materialize_with_attempts::<Portfolio>("Reconcile the fund book").await {
-    Ok(report) => {
-        println!("Portfolio: {:?}", report.data);
-        println!("Provider attempts: {}", report.attempts.len());
-        if let Some(usage) = report.cumulative_usage {
+match client.extract_with_report::<Portfolio>("Reconcile the fund book").await {
+    Ok(extraction) => {
+        println!("Portfolio: {:?}", extraction.data);
+        println!("Provider attempts: {}", extraction.report.attempts.len());
+        if let Some(usage) = extraction.report.cumulative_usage {
             println!("Known run tokens: {}", usage.total_tokens());
             for (model, model_usage) in usage.by_model {
                 println!("{model}: {} tokens", model_usage.total_tokens());
@@ -710,8 +695,8 @@ match client.materialize_with_attempts::<Portfolio>("Reconcile the fund book").a
     }
     Err(failure) => {
         eprintln!("Final error: {}", failure.error());
-        eprintln!("Attempts made: {}", failure.attempts.len());
-        if let Some(usage) = failure.cumulative_usage {
+        eprintln!("Attempts made: {}", failure.report.attempts.len());
+        if let Some(usage) = failure.report.cumulative_usage {
             eprintln!("Known tokens before failure: {}", usage.total_tokens());
         }
     }
@@ -723,9 +708,9 @@ token metadata, while cumulative totals include only responses with reported
 usage. Local schema/media preflight failures record zero provider attempts.
 Cache read and write counters are provider-reported subsets of input usage, so
 they provide cache observability without inflating `total_tokens()`.
-Built-in clients and `MockClient` set `attempts_complete` to `true`; the default
-implementation for custom clients sets it to `false` rather than inventing
-provider attempts it cannot observe.
+Built-in clients and `MockClient` set `report.attempts_complete` to `true`; the
+compatibility fallback for custom clients sets it to `false` rather than
+inventing provider attempts it cannot observe.
 See `examples/retry_attempt_ledger.rs` for a complete success-and-failure
 example.
 
@@ -734,7 +719,7 @@ example.
 ```rust
 use rstructor::{ApiErrorKind, RStructorError};
 
-match client.materialize::<Movie>("...").await {
+match client.extract::<Movie>("...").await {
     Ok(movie) => println!("{:?}", movie),
     Err(e) if e.is_retryable() => {
         println!("Transient error: {}", e);

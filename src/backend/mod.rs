@@ -52,8 +52,9 @@ pub use streaming::{ItemStream, ObjectStream, StreamedObject, TextStream};
 #[cfg(feature = "tools")]
 pub use tools::{DynTool, FnTool, Tool, ToolRunner, Toolbox};
 pub use usage::{
-    AttemptKind, AttemptOutcome, AttemptRecord, GenerateResult, MaterializeFailure,
-    MaterializeReport, MaterializeResult, RetryDisposition, RunUsage, TokenUsage,
+    AttemptKind, AttemptOutcome, AttemptRecord, Extraction, ExtractionError, ExtractionReport,
+    ExtractionResult, GenerateResult, MaterializeFailure, MaterializeReport, MaterializeResult,
+    RetryDisposition, RunUsage, TokenUsage,
 };
 
 /// Information about an available model from an LLM provider.
