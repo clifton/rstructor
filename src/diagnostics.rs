@@ -4,12 +4,14 @@ use std::collections::BTreeMap;
 #[cfg(feature = "_client")]
 use std::{fmt, sync::Arc};
 
+use serde::{Deserialize, Serialize};
+
 /// A response body that has passed through a caller-provided sanitizer.
 ///
 /// rstructor never stores provider response bodies by default. When capture is
 /// explicitly enabled, the sanitizer runs before the value is retained and the
 /// sanitized value is bounded by the configured byte limit.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SanitizedResponseBody {
     /// Sanitized response text retained for diagnostics.
@@ -23,7 +25,7 @@ pub struct SanitizedResponseBody {
 /// Status and recognized request-ID headers are captured for both successful
 /// and failed structured-output attempts. Response bodies remain absent unless
 /// the client was configured with opt-in response body capture.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ResponseMetadata {
     /// Exact HTTP status code returned by the provider.

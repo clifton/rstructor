@@ -203,6 +203,7 @@ complete copy-paste recipes.
 | Read a chart with Kimi K3 | [`kimi_k3_multimodal_example.rs`](examples/kimi_k3_multimodal_example.rs) | Downloads a labeled revenue chart, sends it through Moonshot's OpenAI-compatible endpoint, and returns typed values plus calculated insights. |
 | Put extraction behind an axum handler | [`axum_handler_example.rs`](examples/axum_handler_example.rs) | Injects any `LLMClient` into typed JSON request and response handling, tested in-process. |
 | Test without network | [`mock_testing_example.rs`](examples/mock_testing_example.rs) | Scripts realistic responses through the real deserialization, validation, and re-ask path. |
+| Record and replay a sanitized fixture | [`fixture_record_replay.rs`](examples/fixture_record_replay.rs) | Persists a versioned interaction with usage and attempts, then strictly replays it offline. |
 | Use a local model with Ollama | [`ollama_local_example.rs`](examples/ollama_local_example.rs) | Connects to the keyless local endpoint through the same structured-output API. |
 | Choose a provider at runtime | [`runtime_provider_example.rs`](examples/runtime_provider_example.rs) | Parses `provider/model` into one `AnyClient`, including aggregator model IDs with slashes. |
 | Reuse an existing schemars model | [`schemars_bridge_example.rs`](examples/schemars_bridge_example.rs) | Materializes `JsonSchema + Serde` types through the transparent `Schemars<T>` adapter. |
@@ -958,6 +959,46 @@ feature pulls in only the lightweight path-aware decoder and works without the H
 client; streaming and tool-loop mocking light up when the `streaming` / `tools`
 features are also enabled. See `examples/mock_testing_example.rs`.
 
+### Record, sanitize, and replay fixtures
+
+`FixtureRecorder<C>` is an `LLMClient` wrapper for turning representative
+non-streaming calls into versioned JSON fixtures. Sanitization is mandatory and
+runs before a request or response is retained. Credential-shaped JSON fields are
+redacted structurally, inline media bytes are never stored, and the callback lets
+you remove domain-specific identifiers:
+
+```rust
+use rstructor::{
+    Fixture, FixtureRecorder, FixtureSanitizer, Instructor, LLMClient, OpenAIClient,
+};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Instructor, Serialize, Deserialize)]
+struct Position { account_id: String, symbol: String, quantity: i64 }
+
+fn sanitizer() -> FixtureSanitizer {
+    FixtureSanitizer::new(|text| text.replace("HF-ALPHA-001", "[ACCOUNT]"))
+}
+
+let recorder = FixtureRecorder::new(OpenAIClient::from_env()?, sanitizer());
+let position: Position = recorder.extract("HF-ALPHA-001 owns 1,000 AAPL shares").await?;
+recorder.save("tests/fixtures/position.fixture.json")?;
+
+// CI: no API key or network.
+let fixture = Fixture::load("tests/fixtures/position.fixture.json")?;
+let replay = fixture.replay_with_sanitizer(sanitizer());
+let replayed: Position = replay.extract("HF-ALPHA-001 owns 1,000 AAPL shares").await?;
+assert_eq!(replayed, position);
+replay.assert_finished()?;
+```
+
+Replay is ordered and strict. Operation, sanitized prompt, target schema, and
+media metadata must match before an interaction is consumed, so prompt or type
+drift fails locally instead of silently returning a stale fixture. The fixture
+also preserves token usage, attempt reports, typed provider errors, HTTP status,
+and request IDs. See `examples/fixture_record_replay.rs` for a runnable,
+key-free round trip based on a real 10-K metric.
+
 ## Feature Flags
 
 ```toml
@@ -970,7 +1011,7 @@ rstructor = { version = "0.5.1", features = ["openai", "anthropic", "grok", "gem
 - `logging` — Tracing integration
 - `streaming` — Streaming via `generate_stream` / `materialize_iter` / `materialize_stream` (opt-in)
 - `tools` — Tool/function calling via `Toolbox` + `client.with_tools(..).run(..)` (opt-in)
-- `mock` — `MockClient` for offline unit testing (opt-in; see [Testing](#testing-offline))
+- `mock` — `MockClient` plus record/sanitize/replay fixtures for offline testing (opt-in; see [Testing](#testing-offline))
 
 All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:
 

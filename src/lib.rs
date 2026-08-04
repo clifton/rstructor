@@ -100,7 +100,10 @@ pub use backend::{
 pub use backend::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
 #[cfg(feature = "tools")]
 pub use backend::{DynTool, FnTool, Tool, ToolRunner, Toolbox};
+#[cfg(feature = "mock")]
+pub use backend::{
+    FIXTURE_SCHEMA_VERSION, Fixture, FixtureError, FixtureRecorder, FixtureSanitizer, MockClient,
+    MockRequestView, MockResponse, RecordedRequest, ReplayClient, RequestKind,
+};
 #[cfg(feature = "streaming")]
 pub use backend::{ItemStream, ObjectStream, StreamedObject, TextStream};
-#[cfg(feature = "mock")]
-pub use backend::{MockClient, MockRequestView, MockResponse, RecordedRequest, RequestKind};

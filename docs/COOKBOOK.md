@@ -309,6 +309,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Scripted payloads still pass through the production Serde and `Instructor`
 validation path; only the provider transport is replaced.
 
+## Record and replay a sanitized fixture
+
+The [fixture example](../examples/fixture_record_replay.rs) records a complete
+non-streaming interaction and replays it without a key or network. The required
+sanitizer runs before values enter the in-memory fixture; inline media bytes are
+never persisted.
+
+```rust
+use rstructor::{Fixture, FixtureRecorder, FixtureSanitizer, LLMClient, OpenAIClient};
+
+fn sanitizer() -> FixtureSanitizer {
+    FixtureSanitizer::new(|text| text.replace("PRIVATE-ACCOUNT", "[ACCOUNT]"))
+}
+
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+let recorder = FixtureRecorder::new(OpenAIClient::from_env()?, sanitizer());
+let fill: Fill = recorder.extract("PRIVATE-ACCOUNT bought 5,000 AAPL at 238").await?;
+recorder.save("tests/fixtures/fill.fixture.json")?;
+
+let fixture = Fixture::load("tests/fixtures/fill.fixture.json")?;
+let replay = fixture.replay_with_sanitizer(sanitizer());
+let replayed: Fill = replay.extract("PRIVATE-ACCOUNT bought 5,000 AAPL at 238").await?;
+assert_eq!(replayed, fill);
+replay.assert_finished()?;
+# Ok(())
+# }
+```
+
+Replay matches the sanitized operation, prompt, schema, and media metadata in
+order. A mismatch leaves the interaction unconsumed and reports only the field
+that differed, so assertion failures do not echo fixture contents.
+
 ## Use a local model through Ollama
 
 The [Ollama example](../examples/ollama_local_example.rs) is safe to run in CI:
