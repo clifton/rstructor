@@ -8,25 +8,13 @@ repository = "https://github.com/clifton/rstructor"
 authors = ["Clifton King <cliftonk@gmail.com>"]
 readme = "README.md"
 documentation = "https://docs.rs/rstructor"
-exclude = [
-  # Release and development scripts
-  "release.sh",
-  "*.sh",
-  # Documentation that shouldn't be in the crate
-  "CLAUDE.md",
-  "EXAMPLES.md",
-  # GitHub workflows
-  ".github/",
-  # CI/CD configs
-  ".gitignore",
-  ".gitattributes",
-  # Claude/LLM generated or temporary files
-  ".claude/",
-  # Temporary files directory (ad-hoc scripts, temporary markdown, etc.)
-  "tmp/",
-  # Backup files from sed/editors
-  "*.orig",
-  "*.bak",
+include = [
+  "/src/**",
+  "/examples/**",
+  "/docs/COOKBOOK.md",
+  "/Cargo.toml",
+  "/README.md",
+  "/LICENSE",
 ]
 keywords = ["llm", "structured-output", "json-schema", "openai", "anthropic"]
 categories = [
@@ -69,7 +57,9 @@ async-stream = { version = "0.3.6", optional = true }
 
 # Feature flags
 [features]
-default = ["openai", "anthropic", "grok", "gemini", "derive", "logging"]
+default = ["derive", "openai"]
+# Convenience bundle for applications that select providers at runtime.
+all-providers = ["openai", "anthropic", "grok", "gemini"]
 # Each provider pulls in the shared networking + media stack via `_client`.
 openai = ["_client"]
 anthropic = ["_client"]
@@ -95,6 +85,9 @@ tools = ["_client"]
 # only the path-aware decoder and works without `_client`; the streaming and tool
 # overrides additionally require the `streaming` / `tools` features.
 mock = ["dep:serde_path_to_error"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [[example]]
 name = "streaming_example"

@@ -265,7 +265,7 @@ impl AttemptRecord {
         Self::succeeded_with_response(number, usage, None)
     }
 
-    #[cfg(any(feature = "_client", feature = "mock"))]
+    #[cfg(any(test, feature = "_client", feature = "mock"))]
     pub(crate) fn succeeded_with_response(
         number: usize,
         usage: Option<TokenUsage>,
@@ -291,7 +291,7 @@ impl AttemptRecord {
         Self::failed_with_response(number, kind, error, disposition, usage, None)
     }
 
-    #[cfg(any(feature = "_client", feature = "mock"))]
+    #[cfg(any(test, feature = "_client", feature = "mock"))]
     pub(crate) fn failed_with_response(
         number: usize,
         kind: AttemptKind,
@@ -479,7 +479,7 @@ pub struct MaterializeReport<T> {
 }
 
 impl<T> MaterializeReport<T> {
-    #[cfg(any(feature = "_client", feature = "mock"))]
+    #[cfg(any(test, feature = "_client", feature = "mock"))]
     pub(crate) fn new(
         data: T,
         final_usage: Option<TokenUsage>,
@@ -562,7 +562,7 @@ pub struct MaterializeFailure {
 }
 
 impl MaterializeFailure {
-    #[cfg(any(feature = "_client", feature = "mock"))]
+    #[cfg(any(test, feature = "_client", feature = "mock"))]
     pub(crate) fn new(
         error: RStructorError,
         cumulative_usage: Option<RunUsage>,

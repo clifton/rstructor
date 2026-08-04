@@ -1,4 +1,9 @@
-#![cfg(feature = "_client")]
+#![cfg(all(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "gemini",
+    feature = "grok"
+))]
 //! Environment-driven construction of [`AnyClient`].
 //!
 //! Environment variables are process-global, and tests within a single binary

@@ -3,20 +3,25 @@ mod any_client;
 pub mod client;
 #[cfg(feature = "mock")]
 mod fixture;
-#[cfg(feature = "_client")]
+#[cfg(any(feature = "openai", feature = "anthropic", feature = "grok"))]
 mod media;
 mod messages;
 #[cfg(feature = "mock")]
 pub mod mock;
 #[cfg(feature = "_client")]
 mod model_macro;
-#[cfg(feature = "_client")]
+#[cfg(any(feature = "openai", feature = "grok"))]
 mod openai_compatible;
 #[cfg(feature = "_client")]
 mod request;
 #[cfg(feature = "_client")]
 mod routing;
-#[cfg(feature = "_client")]
+#[cfg(any(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "grok",
+    feature = "tools"
+))]
 mod schema_compatibility;
 #[cfg(feature = "streaming")]
 pub mod streaming;
@@ -91,20 +96,26 @@ pub struct ModelInfo {
     /// Description of the model's capabilities
     pub description: Option<String>,
 }
-#[cfg(feature = "_client")]
-pub(crate) use media::{
-    AnthropicMessageContent, OpenAICompatibleMessageContent, build_anthropic_message_content,
-    build_openai_compatible_message_content,
-};
-#[cfg(feature = "streaming")]
+#[cfg(feature = "anthropic")]
+pub(crate) use media::{AnthropicMessageContent, build_anthropic_message_content};
+#[cfg(any(feature = "openai", feature = "grok"))]
+pub(crate) use media::{OpenAICompatibleMessageContent, build_openai_compatible_message_content};
+#[cfg(all(feature = "streaming", any(feature = "openai", feature = "grok")))]
 pub(crate) use openai_compatible::OpenAICompatibleChatMessage;
-#[cfg(feature = "_client")]
+#[cfg(any(feature = "openai", feature = "grok"))]
 pub(crate) use openai_compatible::{
     OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse,
     convert_openai_compatible_chat_messages,
 };
-#[cfg(feature = "_client")]
+#[cfg(any(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "grok",
+    feature = "tools"
+))]
 pub(crate) use schema_compatibility::{StrictSchemaProvider, compile_strict_schema};
+#[cfg(any(feature = "openai", feature = "grok"))]
+pub(crate) use utils::ResponseFormat;
 #[cfg(feature = "tools")]
 pub(crate) use utils::check_response_status;
 #[cfg(all(test, feature = "schemars"))]
@@ -113,7 +124,7 @@ pub(crate) use utils::prepare_gemini_schema;
 pub use utils::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
 #[cfg(feature = "_client")]
 pub(crate) use utils::{
-    ResponseFormat, build_http_client, check_response_status_with_capture,
+    build_http_client, check_response_status_with_capture,
     generate_with_retry_attempts_with_history, generate_with_retry_attempts_with_initial_messages,
     generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
     materialize_request_error, materialize_with_media_and_attempts_with_retry,
@@ -134,7 +145,7 @@ pub(crate) use utils::{
 /// # Examples
 ///
 /// ```rust
-/// use rstructor::{OpenAIClient, GeminiClient, ThinkingLevel};
+/// use rstructor::{OpenAIClient, ThinkingLevel};
 ///
 /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// // OpenAI with low thinking (default)
@@ -143,10 +154,6 @@ pub(crate) use utils::{
 /// // Enable high thinking for complex tasks
 /// # let client = OpenAIClient::new("key")?;
 /// let client = client.thinking_level(ThinkingLevel::High);
-///
-/// // Gemini with custom thinking level
-/// # let client = GeminiClient::new("key")?;
-/// let client = client.thinking_level(ThinkingLevel::Medium);
 /// # Ok(())
 /// # }
 /// ```

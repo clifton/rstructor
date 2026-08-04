@@ -16,16 +16,22 @@ use crate::schema::Schema;
 /// Providers whose constrained-output dialect closes every object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StrictSchemaProvider {
+    #[cfg(any(feature = "openai", feature = "tools", test))]
     OpenAI,
+    #[cfg(any(feature = "anthropic", feature = "tools", test))]
     Anthropic,
+    #[cfg(any(feature = "grok", feature = "tools", test))]
     Grok,
 }
 
 impl fmt::Display for StrictSchemaProvider {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            #[cfg(any(feature = "openai", feature = "tools", test))]
             Self::OpenAI => "OpenAI",
+            #[cfg(any(feature = "anthropic", feature = "tools", test))]
             Self::Anthropic => "Anthropic",
+            #[cfg(any(feature = "grok", feature = "tools", test))]
             Self::Grok => "Grok",
         })
     }

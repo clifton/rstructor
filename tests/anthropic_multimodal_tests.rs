@@ -4,6 +4,8 @@
 //! - `ANTHROPIC_API_KEY`
 //! - `--features anthropic`
 
+#![cfg(feature = "anthropic")]
+
 #[path = "common/mod.rs"]
 mod common;
 

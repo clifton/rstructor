@@ -3,6 +3,7 @@ use serde::Serialize;
 use crate::backend::ChatMessage;
 use crate::error::{ApiErrorKind, RStructorError, Result};
 
+#[cfg(any(feature = "openai", feature = "grok"))]
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub(crate) enum OpenAICompatibleMessageContent {
@@ -10,6 +11,7 @@ pub(crate) enum OpenAICompatibleMessageContent {
     Parts(Vec<OpenAICompatibleMessagePart>),
 }
 
+#[cfg(any(feature = "openai", feature = "grok"))]
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum OpenAICompatibleMessagePart {
@@ -18,6 +20,7 @@ pub(crate) enum OpenAICompatibleMessagePart {
     File { file: OpenAICompatibleFile },
 }
 
+#[cfg(any(feature = "openai", feature = "grok"))]
 #[derive(Debug, Serialize)]
 pub(crate) struct OpenAICompatibleImageUrl {
     pub(crate) url: String,
@@ -29,12 +32,14 @@ pub(crate) struct OpenAICompatibleImageUrl {
 ///
 /// See <https://platform.openai.com/docs/guides/pdf-files>: the part is
 /// `{"type": "file", "file": {"filename": ..., "file_data": "data:application/pdf;base64,..."}}`.
+#[cfg(any(feature = "openai", feature = "grok"))]
 #[derive(Debug, Serialize)]
 pub(crate) struct OpenAICompatibleFile {
     pub(crate) filename: String,
     pub(crate) file_data: String,
 }
 
+#[cfg(feature = "anthropic")]
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub(crate) enum AnthropicMessageContent {
@@ -42,6 +47,7 @@ pub(crate) enum AnthropicMessageContent {
     Blocks(Vec<AnthropicContentBlock>),
 }
 
+#[cfg(feature = "anthropic")]
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum AnthropicContentBlock {
@@ -61,6 +67,7 @@ pub(crate) enum AnthropicContentBlock {
 }
 
 /// Source of an Anthropic `image` or `document` block (both share this shape).
+#[cfg(feature = "anthropic")]
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum AnthropicMediaSource {
@@ -68,6 +75,7 @@ pub(crate) enum AnthropicMediaSource {
     Url { url: String },
 }
 
+#[cfg(any(feature = "openai", feature = "grok"))]
 pub(crate) fn build_openai_compatible_message_content(
     msg: &ChatMessage,
     provider_name: &str,
@@ -104,6 +112,7 @@ pub(crate) fn build_openai_compatible_message_content(
 
 /// Build the PDF content part for an OpenAI-compatible chat completions request,
 /// or a clear error for providers/sources without a documented PDF pathway.
+#[cfg(any(feature = "openai", feature = "grok"))]
 fn openai_compatible_pdf_part(
     media: &crate::backend::client::MediaFile,
     provider_name: &str,
@@ -186,6 +195,7 @@ fn unsupported_media_type(
     )
 }
 
+#[cfg(feature = "anthropic")]
 pub(crate) fn build_anthropic_message_content(
     msg: &ChatMessage,
 ) -> Result<AnthropicMessageContent> {
@@ -252,6 +262,7 @@ pub(crate) fn build_anthropic_message_content(
     Ok(AnthropicMessageContent::Blocks(blocks))
 }
 
+#[cfg(any(feature = "openai", feature = "grok"))]
 fn media_to_url(media: &crate::backend::client::MediaFile, provider_name: &str) -> Result<String> {
     if let Some(data) = media.data.as_ref() {
         if data.is_empty() {
@@ -288,6 +299,7 @@ mod tests {
     use super::*;
     use crate::backend::MediaFile;
 
+    #[cfg(any(feature = "openai", feature = "grok"))]
     #[test]
     fn test_openai_compatible_content_text_only() {
         let msg = ChatMessage::user("hello");
@@ -297,6 +309,7 @@ mod tests {
         assert_eq!(json, serde_json::json!("hello"));
     }
 
+    #[cfg(any(feature = "openai", feature = "grok"))]
     #[test]
     fn test_openai_compatible_content_with_media() {
         let msg = ChatMessage::user_with_media(
@@ -311,6 +324,7 @@ mod tests {
         assert_eq!(json[1]["image_url"]["url"], "data:image/png;base64,YWJj");
     }
 
+    #[cfg(feature = "anthropic")]
     #[test]
     fn test_anthropic_content_text_only() {
         let msg = ChatMessage::user("hello");
@@ -319,6 +333,7 @@ mod tests {
         assert_eq!(json, serde_json::json!("hello"));
     }
 
+    #[cfg(feature = "anthropic")]
     #[test]
     fn test_anthropic_content_with_inline_media() {
         let msg = ChatMessage::user_with_media(
@@ -334,6 +349,7 @@ mod tests {
         assert_eq!(json[1]["source"]["data"], "YWJj");
     }
 
+    #[cfg(feature = "anthropic")]
     #[test]
     fn test_anthropic_content_with_url_image() {
         let msg = ChatMessage::user_with_media(
@@ -351,6 +367,7 @@ mod tests {
 
     // ---- PDF routing: OpenAI ----
 
+    #[cfg(any(feature = "openai", feature = "grok"))]
     #[test]
     fn test_openai_inline_pdf_becomes_file_part() {
         let msg = ChatMessage::user_with_media(
@@ -373,6 +390,7 @@ mod tests {
         );
     }
 
+    #[cfg(any(feature = "openai", feature = "grok"))]
     #[test]
     fn test_openai_url_pdf_is_a_clear_error() {
         let msg = ChatMessage::user_with_media(
@@ -391,6 +409,7 @@ mod tests {
         );
     }
 
+    #[cfg(any(feature = "openai", feature = "grok"))]
     #[test]
     fn test_openai_non_image_non_pdf_is_a_clear_error() {
         let msg = ChatMessage::user_with_media(
@@ -408,6 +427,7 @@ mod tests {
 
     // ---- PDF routing: Grok ----
 
+    #[cfg(feature = "grok")]
     #[test]
     fn test_grok_inline_pdf_is_a_clear_error_not_an_image_url() {
         let msg = ChatMessage::user_with_media(
@@ -423,6 +443,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "grok")]
     #[test]
     fn test_grok_url_pdf_is_a_clear_error() {
         let msg = ChatMessage::user_with_media(
@@ -440,6 +461,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "grok")]
     #[test]
     fn test_grok_images_still_use_image_url() {
         let msg = ChatMessage::user_with_media(
@@ -455,6 +477,7 @@ mod tests {
 
     // ---- PDF routing: Anthropic ----
 
+    #[cfg(feature = "anthropic")]
     #[test]
     fn test_anthropic_inline_pdf_becomes_document_block() {
         let msg = ChatMessage::user_with_media(
@@ -477,6 +500,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "anthropic")]
     #[test]
     fn test_anthropic_url_pdf_becomes_url_document_block() {
         let msg = ChatMessage::user_with_media(
@@ -500,6 +524,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "anthropic")]
     #[test]
     fn test_anthropic_non_image_non_pdf_is_a_clear_error() {
         let msg = ChatMessage::user_with_media(

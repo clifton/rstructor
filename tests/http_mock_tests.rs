@@ -335,6 +335,9 @@ async fn routed_client_sends_the_full_custom_model_string() {
         .await;
 
     let routed = rstructor::client("openai/vendor/some-model").unwrap();
+    // The wildcard is reachable with additional provider features and intentionally
+    // retained so this assertion stays valid under both default and all-feature builds.
+    #[allow(unreachable_patterns)]
     let client = match routed {
         AnyClient::OpenAI(client) => client.base_url(server.url()).no_retries(),
         _ => panic!("openai prefix should construct the OpenAI AnyClient variant"),

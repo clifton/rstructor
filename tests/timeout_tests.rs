@@ -3,6 +3,13 @@
 //! These tests verify that timeout configuration works correctly
 //! and that timeout errors are properly handled.
 
+#![cfg(any(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "gemini",
+    feature = "grok"
+))]
+
 #[cfg(test)]
 mod timeout_tests {
     #[cfg(feature = "anthropic")]
@@ -15,6 +22,7 @@ mod timeout_tests {
     #[cfg(feature = "openai")]
     use rstructor::{OpenAIClient, OpenAIModel};
     use serde::{Deserialize, Serialize};
+    #[cfg(any(feature = "openai", feature = "anthropic"))]
     use std::env;
     use std::time::Duration;
 

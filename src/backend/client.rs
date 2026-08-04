@@ -173,6 +173,8 @@ impl MediaFile {
 ///
 /// ```no_run
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// # #[cfg(feature = "anthropic")]
+/// # {
 /// use rstructor::{LLMClient, Instructor, AnthropicClient, AnthropicModel};
 /// use serde::{Serialize, Deserialize};
 /// use std::time::Duration;
@@ -197,6 +199,7 @@ impl MediaFile {
 /// println!("Movie: {}", review.movie_title);
 /// println!("Rating: {}/10", review.rating);
 /// println!("Review: {}", review.review);
+/// # }
 /// # Ok(())
 /// # }
 /// ```

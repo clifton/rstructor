@@ -12,16 +12,24 @@
 
 #[cfg(test)]
 mod llm_integration_tests {
+    #[cfg(any(
+        feature = "openai",
+        feature = "anthropic",
+        feature = "gemini",
+        feature = "grok"
+    ))]
+    use rstructor::LLMClient;
     #[cfg(feature = "anthropic")]
     use rstructor::{AnthropicClient, AnthropicModel};
     #[cfg(feature = "gemini")]
     use rstructor::{GeminiClient, GeminiModel};
     #[cfg(feature = "grok")]
     use rstructor::{GrokClient, GrokModel};
-    use rstructor::{Instructor, LLMClient, SchemaType};
+    use rstructor::{Instructor, SchemaType};
     #[cfg(feature = "openai")]
     use rstructor::{OpenAIClient, OpenAIModel};
     use serde::{Deserialize, Serialize};
+    #[cfg(any(feature = "openai", feature = "anthropic"))]
     use std::env;
 
     // Simple model for testing

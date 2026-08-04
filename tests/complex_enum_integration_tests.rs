@@ -1,4 +1,6 @@
 // tests/complex_enum_integration_tests.rs
+#![cfg(feature = "gemini")]
+
 #[cfg(test)]
 mod complex_enum_tests {
     use rstructor::{GeminiClient, GeminiModel, Instructor, LLMClient};
