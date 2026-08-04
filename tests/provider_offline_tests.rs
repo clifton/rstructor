@@ -1,4 +1,10 @@
 //! Offline unit tests for provider-facing pure logic.
+#![cfg(all(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "gemini",
+    feature = "grok"
+))]
 //!
 //! Covers two report rows (no network, no mockito):
 //!   * `provider | ThinkingLevel mapping fns (4) zero direct tests`

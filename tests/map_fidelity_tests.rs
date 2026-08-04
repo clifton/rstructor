@@ -4,9 +4,19 @@
 //! Providers must either preserve those keys and the value schema or reject the
 //! request locally before a paid HTTP call.
 
+#![cfg(any(
+    feature = "mock",
+    feature = "openai",
+    feature = "anthropic",
+    feature = "gemini",
+    feature = "grok"
+))]
+
 use std::collections::HashMap;
 
-use rstructor::{Instructor, LLMClient, RStructorError};
+#[cfg(any(feature = "openai", feature = "anthropic", feature = "grok"))]
+use rstructor::RStructorError;
+use rstructor::{Instructor, LLMClient};
 use serde::{Deserialize, Serialize};
 
 #[derive(Instructor, Serialize, Deserialize, Debug, PartialEq)]
@@ -42,6 +52,7 @@ fn scenario_price_toolbox() -> rstructor::Toolbox {
     ))
 }
 
+#[cfg(any(feature = "openai", feature = "anthropic", feature = "grok"))]
 fn assert_map_compatibility_error(
     error: RStructorError,
     expected_provider: &str,

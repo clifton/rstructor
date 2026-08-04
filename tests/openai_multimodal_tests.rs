@@ -4,6 +4,8 @@
 //! - `OPENAI_API_KEY`
 //! - `--features openai`
 
+#![cfg(feature = "openai")]
+
 #[path = "common/mod.rs"]
 mod common;
 

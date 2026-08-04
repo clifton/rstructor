@@ -4,6 +4,8 @@
 //! - `XAI_API_KEY`
 //! - `--features grok`
 
+#![cfg(feature = "grok")]
+
 #[path = "common/mod.rs"]
 mod common;
 

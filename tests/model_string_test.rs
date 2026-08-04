@@ -1,3 +1,10 @@
+#![cfg(all(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "gemini",
+    feature = "grok"
+))]
+
 #[cfg(test)]
 mod tests {
     use rstructor::{AnthropicModel, GeminiModel, GrokModel, OpenAIModel};

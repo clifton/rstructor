@@ -7,6 +7,7 @@ use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
 use crate::{ResponseBodyCapture, ResponseMetadata};
 use reqwest::Response;
+#[cfg(any(feature = "openai", feature = "grok", test))]
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -90,6 +91,12 @@ pub fn build_http_client(timeout: Duration) -> reqwest::Client {
 /// # Returns
 ///
 /// A new schema Value with strict mode requirements added to all objects
+#[cfg(any(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "grok",
+    feature = "tools"
+))]
 pub fn prepare_strict_schema(schema: &crate::schema::Schema) -> Value {
     let mut schema_json = schema.to_json();
     add_additional_properties_false(&mut schema_json);
@@ -101,6 +108,13 @@ pub fn prepare_strict_schema(schema: &crate::schema::Schema) -> Value {
 /// 2. `null` to the schemas of properties absent from the original `required`
 ///    array (optional fields), so constrained decoding can emit `null` for them
 /// 3. `required` array with all property keys (overriding any existing array)
+#[cfg(any(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "grok",
+    feature = "tools",
+    test
+))]
 fn add_additional_properties_false(schema: &mut Value) {
     if let Some(obj) = schema.as_object_mut() {
         // Check if this is an object type schema (the type may already be a
@@ -252,6 +266,13 @@ fn add_additional_properties_false(schema: &mut Value) {
 }
 
 /// Returns true if a schema branch explicitly admits `null` via its `type` keyword.
+#[cfg(any(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "grok",
+    feature = "tools",
+    test
+))]
 fn schema_branch_admits_null(branch: &Value) -> bool {
     match branch.get("type") {
         Some(Value::String(t)) => t == "null",
@@ -277,6 +298,13 @@ fn schema_branch_admits_null(branch: &Value) -> bool {
 ///
 /// Schemas without any of these keywords (e.g. `{}`) already admit `null` and
 /// are left untouched.
+#[cfg(any(
+    feature = "openai",
+    feature = "anthropic",
+    feature = "grok",
+    feature = "tools",
+    test
+))]
 fn make_schema_nullable(schema: &mut Value) {
     let Some(obj) = schema.as_object_mut() else {
         return;
@@ -327,6 +355,7 @@ fn make_schema_nullable(schema: &mut Value) {
 }
 
 /// Information about adjacently tagged enum transformations for response conversion
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 #[derive(Debug, Clone)]
 pub struct AdjacentlyTaggedEnumInfo {
     pub tag_key: String,
@@ -336,6 +365,7 @@ pub struct AdjacentlyTaggedEnumInfo {
 
 /// Extract adjacently tagged enum info from a schema (before Gemini transformation)
 /// Searches recursively through the schema tree
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 pub fn extract_adjacently_tagged_info(schema: &Value) -> Option<AdjacentlyTaggedEnumInfo> {
     // First check if this level has enum disjunction variants
     for key in ["oneOf", "anyOf"] {
@@ -376,6 +406,7 @@ pub fn extract_adjacently_tagged_info(schema: &Value) -> Option<AdjacentlyTagged
     None
 }
 
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn extract_adjacently_tagged_info_from_variants(
     variants: &[Value],
 ) -> Option<AdjacentlyTaggedEnumInfo> {
@@ -405,6 +436,7 @@ fn extract_adjacently_tagged_info_from_variants(
 }
 
 /// Transform internally tagged JSON back to adjacently tagged format
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 pub fn transform_internally_to_adjacently_tagged(
     json: &mut Value,
     enum_info: &AdjacentlyTaggedEnumInfo,
@@ -468,6 +500,7 @@ pub fn transform_internally_to_adjacently_tagged(
 ///
 /// A new schema value with unsupported keywords removed, or a local
 /// compatibility error when preserving the canonical schema is impossible.
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 pub fn prepare_gemini_schema(
     schema: &crate::schema::Schema,
     context: impl Into<String>,
@@ -479,6 +512,7 @@ pub fn prepare_gemini_schema(
 }
 
 /// Recursively removes keywords unsupported by Gemini's structured outputs.
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn strip_gemini_unsupported_keywords(schema: &mut Value, context: &str) -> Result<()> {
     resolve_refs_for_gemini(schema, context)?;
     strip_gemini_unsupported_keywords_recursive(schema);
@@ -491,6 +525,7 @@ fn strip_gemini_unsupported_keywords(schema: &mut Value, context: &str) -> Resul
 /// rejected before any HTTP request because Gemini's schema transport cannot
 /// preserve an unbounded cycle, and finite-depth expansion would silently
 /// widen the accepted values at the cutoff.
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn resolve_refs_for_gemini(schema: &mut Value, context: &str) -> Result<()> {
     let definitions = schema
         .get("$defs")
@@ -509,6 +544,7 @@ fn resolve_refs_for_gemini(schema: &mut Value, context: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn inline_refs_for_gemini(
     schema: &mut Value,
     definitions: &serde_json::Map<String, Value>,
@@ -587,6 +623,7 @@ fn inline_refs_for_gemini(
     Ok(())
 }
 
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn referenced_definition(
     reference: &str,
     definitions: &serde_json::Map<String, Value>,
@@ -605,6 +642,7 @@ fn referenced_definition(
     )
 }
 
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn append_json_path(path: &str, key: &str) -> String {
     let mut characters = key.chars();
     let is_identifier = matches!(
@@ -620,6 +658,7 @@ fn append_json_path(path: &str, key: &str) -> String {
     }
 }
 
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn gemini_schema_compatibility_error(context: &str, path: &str, message: String) -> RStructorError {
     RStructorError::SchemaCompatibilityError {
         provider: "Gemini".into(),
@@ -631,6 +670,7 @@ fn gemini_schema_compatibility_error(context: &str, path: &str, message: String)
 
 /// Detects if a oneOf variant looks like an adjacently tagged enum variant.
 /// Returns Some((tag_key, content_key, tag_value)) if it matches the pattern.
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn detect_adjacently_tagged_variant(variant: &Value) -> Option<(String, String, String)> {
     let obj = variant.as_object()?;
 
@@ -683,6 +723,7 @@ fn detect_adjacently_tagged_variant(variant: &Value) -> Option<(String, String, 
 
 /// Transforms adjacently tagged enum variants to internally tagged format for Gemini.
 /// This is a workaround for Gemini's limitation with nested content objects.
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn transform_adjacently_tagged_to_internally_tagged(
     variant: &Value,
     _tag_key: &str,
@@ -755,6 +796,7 @@ fn transform_adjacently_tagged_to_internally_tagged(
     Value::Object(obj)
 }
 
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn normalize_adjacently_tagged_variants(variants: &mut Vec<Value>) {
     // First, check if this looks like an adjacently tagged enum.
     // All variants should have the same tag/content keys.
@@ -805,6 +847,7 @@ fn normalize_adjacently_tagged_variants(variants: &mut Vec<Value>) {
 }
 
 /// Internal function that strips unsupported keywords after refs are resolved.
+#[cfg(any(feature = "gemini", feature = "tools", test))]
 fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
     if let Some(obj) = schema.as_object_mut() {
         // Remove unsupported keywords
@@ -925,6 +968,7 @@ fn strip_gemini_unsupported_keywords_recursive(schema: &mut Value) {
 ///
 /// This struct is used by OpenAI and Grok (and potentially other OpenAI-compatible APIs)
 /// for their native structured outputs feature.
+#[cfg(any(feature = "openai", feature = "grok", test))]
 #[derive(Debug, Serialize)]
 pub struct JsonSchemaFormat {
     /// Name of the schema (usually the type name)
@@ -939,6 +983,7 @@ pub struct JsonSchemaFormat {
 }
 
 /// Response format for structured outputs (OpenAI-compatible).
+#[cfg(any(feature = "openai", feature = "grok", test))]
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
 pub enum ResponseFormat {
@@ -950,6 +995,7 @@ pub enum ResponseFormat {
     },
 }
 
+#[cfg(any(feature = "openai", feature = "grok", test))]
 impl ResponseFormat {
     /// Create a new JSON schema response format for structured outputs.
     ///

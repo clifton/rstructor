@@ -9,6 +9,8 @@
 //! cargo test --test openai_enum_anyof_test
 //! ```
 
+#![cfg(feature = "openai")]
+
 #[cfg(test)]
 mod openai_enum_anyof_tests {
     use rstructor::Instructor;
@@ -55,7 +57,6 @@ mod openai_enum_anyof_tests {
     ///
     /// Before the fix this would fail with:
     /// > Invalid schema for response_format '...': 'oneOf' is not permitted.
-    #[cfg(feature = "openai")]
     #[tokio::test]
     async fn test_openai_accepts_complex_enum_schema() {
         use rstructor::{LLMClient, OpenAIClient, OpenAIModel};

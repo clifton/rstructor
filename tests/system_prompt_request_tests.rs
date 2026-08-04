@@ -26,6 +26,7 @@ struct RiskSummary {
     gross_exposure: f64,
 }
 
+#[cfg(any(feature = "openai", feature = "grok"))]
 fn openai_compatible_completion(text: &str) -> String {
     json!({
         "choices": [{

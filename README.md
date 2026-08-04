@@ -27,6 +27,10 @@ serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 ```
 
+The default is intentionally useful and narrow: the derive macro plus the
+OpenAI client. Other providers, logging setup, streaming, tools, schemars
+interop, mocks, and fixture replay remain opt-in.
+
 ## 60-Second Extraction
 
 Set the API key for your provider—for this example, `OPENAI_API_KEY`—then
@@ -924,7 +928,7 @@ network or API key. `MockClient` implements `LLMClient`, so it drops into any
 
 ```toml
 [dev-dependencies]
-rstructor = { version = "0.5.1", features = ["mock"] }
+rstructor = { version = "0.5.1", default-features = false, features = ["derive", "mock"] }
 ```
 
 ```rust
@@ -1003,17 +1007,28 @@ key-free round trip based on a real 10-K metric.
 
 ```toml
 [dependencies]
-rstructor = { version = "0.5.1", features = ["openai", "anthropic", "grok", "gemini"] }
+rstructor = { version = "0.5.1", features = ["all-providers"] }
 ```
 
-- `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
-- `derive` — Derive macro (default)
-- `logging` — Tracing integration
+- `derive`, `openai` — The only default features: typed schemas plus one immediately usable provider
+- `anthropic`, `grok`, `gemini` — Additional provider backends; every provider shares the same HTTP/`tokio` stack
+- `all-providers` — Convenience bundle for runtime provider selection
+- `logging` — Subscriber setup helpers (the core `tracing` spans do not require it)
 - `streaming` — Streaming via `generate_stream` / `materialize_iter` / `materialize_stream` (opt-in)
 - `tools` — Tool/function calling via `Toolbox` + `client.with_tools(..).run(..)` (opt-in)
+- `schemars` — Adapter for types that already derive `schemars::JsonSchema` (opt-in)
 - `mock` — `MockClient` plus record/sanitize/replay fixtures for offline testing (opt-in; see [Testing](#testing-offline))
 
-All features are on by default. For a **schema-only build** — generate JSON Schema from your types with no networking, `tokio`, or `reqwest` — disable the providers:
+For a single non-default provider with no unused client modules, disable defaults
+and select `derive` plus that provider:
+
+```toml
+[dependencies]
+rstructor = { version = "0.5.1", default-features = false, features = ["derive", "anthropic"] }
+```
+
+For a **schema-only build** — generate JSON Schema from your types with no
+networking, `tokio`, or `reqwest` — enable only `derive`:
 
 ```toml
 [dependencies]
@@ -1029,10 +1044,10 @@ See `examples/` for complete working examples:
 ```bash
 export OPENAI_API_KEY=your_key
 cargo run --example structured_movie_info
-cargo run --example nested_objects_example
+cargo run --example nested_objects_example --features gemini
 cargo run --example enum_with_data_example
 cargo run --example serde_rename_example
-cargo run --example gemini_multimodal_example
+cargo run --example gemini_multimodal_example --features gemini
 cargo run --example retry_attempt_ledger --features openai
 ```
 

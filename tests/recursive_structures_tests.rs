@@ -1,4 +1,6 @@
 // tests/recursive_structures_tests.rs
+#![cfg(feature = "gemini")]
+
 #[cfg(test)]
 mod recursive_tests {
     #[cfg(feature = "streaming")]

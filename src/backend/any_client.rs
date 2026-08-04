@@ -154,7 +154,7 @@ fn provider_feature_disabled(provider: &str, feature: &str) -> RStructorError {
 /// }
 ///
 /// // Provider decided at runtime.
-/// let provider = Provider::Anthropic;
+/// let provider = Provider::OpenAI;
 /// let client = AnyClient::from_env_for(provider)?;
 ///
 /// let movie: Movie = client.materialize("Describe Inception").await?;

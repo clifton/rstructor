@@ -1,4 +1,6 @@
 // tests/weird_types_tests.rs
+#![cfg(feature = "gemini")]
+
 #[cfg(test)]
 mod weird_types_tests {
     use rstructor::{GeminiClient, GeminiModel, Instructor, LLMClient};

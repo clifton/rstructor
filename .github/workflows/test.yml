@@ -34,7 +34,7 @@ jobs:
         run: cargo test --all-features --no-fail-fast
 
   schema-only:
-    name: Schema-only build (dependency-light, no API keys)
+    name: Minimal feature surfaces
     runs-on: ubuntu-latest
 
     steps:
@@ -49,10 +49,31 @@ jobs:
           shared-key: "ci-schema-only"
           cache-on-failure: true
 
-      # `--all-features` (the test job above) can't catch breakage in the
-      # advertised dependency-light build (no tokio/reqwest/network), so guard it.
-      - name: Build (derive only)
-        run: cargo build --no-default-features --features derive
+      - name: Lint default (derive + OpenAI only)
+        run: cargo clippy --all-targets -- -D warnings
 
-      - name: Build (derive + mock)
-        run: cargo build --no-default-features --features "derive,mock"
+      # `--all-features` (the test job above) cannot catch breakage in the
+      # advertised dependency-light or single-provider builds, so guard each one.
+      - name: Lint (derive only)
+        run: cargo clippy --all-targets --no-default-features --features derive -- -D warnings
+
+      - name: Lint library (mock only, no derive)
+        run: cargo clippy --lib --no-default-features --features mock -- -D warnings
+
+      - name: Lint library (mock + schemars, no derive)
+        run: cargo clippy --lib --no-default-features --features "mock,schemars" -- -D warnings
+
+      - name: Lint (derive + mock)
+        run: cargo clippy --all-targets --no-default-features --features "derive,mock" -- -D warnings
+
+      - name: Lint (derive + Anthropic only)
+        run: cargo clippy --all-targets --no-default-features --features "derive,anthropic" -- -D warnings
+
+      - name: Lint (derive + Gemini only)
+        run: cargo clippy --all-targets --no-default-features --features "derive,gemini" -- -D warnings
+
+      - name: Lint (derive + Grok only)
+        run: cargo clippy --all-targets --no-default-features --features "derive,grok" -- -D warnings
+
+      - name: Validate crates.io package contents
+        run: cargo package

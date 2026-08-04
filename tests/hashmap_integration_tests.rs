@@ -1,4 +1,6 @@
 // tests/hashmap_integration_tests.rs
+#![cfg(feature = "gemini")]
+
 #[cfg(test)]
 mod hashmap_tests {
     use rstructor::{GeminiClient, GeminiModel, Instructor, LLMClient};

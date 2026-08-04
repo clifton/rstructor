@@ -7,6 +7,8 @@
 //! cargo test --test gemini_multimodal_tests --features gemini
 //! ```
 
+#![cfg(feature = "gemini")]
+
 #[path = "common/mod.rs"]
 mod common;
 
