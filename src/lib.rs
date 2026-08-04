@@ -31,8 +31,8 @@
 //!     // Create a client
 //!     let client = OpenAIClient::new("your-openai-api-key")?;
 //!
-//!     // Generate a structured response
-//!     let person: Person = client.materialize("Describe a fictional person").await?;
+//!     // Extract a structured response
+//!     let person: Person = client.extract("Describe a fictional person").await?;
 //!
 //!     println!("Name: {}", person.name);
 //!     println!("Age: {}", person.age);

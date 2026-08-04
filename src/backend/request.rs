@@ -1,7 +1,7 @@
 //! A fluent request builder over any [`LLMClient`].
 //!
 //! Attach context with `with_system`, images with `with_media`, and tools with
-//! `with_tools`, then choose a terminal: `materialize` (structured), `generate`
+//! `with_tools`, then choose a terminal: `extract` (structured), `generate`
 //! (text), `run` (text, using tools if attached), or — with the `streaming`
 //! feature — `materialize_iter` / `materialize_stream` / `generate_stream`.
 //! Media-bearing requests must use a non-streaming terminal; streaming terminals
@@ -16,7 +16,7 @@
 //! let client = OpenAIClient::from_env()?;
 //! let movie: Movie = client
 //!     .with_system("Assume USD; dates as ISO-8601.")
-//!     .materialize("Describe Inception")
+//!     .extract("Describe Inception")
 //!     .await?;
 //! # Ok(()) }
 //! ```
@@ -99,7 +99,17 @@ impl<'a, C: ?Sized> Request<'a, C> {
 }
 
 impl<C: LLMClient + Sync + ?Sized> Request<'_, C> {
+    /// Extract a structured `T`, applying any attached system context and media.
+    pub async fn extract<T>(self, prompt: &str) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        self.materialize(prompt).await
+    }
+
     /// Materialize a structured `T`, applying any attached system context and media.
+    ///
+    /// This is the original name for [`extract`](Self::extract).
     pub async fn materialize<T>(self, prompt: &str) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,

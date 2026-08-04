@@ -8,13 +8,13 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"/>
 </p>
 
-Get structured, validated data out of any LLM as native Rust structs and enums. Define the shape you want as plain Rust types — rstructor generates the JSON Schema, prompts the model, parses the response, and retries on validation errors until the data fits.
+Get structured, validated data from supported LLM providers as native Rust structs and enums. Define the shape you want as plain Rust types — rstructor generates the JSON Schema, prompts the model, parses the response, and either returns a validated value or a typed error after the configured retries.
 
 ## Features
 
 - **Type-safe schemas from Rust types** — Derive `Instructor` on structs and enums; rstructor generates the JSON Schema and validated parser for you, no hand-written prompts or DTOs
-- **Multi-provider, one API** — OpenAI, Anthropic, Grok (xAI), and Gemini behind a single `materialize()` call with swappable clients
-- **Validation with automatic re-ask** — Built-in type checking plus custom business rules; validation failures are fed back to the model and retried until the data is correct
+- **Multi-provider, one API** — OpenAI, Anthropic, Grok (xAI), and Gemini behind a single `extract()` call with swappable clients
+- **Validation with automatic re-ask** — Built-in type checking plus custom business rules; validation failures are fed back to the model and retried within an explicit bound
 - **Rich, nested data** — Nested objects, arrays, optionals, maps, and enums with associated data, with validation that recurses through the whole tree
 - **Familiar if you know Pydantic + Instructor** — The same structured-output workflow as Python's [Instructor](https://github.com/jxnl/instructor) + [Pydantic](https://github.com/pydantic/pydantic), with Rust's compile-time type safety
 
@@ -22,14 +22,16 @@ Get structured, validated data out of any LLM as native Rust structs and enums. 
 
 ```toml
 [dependencies]
-rstructor = "0.3"
+rstructor = "0.5.1"
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 ```
 
-## Quick Start
+## 60-Second Extraction
 
-Describe the shape you want as plain Rust types, then turn a line of free-form text into a fully-typed, validated value:
+Set the API key for your provider—for this example, `OPENAI_API_KEY`—then
+describe the shape you want as plain Rust types. One `extract` call turns
+free-form text into a fully typed, validated value:
 
 ```rust
 use rstructor::{Instructor, LLMClient};
@@ -61,7 +63,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let text = "Hey, the login page is throwing 500s for half our users since the deploy. \
                 Sarah (sarah@acme.io) is on it but we need this fixed before the demo at 3pm!";
     let ticket: Ticket = rstructor::client("openai/gpt-5.6-sol")?
-        .materialize(text).await?;
+        .extract(text)
+        .await?;
 
     println!("{ticket:#?}");
     // Ticket {
@@ -82,8 +85,11 @@ If you want provider-specific configuration, use the explicit client form:
 use rstructor::{LLMClient, OpenAIClient};
 
 let client = OpenAIClient::from_env()?.temperature(0.0);
-let ticket: Ticket = client.materialize(text).await?;
+let ticket: Ticket = client.extract(text).await?;
 ```
+
+`materialize` is retained as an equivalent name for existing code. New code
+can use `extract` when that better describes the operation.
 
 ### Already using schemars?
 
@@ -92,7 +98,7 @@ Enable rstructor's `schemars` feature and wrap your existing
 
 ```rust
 let ticket = client
-    .materialize::<rstructor::Schemars<Ticket>>(text)
+    .extract::<rstructor::Schemars<Ticket>>(text)
     .await?
     .into_inner();
 ```
@@ -103,7 +109,7 @@ the bridge intentionally sends only reference-free schemas.
 
 ## Request Builder
 
-`materialize`, `generate`, and (with the `tools` feature) tool `run` are also
+`extract`, `generate`, and (with the `tools` feature) tool `run` are also
 available through a fluent builder that attaches context, images, and tools to a
 single request. Bring `RequestExt` into scope and chain the pieces you need:
 
@@ -115,7 +121,7 @@ let client = OpenAIClient::from_env()?;
 // Keep stable instructions separate from the dynamic user prompt.
 let movie: Movie = client
     .with_system("Assume USD; format dates as ISO-8601.")
-    .materialize("Describe Inception")
+    .extract("Describe Inception")
     .await?;
 
 // Or start from `.request()` and combine builders before a terminal.
@@ -126,10 +132,11 @@ let summary = client
     .await?;
 ```
 
-The terminals are `materialize::<T>(prompt)` (structured), `generate(prompt)`
+The primary terminals are `extract::<T>(prompt)` (structured), `generate(prompt)`
 (text), and — with the `tools` feature — `run(prompt)` (text, calling any
 attached tools in a loop). Builders compose: `with_system`, `with_media`, and
-`with_tools` can be chained in any order before the terminal.
+`with_tools` can be chained in any order before the terminal. The original
+`materialize::<T>(prompt)` name remains an equivalent structured terminal.
 
 ### System prompts and prompt caching
 
@@ -748,7 +755,7 @@ match client.materialize::<Movie>("...").await {
 Enable the `streaming` feature to stream responses as they are generated.
 
 ```toml
-rstructor = { version = "0.3", features = ["streaming"] }
+rstructor = { version = "0.5.1", features = ["streaming"] }
 ```
 
 `materialize_iter` streams a **list of structured objects**, yielding each item as soon as it is fully generated and validated — the common case where you want a long list without buffering the whole response:
@@ -834,7 +841,7 @@ required.
 Enable the `tools` feature to let the model call your typed Rust functions and feed the results back, looping until it produces a final answer. Tool argument types derive `Instructor`, so their JSON Schema is generated automatically.
 
 ```toml
-rstructor = { version = "0.3", features = ["tools"] }
+rstructor = { version = "0.5.1", features = ["tools"] }
 ```
 
 ```rust
@@ -875,7 +882,7 @@ network or API key. `MockClient` implements `LLMClient`, so it drops into any
 
 ```toml
 [dev-dependencies]
-rstructor = { version = "0.3", features = ["mock"] }
+rstructor = { version = "0.5.1", features = ["mock"] }
 ```
 
 ```rust
@@ -914,7 +921,7 @@ features are also enabled. See `examples/mock_testing_example.rs`.
 
 ```toml
 [dependencies]
-rstructor = { version = "0.3", features = ["openai", "anthropic", "grok", "gemini"] }
+rstructor = { version = "0.5.1", features = ["openai", "anthropic", "grok", "gemini"] }
 ```
 
 - `openai`, `anthropic`, `grok`, `gemini` — Provider backends (each pulls in the shared HTTP/`tokio` stack)
@@ -928,7 +935,7 @@ All features are on by default. For a **schema-only build** — generate JSON Sc
 
 ```toml
 [dependencies]
-rstructor = { version = "0.3", default-features = false, features = ["derive"] }
+rstructor = { version = "0.5.1", default-features = false, features = ["derive"] }
 ```
 
 This keeps the derive macro, `SchemaType`, the `Instructor` trait, and the `LLMClient` trait (so you can implement your own backend) without the async/HTTP dependency tree.
