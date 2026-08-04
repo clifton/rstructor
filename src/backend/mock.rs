@@ -119,9 +119,14 @@ impl From<String> for MockResponse {
 /// once, so we best-effort clone the clonable variants and stringify the rest.
 fn clone_error(e: &RStructorError) -> RStructorError {
     match e {
-        RStructorError::ApiError { provider, kind } => RStructorError::ApiError {
+        RStructorError::ApiError {
+            provider,
+            kind,
+            response,
+        } => RStructorError::ApiError {
             provider: provider.clone(),
             kind: kind.clone(),
+            response: response.clone(),
         },
         RStructorError::ValidationError(s) => RStructorError::ValidationError(s.clone()),
         RStructorError::SchemaError(s) => RStructorError::SchemaError(s.clone()),

@@ -331,7 +331,7 @@ where
     F: Fn(&Value) -> Result<ProviderStreamEvent> + Send + 'a,
 {
     object_stream_with(send, extract, marker, |raw: &str| {
-        super::utils::parse_and_validate_response::<T>(raw).map_err(|(err, _ctx)| err)
+        super::utils::parse_and_validate_response::<T>(raw).map_err(|(err, _ctx)| *err)
     })
 }
 

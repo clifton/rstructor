@@ -253,26 +253,50 @@ pub struct AttemptRecord {
     pub outcome: AttemptOutcome,
     /// Per-response token usage, when reported by the provider.
     pub usage: Option<TokenUsage>,
+    /// HTTP response diagnostics, when the attempt reached a provider.
+    pub response: Option<crate::ResponseMetadata>,
 }
 
 impl AttemptRecord {
-    #[cfg(any(feature = "_client", feature = "mock"))]
+    #[cfg(any(test, feature = "mock"))]
     pub(crate) fn succeeded(number: usize, usage: Option<TokenUsage>) -> Self {
+        Self::succeeded_with_response(number, usage, None)
+    }
+
+    #[cfg(any(feature = "_client", feature = "mock"))]
+    pub(crate) fn succeeded_with_response(
+        number: usize,
+        usage: Option<TokenUsage>,
+        response: Option<crate::ResponseMetadata>,
+    ) -> Self {
         Self {
             number,
             kind: AttemptKind::Semantic,
             outcome: AttemptOutcome::Succeeded,
             usage,
+            response,
         }
     }
 
-    #[cfg(any(feature = "_client", feature = "mock"))]
+    #[cfg(any(test, feature = "mock"))]
     pub(crate) fn failed(
         number: usize,
         kind: AttemptKind,
         error: &RStructorError,
         disposition: RetryDisposition,
         usage: Option<TokenUsage>,
+    ) -> Self {
+        Self::failed_with_response(number, kind, error, disposition, usage, None)
+    }
+
+    #[cfg(any(feature = "_client", feature = "mock"))]
+    pub(crate) fn failed_with_response(
+        number: usize,
+        kind: AttemptKind,
+        error: &RStructorError,
+        disposition: RetryDisposition,
+        usage: Option<TokenUsage>,
+        response: Option<crate::ResponseMetadata>,
     ) -> Self {
         Self {
             number,
@@ -282,6 +306,7 @@ impl AttemptRecord {
                 disposition,
             },
             usage,
+            response,
         }
     }
 }

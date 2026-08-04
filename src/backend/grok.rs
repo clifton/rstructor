@@ -1,19 +1,20 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{Instrument, debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeAttemptError,
     MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
     OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse, ResponseFormat,
-    StrictSchemaProvider, build_http_client, check_response_status, compile_strict_schema,
-    convert_openai_compatible_chat_messages, generate_with_retry_attempts_with_history,
-    generate_with_retry_attempts_with_initial_messages, generate_with_retry_with_history,
-    generate_with_retry_with_initial_messages, handle_http_error, materialize_request_error,
-    materialize_with_media_and_attempts_with_retry, materialize_with_media_with_retry,
-    parse_validate_and_create_output, request_messages,
+    StrictSchemaProvider, build_http_client, check_response_status_with_capture,
+    compile_strict_schema, convert_openai_compatible_chat_messages,
+    generate_with_retry_attempts_with_history, generate_with_retry_attempts_with_initial_messages,
+    generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
+    materialize_request_error, materialize_with_media_and_attempts_with_retry,
+    materialize_with_media_with_retry, parse_json_response, parse_validate_and_create_output,
+    request_messages,
 };
 #[cfg(feature = "streaming")]
 use crate::backend::{OpenAICompatibleChatMessage, OpenAICompatibleMessageContent};
@@ -74,6 +75,8 @@ pub struct GrokConfig {
     /// Custom base URL for Grok-compatible APIs (e.g., local LLMs, proxy endpoints)
     /// Defaults to "https://api.x.ai/v1" if not set
     pub base_url: Option<String>,
+    /// Opt-in caller-sanitized provider response capture.
+    pub response_body_capture: Option<crate::ResponseBodyCapture>,
 }
 
 /// Grok client for generating completions
@@ -122,6 +125,7 @@ impl GrokClient {
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official Grok API
+            response_body_capture: None,
         };
 
         debug!("Grok client created with default configuration");
@@ -162,6 +166,7 @@ impl GrokClient {
             timeout: Some(DEFAULT_REQUEST_TIMEOUT), // Default: 5-minute request timeout
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official Grok API
+            response_body_capture: None,
         };
 
         debug!("Grok client created with default configuration");
@@ -231,6 +236,14 @@ impl GrokClient {
             .as_deref()
             .unwrap_or("https://api.x.ai/v1");
         let url = format!("{}/chat/completions", base_url);
+        let gen_ai_span = crate::telemetry::inference_span(
+            "x_ai",
+            "chat",
+            self.config.model.as_str(),
+            &url,
+            Some(f64::from(self.config.temperature)),
+            self.config.max_tokens.map(u64::from),
+        );
         debug!(url = %url, "Sending request to Grok API with structured outputs");
         let response = self
             .client
@@ -239,19 +252,32 @@ impl GrokClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
+            .instrument(gen_ai_span.clone())
             .await
-            .map_err(|error| materialize_request_error(error, "Grok"))?;
+            .map_err(|error| {
+                crate::telemetry::record_http_client_error(&gen_ai_span, &error);
+                materialize_request_error(error, "Grok")
+            })?;
 
-        let response = check_response_status(response, "Grok")
-            .await
-            .map_err(MaterializeAttemptError::transport)?;
+        let response = check_response_status_with_capture(
+            response,
+            "Grok",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .map_err(|error| {
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            MaterializeAttemptError::transport(error)
+        })?;
 
         debug!("Successfully received response from Grok API");
-        let completion: OpenAICompatibleChatCompletionResponse =
-            response.json().await.map_err(|e| {
-                error!(error = %e, "Failed to parse JSON response from Grok API");
-                MaterializeAttemptError::transport(RStructorError::from(e))
-            })?;
+        let (completion, response_metadata): (OpenAICompatibleChatCompletionResponse, _) =
+            parse_json_response(response, "Grok", self.config.response_body_capture.as_ref())
+                .await
+                .map_err(|error| {
+                    crate::telemetry::record_error(&gen_ai_span, &error);
+                    MaterializeAttemptError::transport(error)
+                })?;
 
         // Extract usage before validating the envelope so protocol failures can
         // still report provider-billed tokens.
@@ -266,15 +292,16 @@ impl GrokClient {
 
         if completion.choices.is_empty() {
             error!("Grok API returned empty choices array");
-            return Err(MaterializeAttemptError::transport_with_usage(
-                RStructorError::api_error(
-                    "Grok",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No completion choices returned".to_string(),
-                    },
-                ),
-                usage,
-            ));
+            let error = RStructorError::api_error_with_response(
+                "Grok",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion choices returned".to_string(),
+                },
+                response_metadata.clone(),
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            return Err(MaterializeAttemptError::transport_with_usage(error, usage)
+                .with_response(response_metadata));
         }
 
         let message = &completion.choices[0].message;
@@ -282,6 +309,12 @@ impl GrokClient {
 
         // With native structured outputs, the response is in message.content as guaranteed JSON
         if let Some(content) = &message.content {
+            crate::telemetry::record_success(
+                &gen_ai_span,
+                completion.id.as_deref(),
+                Some(&model_name),
+                usage.as_ref(),
+            );
             let raw_response = content.clone();
             debug!(
                 content_len = raw_response.len(),
@@ -289,19 +322,25 @@ impl GrokClient {
             );
 
             // Parse and validate the response using shared utility
-            trace!(json = %raw_response, "Parsing structured output response");
+            trace!(
+                response_bytes = raw_response.len(),
+                "Parsing structured output response"
+            );
             parse_validate_and_create_output(raw_response, usage)
+                .map(|output| output.with_response(response_metadata.clone()))
+                .map_err(|error| error.with_response(response_metadata))
         } else {
             error!("No content in Grok API response");
-            Err(MaterializeAttemptError::transport_with_usage(
-                RStructorError::api_error(
-                    "Grok",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No content in response".to_string(),
-                    },
-                ),
-                usage,
-            ))
+            let error = RStructorError::api_error_with_response(
+                "Grok",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No content in response".to_string(),
+                },
+                response_metadata.clone(),
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            Err(MaterializeAttemptError::transport_with_usage(error, usage)
+                .with_response(response_metadata))
         }
     }
 
@@ -332,6 +371,14 @@ impl GrokClient {
             .as_deref()
             .unwrap_or("https://api.x.ai/v1");
         let url = format!("{}/chat/completions", base_url);
+        let gen_ai_span = crate::telemetry::inference_span(
+            "x_ai",
+            "chat",
+            self.config.model.as_str(),
+            &url,
+            Some(f64::from(self.config.temperature)),
+            self.config.max_tokens.map(u64::from),
+        );
         debug!(url = %url, "Sending request to Grok API");
         let response = self
             .client
@@ -340,27 +387,39 @@ impl GrokClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
+            .instrument(gen_ai_span.clone())
             .await
-            .map_err(|e| handle_http_error(e, "Grok"))?;
+            .map_err(|error| {
+                crate::telemetry::record_http_client_error(&gen_ai_span, &error);
+                handle_http_error(error, "Grok")
+            })?;
 
         // Parse the response
-        let response = check_response_status(response, "Grok").await?;
+        let response = check_response_status_with_capture(
+            response,
+            "Grok",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .inspect_err(|error| crate::telemetry::record_error(&gen_ai_span, error))?;
 
         debug!("Successfully received response from Grok API");
-        let completion: OpenAICompatibleChatCompletionResponse =
-            response.json().await.map_err(|e| {
-                error!(error = %e, "Failed to parse JSON response from Grok API");
-                e
-            })?;
+        let (completion, response_metadata): (OpenAICompatibleChatCompletionResponse, _) =
+            parse_json_response(response, "Grok", self.config.response_body_capture.as_ref())
+                .await
+                .inspect_err(|error| crate::telemetry::record_error(&gen_ai_span, error))?;
 
         if completion.choices.is_empty() {
             error!("Grok API returned empty choices array");
-            return Err(RStructorError::api_error(
+            let error = RStructorError::api_error_with_response(
                 "Grok",
                 ApiErrorKind::UnexpectedResponse {
                     details: "No completion choices returned".to_string(),
                 },
-            ));
+                response_metadata,
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            return Err(error);
         }
 
         // Extract usage info
@@ -368,12 +427,21 @@ impl GrokClient {
             .model
             .clone()
             .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion.usage.as_ref().map(|u| u.token_usage(model_name));
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| u.token_usage(model_name.clone()));
 
         let message = &completion.choices[0].message;
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
 
         if let Some(content) = &message.content {
+            crate::telemetry::record_success(
+                &gen_ai_span,
+                completion.id.as_deref(),
+                Some(&model_name),
+                usage.as_ref(),
+            );
             debug!(
                 content_len = content.len(),
                 "Successfully extracted content from response"
@@ -381,12 +449,15 @@ impl GrokClient {
             Ok(GenerateResult::new(content.clone(), usage))
         } else {
             error!("No content in Grok API response");
-            Err(RStructorError::api_error(
+            let error = RStructorError::api_error_with_response(
                 "Grok",
                 ApiErrorKind::UnexpectedResponse {
                     details: "No content in response".to_string(),
                 },
-            ))
+                response_metadata,
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            Err(error)
         }
     }
 }
@@ -459,6 +530,7 @@ impl GrokClient {
     ) -> impl std::future::Future<Output = Result<reqwest::Response>> + Send + 'static {
         let client = self.client.clone();
         let api_key = self.config.api_key.clone();
+        let response_body_capture = self.config.response_body_capture.clone();
         let base_url = self
             .config
             .base_url
@@ -474,7 +546,7 @@ impl GrokClient {
                 .send()
                 .await
                 .map_err(|e| handle_http_error(e, "Grok"))?;
-            check_response_status(resp, "Grok").await
+            check_response_status_with_capture(resp, "Grok", response_body_capture.as_ref()).await
         }
     }
 }
@@ -886,7 +958,12 @@ impl LLMClient for GrokClient {
             .await
             .map_err(|e| handle_http_error(e, "Grok"))?;
 
-        let response = check_response_status(response, "Grok").await?;
+        let response = check_response_status_with_capture(
+            response,
+            "Grok",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await?;
 
         let json: serde_json::Value = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse models response from Grok");

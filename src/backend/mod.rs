@@ -99,17 +99,19 @@ pub(crate) use openai_compatible::{
 };
 #[cfg(feature = "_client")]
 pub(crate) use schema_compatibility::{StrictSchemaProvider, compile_strict_schema};
+#[cfg(feature = "tools")]
+pub(crate) use utils::check_response_status;
 #[cfg(all(test, feature = "schemars"))]
 pub(crate) use utils::prepare_gemini_schema;
 #[cfg(feature = "_client")]
 pub use utils::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
 #[cfg(feature = "_client")]
 pub(crate) use utils::{
-    ResponseFormat, build_http_client, check_response_status,
+    ResponseFormat, build_http_client, check_response_status_with_capture,
     generate_with_retry_attempts_with_history, generate_with_retry_attempts_with_initial_messages,
     generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
     materialize_request_error, materialize_with_media_and_attempts_with_retry,
-    materialize_with_media_with_retry, parse_validate_and_create_output,
+    materialize_with_media_with_retry, parse_json_response, parse_validate_and_create_output,
 };
 
 /// Thinking level configuration for models that support extended reasoning.

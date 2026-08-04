@@ -48,6 +48,7 @@ extern crate self as rstructor;
 mod backend;
 #[cfg(any(feature = "_client", feature = "mock"))]
 mod decode;
+mod diagnostics;
 pub mod error;
 #[cfg(feature = "logging")]
 pub mod logging;
@@ -55,8 +56,13 @@ pub mod model;
 pub mod schema;
 #[cfg(feature = "schemars")]
 mod schemars_bridge;
+#[cfg(feature = "_client")]
+pub mod telemetry;
 
 // Re-exports for convenience
+#[cfg(feature = "_client")]
+pub use diagnostics::ResponseBodyCapture;
+pub use diagnostics::{ResponseMetadata, SanitizedResponseBody};
 pub use error::{ApiErrorKind, RStructorError, Result, StreamErrorKind};
 pub use model::Instructor;
 pub use schema::{CustomTypeSchema, Schema, SchemaBuilder, SchemaType};

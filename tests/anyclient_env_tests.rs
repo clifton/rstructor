@@ -214,7 +214,7 @@ fn anyclient_from_env_detection_precedence_and_per_provider() {
         "no-key from_env should yield AuthenticationFailed, got {err:?}"
     );
     match &err {
-        RStructorError::ApiError { provider, kind } => {
+        RStructorError::ApiError { provider, kind, .. } => {
             assert_eq!(
                 provider, "AnyClient",
                 "no-key from_env must report the synthetic provider label \"AnyClient\""

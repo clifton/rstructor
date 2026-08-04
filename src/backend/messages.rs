@@ -131,6 +131,8 @@ pub struct MaterializeInternalOutput<T> {
     pub raw_response: String,
     /// Token usage information if available
     pub usage: Option<crate::backend::TokenUsage>,
+    /// Provider response diagnostics for this attempt.
+    pub response: Option<crate::ResponseMetadata>,
 }
 
 #[cfg(feature = "_client")]
@@ -141,7 +143,15 @@ impl<T> MaterializeInternalOutput<T> {
             data,
             raw_response,
             usage,
+            response: None,
         }
+    }
+
+    /// Attach provider response diagnostics to this successful attempt.
+    #[must_use]
+    pub(crate) fn with_response(mut self, response: crate::ResponseMetadata) -> Self {
+        self.response = Some(response);
+        self
     }
 }
 
@@ -179,12 +189,14 @@ pub(crate) enum MaterializeAttemptError {
     Transport {
         error: Box<crate::RStructorError>,
         usage: Option<crate::backend::TokenUsage>,
+        response: Option<Box<crate::ResponseMetadata>>,
     },
     /// Structured output reached decoding or custom validation and failed there.
     Semantic {
         error: Box<crate::RStructorError>,
         context: ValidationFailureContext,
         usage: Option<crate::backend::TokenUsage>,
+        response: Option<Box<crate::ResponseMetadata>>,
     },
 }
 
@@ -198,6 +210,7 @@ impl MaterializeAttemptError {
         Self::Transport {
             error: Box::new(error),
             usage: None,
+            response: None,
         }
     }
 
@@ -208,6 +221,7 @@ impl MaterializeAttemptError {
         Self::Transport {
             error: Box::new(error),
             usage,
+            response: None,
         }
     }
 
@@ -220,6 +234,17 @@ impl MaterializeAttemptError {
             error: Box::new(error),
             context,
             usage,
+            response: None,
         }
+    }
+
+    pub(crate) fn with_response(mut self, response_metadata: crate::ResponseMetadata) -> Self {
+        match &mut self {
+            Self::Preflight(_) => {}
+            Self::Transport { response, .. } | Self::Semantic { response, .. } => {
+                *response = Some(Box::new(response_metadata));
+            }
+        }
+        self
     }
 }
