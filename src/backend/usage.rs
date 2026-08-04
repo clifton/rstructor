@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::RStructorError;
 
 /// Token usage information from an LLM API call.
@@ -26,7 +28,7 @@ use crate::error::RStructorError;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     /// The model used for this request
     pub model: String,
@@ -81,7 +83,7 @@ impl TokenUsage {
 /// accounting if a provider reports different concrete model versions across
 /// retries. Keys use the response's model identifier when present and the
 /// configured model as a fallback.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RunUsage {
     /// Number of attempts whose provider response included token usage.
@@ -206,7 +208,7 @@ fn saturating_add(overflowed: &mut bool, left: u64, right: u64) -> u64 {
 
 /// Whether an attempt reached structured-output validation.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttemptKind {
     /// A structured response reached decoding and custom validation.
     Semantic,
@@ -216,7 +218,7 @@ pub enum AttemptKind {
 
 /// Why execution did or did not continue after a failed attempt.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RetryDisposition {
     /// Another provider attempt was made.
     Retried,
@@ -228,7 +230,7 @@ pub enum RetryDisposition {
 
 /// Outcome of one materialization attempt.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttemptOutcome {
     /// Structured output decoded and validated successfully.
     Succeeded,
@@ -242,7 +244,7 @@ pub enum AttemptOutcome {
 }
 
 /// Immutable record of one materialization attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AttemptRecord {
     /// One-indexed attempt number.
@@ -316,7 +318,7 @@ impl AttemptRecord {
 /// The same report shape is available on [`Extraction<T>`] and
 /// [`ExtractionError`], so callers can inspect attempts and usage without
 /// maintaining separate success and failure accounting code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ExtractionReport {
     /// Usage from the final provider response, when it was reported.
@@ -493,6 +495,23 @@ impl<T> MaterializeReport<T> {
         }
     }
 
+    #[cfg(feature = "mock")]
+    pub(crate) fn from_fixture_parts(
+        data: T,
+        final_usage: Option<TokenUsage>,
+        cumulative_usage: Option<RunUsage>,
+        attempts: Vec<AttemptRecord>,
+        attempts_complete: bool,
+    ) -> Self {
+        Self {
+            data,
+            final_usage,
+            cumulative_usage,
+            attempts,
+            attempts_complete,
+        }
+    }
+
     /// Build a report from final-only metadata with unavailable attempt history.
     ///
     /// This is used by the default [`LLMClient`](crate::LLMClient)
@@ -554,6 +573,21 @@ impl MaterializeFailure {
             cumulative_usage,
             attempts,
             attempts_complete: true,
+        }
+    }
+
+    #[cfg(feature = "mock")]
+    pub(crate) fn from_fixture_parts(
+        error: RStructorError,
+        cumulative_usage: Option<RunUsage>,
+        attempts: Vec<AttemptRecord>,
+        attempts_complete: bool,
+    ) -> Self {
+        Self {
+            error: Box::new(error),
+            cumulative_usage,
+            attempts,
+            attempts_complete,
         }
     }
 

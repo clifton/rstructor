@@ -12,6 +12,7 @@ const GALLERY_EXAMPLES: &[(&str, &[&str])] = &[
     ("kimi_k3_multimodal_example", &["derive", "openai"]),
     ("axum_handler_example", &["derive", "mock"]),
     ("mock_testing_example", &["derive", "mock"]),
+    ("fixture_record_replay", &["derive", "mock"]),
     ("ollama_local_example", &["derive", "openai"]),
     ("runtime_provider_example", &["derive", "openai"]),
     ("schemars_bridge_example", &["mock", "schemars"]),
@@ -51,6 +52,10 @@ const COOKBOOK_RECIPES: &[(&str, &str)] = &[
     (
         "## Test extraction offline with `MockClient`",
         "mock_testing_example",
+    ),
+    (
+        "## Record and replay a sanitized fixture",
+        "fixture_record_replay",
     ),
     (
         "## Use a local model through Ollama",

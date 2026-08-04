@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "interactions": [
+    {
+      "request": {
+        "operation": "materialize_with_attempts",
+        "prompt": "From Apple Inc.'s 2023 Form 10-K: Total net sales were $383,285 million for the fiscal year ended September 30, 2023. Extract the issuer, fiscal year, and net sales in USD millions.",
+        "schema_name": "FilingMetric",
+        "schema": {
+          "properties": {
+            "fiscal_year": {
+              "type": "integer"
+            },
+            "issuer": {
+              "type": "string"
+            },
+            "net_sales_usd_millions": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "issuer",
+            "fiscal_year",
+            "net_sales_usd_millions"
+          ],
+          "title": "FilingMetric",
+          "type": "object"
+        }
+      },
+      "response": {
+        "type": "success",
+        "body": "{\"fiscal_year\":2023,\"issuer\":\"Apple Inc.\",\"net_sales_usd_millions\":383285}",
+        "usage": {
+          "model": "recorded-provider-model",
+          "input_tokens": 67,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 24
+        },
+        "report": {
+          "final_usage": {
+            "model": "recorded-provider-model",
+            "input_tokens": 67,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 24
+          },
+          "cumulative_usage": {
+            "reported_attempts": 1,
+            "input_tokens": 67,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 24,
+            "by_model": {
+              "recorded-provider-model": {
+                "model": "recorded-provider-model",
+                "input_tokens": 67,
+                "cached_input_tokens": 0,
+                "cache_write_input_tokens": 0,
+                "output_tokens": 24
+              }
+            },
+            "overflowed": false
+          },
+          "attempts": [
+            {
+              "number": 1,
+              "kind": "Semantic",
+              "outcome": "Succeeded",
+              "usage": {
+                "model": "recorded-provider-model",
+                "input_tokens": 67,
+                "cached_input_tokens": 0,
+                "cache_write_input_tokens": 0,
+                "output_tokens": 24
+              },
+              "response": null
+            }
+          ],
+          "attempts_complete": true
+        }
+      }
+    }
+  ]
+}

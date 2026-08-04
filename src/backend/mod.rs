@@ -1,6 +1,8 @@
 #[cfg(feature = "_client")]
 mod any_client;
 pub mod client;
+#[cfg(feature = "mock")]
+mod fixture;
 #[cfg(feature = "_client")]
 mod media;
 mod messages;
@@ -36,6 +38,10 @@ pub mod openai;
 #[cfg(feature = "_client")]
 pub use any_client::{AnyClient, Provider};
 pub use client::{LLMClient, MediaFile};
+#[cfg(feature = "mock")]
+pub use fixture::{
+    FIXTURE_SCHEMA_VERSION, Fixture, FixtureError, FixtureRecorder, FixtureSanitizer, ReplayClient,
+};
 pub use messages::{ChatMessage, ChatRole};
 #[cfg(feature = "_client")]
 pub(crate) use messages::{MaterializeAttemptError, request_messages};
@@ -76,7 +82,7 @@ pub use usage::{
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModelInfo {
     /// The model identifier used in API requests
     pub id: String,

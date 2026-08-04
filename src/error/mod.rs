@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
 use thiserror::Error;
 
@@ -38,7 +39,7 @@ use crate::ResponseMetadata;
 ///     }
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ApiErrorKind {
     /// Rate limit exceeded (HTTP 429)
     ///
@@ -126,7 +127,7 @@ pub enum ApiErrorKind {
 /// provider's remaining response is malformed or truncated. Callers should stop
 /// consuming the stream when a [`RStructorError::StreamingError`] is yielded and
 /// decide whether to retain or roll back any earlier items.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum StreamErrorKind {
     /// An SSE event contained bytes that were not valid UTF-8.

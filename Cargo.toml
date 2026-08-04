@@ -109,6 +109,10 @@ name = "mock_testing_example"
 required-features = ["derive", "mock"]
 
 [[example]]
+name = "fixture_record_replay"
+required-features = ["derive", "mock"]
+
+[[example]]
 name = "retry_attempt_ledger"
 required-features = ["derive", "openai"]
 
