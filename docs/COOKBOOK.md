@@ -438,8 +438,9 @@ request because strict provider schemas must be reference-free.
 ## Inspect cumulative retry cost
 
 The [attempt-ledger example](../examples/retry_attempt_ledger.rs) shows both
-success and terminal-failure reporting. `materialize_with_attempts` preserves
-every provider attempt and sums all usage the provider reported.
+success and terminal-failure reporting. `extract_with_report` attaches the same
+report shape to both outcomes, preserving every provider attempt and summing all
+usage the provider reported.
 
 ```rust
 use rstructor::{AttemptOutcome, Instructor, LLMClient};
@@ -461,13 +462,13 @@ struct Position {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = rstructor::client("openai/gpt-5.6-sol")?;
     match client
-        .materialize_with_attempts::<Portfolio>(
+        .extract_with_report::<Portfolio>(
             "HF-ALPHA-001: short 240 ESU6 and long 125,000 AAPL",
         )
         .await
     {
-        Ok(report) => {
-            for attempt in &report.attempts {
+        Ok(extraction) => {
+            for attempt in &extraction.report.attempts {
                 println!(
                     "attempt {}: {:?}, {:?}, usage={:?}",
                     attempt.number, attempt.kind, attempt.outcome, attempt.usage
@@ -476,13 +477,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     eprintln!("provider failure: {message}");
                 }
             }
-            println!("known cumulative usage: {:?}", report.cumulative_usage);
-            println!("portfolio: {:#?}", report.data);
+            println!(
+                "known cumulative usage: {:?}",
+                extraction.report.cumulative_usage
+            );
+            println!("portfolio: {:#?}", extraction.data);
         }
         Err(failure) => {
             eprintln!("final error: {}", failure.error());
-            eprintln!("attempts: {:#?}", failure.attempts);
-            eprintln!("known cumulative usage: {:?}", failure.cumulative_usage);
+            eprintln!("attempts: {:#?}", failure.report.attempts);
+            eprintln!(
+                "known cumulative usage: {:?}",
+                failure.report.cumulative_usage
+            );
         }
     }
     Ok(())
@@ -518,14 +525,14 @@ struct RiskSummary {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OpenAIClient::from_env()?;
-    let report = client
+    let extraction = client
         .with_system(RISK_POLICY)
-        .materialize_with_attempts::<RiskSummary>(
+        .extract_with_report::<RiskSummary>(
             "NAV USD 100mm; long USD 92mm; short USD 50mm",
         )
         .await?;
 
-    if let Some(usage) = report.cumulative_usage {
+    if let Some(usage) = extraction.report.cumulative_usage {
         println!(
             "input={} cache_read={} cache_write={}",
             usage.input_tokens,
@@ -533,7 +540,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             usage.cache_write_input_tokens,
         );
     }
-    println!("{:#?}", report.data);
+    println!("{:#?}", extraction.data);
     Ok(())
 }
 ```

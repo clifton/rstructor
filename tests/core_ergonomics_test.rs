@@ -59,6 +59,55 @@ impl LLMClient for NoMediaClient {
     }
 }
 
+/// A minimal custom client only implements the four core operations. Metadata,
+/// media, and reporting behavior comes from compatibility defaults.
+struct MinimalClient;
+
+#[async_trait]
+impl LLMClient for MinimalClient {
+    async fn materialize<T>(&self, _prompt: &str) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        Err(RStructorError::ValidationError("minimal-extract".into()))
+    }
+
+    async fn generate(&self, prompt: &str) -> Result<String> {
+        Ok(format!("minimal:{prompt}"))
+    }
+
+    fn from_env() -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(Self)
+    }
+
+    async fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        Ok(Vec::new())
+    }
+}
+
+#[tokio::test]
+async fn minimal_custom_client_inherits_metadata_and_report_defaults() {
+    let client = MinimalClient;
+
+    let generated = client.generate_with_metadata("status").await.unwrap();
+    assert_eq!(generated.text, "minimal:status");
+    assert!(generated.usage.is_none());
+
+    let failure = client
+        .extract_with_report::<Dummy>("position")
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        failure.error(),
+        RStructorError::ValidationError(message) if message == "minimal-extract"
+    ));
+    assert!(failure.report.attempts.is_empty());
+    assert!(!failure.report.attempts_complete);
+}
+
 #[tokio::test]
 async fn extract_alias_delegates_to_materialize_for_custom_clients() {
     let client = NoMediaClient;
@@ -67,6 +116,21 @@ async fn extract_alias_delegates_to_materialize_for_custom_clients() {
         matches!(result, Err(RStructorError::ValidationError(message)) if message == "materialize-called"),
         "extract() must preserve compatibility with existing custom clients"
     );
+}
+
+#[tokio::test]
+async fn extract_report_fallback_is_honest_for_custom_clients() {
+    let client = NoMediaClient;
+    let failure = client.extract_with_report::<Dummy>("hi").await.unwrap_err();
+
+    assert!(matches!(
+        failure.error(),
+        RStructorError::ValidationError(message) if message == "materialize-called"
+    ));
+    assert!(failure.report.attempts.is_empty());
+    assert!(failure.report.final_usage.is_none());
+    assert!(failure.report.cumulative_usage.is_none());
+    assert!(!failure.report.attempts_complete);
 }
 
 #[tokio::test]
@@ -188,6 +252,32 @@ mod builder {
         let request = client.last_request().unwrap();
         assert_eq!(request.kind, RequestKind::Materialize);
         assert_eq!(request.prompt, "CTX\n\nhello");
+    }
+
+    #[tokio::test]
+    async fn extract_report_preserves_builder_system_and_media_routing() {
+        let client = MockClient::new().with_response(r#"{"value":"risk chart"}"#);
+        let media = [MediaFile::new(
+            "https://example.com/risk-chart.png",
+            "image/png",
+        )];
+
+        let extraction = client
+            .with_system("Use the fund's base currency.")
+            .media(media.to_vec())
+            .extract_with_report::<Dummy>("read the chart")
+            .await
+            .unwrap();
+
+        assert_eq!(extraction.data.value, "risk chart");
+        assert_eq!(extraction.report.attempts.len(), 1);
+        let request = client.last_request().unwrap();
+        assert_eq!(request.kind, RequestKind::MaterializeWithMediaAndAttempts);
+        assert_eq!(
+            request.prompt,
+            "Use the fund's base currency.\n\nread the chart"
+        );
+        assert_eq!(request.media.len(), 1);
     }
 
     #[tokio::test]

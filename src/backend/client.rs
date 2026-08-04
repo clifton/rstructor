@@ -3,7 +3,8 @@ use serde::de::DeserializeOwned;
 
 use crate::backend::ModelInfo;
 use crate::backend::usage::{
-    GenerateResult, MaterializeFailure, MaterializeReport, MaterializeResult,
+    Extraction, ExtractionError, ExtractionResult, GenerateResult, MaterializeFailure,
+    MaterializeReport, MaterializeResult,
 };
 use crate::error::Result;
 use crate::model::Instructor;
@@ -232,6 +233,48 @@ pub trait LLMClient {
         self.materialize(prompt).await
     }
 
+    /// Extract a structured value with one report shape on success and failure.
+    ///
+    /// Use this when attempt history or cumulative usage matters. Both variants
+    /// of [`ExtractionResult<T>`] carry an
+    /// [`ExtractionReport`](crate::ExtractionReport), so accounting code does
+    /// not need to switch between unrelated metadata types.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use rstructor::{Instructor, LLMClient, OpenAIClient};
+    /// # use serde::{Deserialize, Serialize};
+    /// # #[derive(Debug, Instructor, Serialize, Deserialize)]
+    /// # struct Position { symbol: String, quantity: i64 }
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let client = OpenAIClient::from_env()?;
+    /// match client
+    ///     .extract_with_report::<Position>("AAPL: 1,000 shares")
+    ///     .await
+    /// {
+    ///     Ok(extraction) => {
+    ///         println!("{:?}", extraction.data);
+    ///         println!("attempts={}", extraction.report.attempts.len());
+    ///     }
+    ///     Err(failure) => {
+    ///         eprintln!("{}", failure.error());
+    ///         eprintln!("attempts={}", failure.report.attempts.len());
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn extract_with_report<T>(&self, prompt: &str) -> ExtractionResult<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        self.materialize_with_attempts(prompt)
+            .await
+            .map(Extraction::from)
+            .map_err(ExtractionError::from)
+    }
+
     /// Materialize a structured object of type T from a prompt.
     ///
     /// This is the original name for [`extract`](Self::extract). It takes a
@@ -241,7 +284,8 @@ pub trait LLMClient {
     /// the client will automatically retry up to 3 times (configurable via `.max_retries()`
     /// or disabled via `.no_retries()`).
     ///
-    /// For token usage information, use [`materialize_with_metadata`](Self::materialize_with_metadata).
+    /// For token usage and attempt history, use
+    /// [`extract_with_report`](Self::extract_with_report).
     ///
     /// # Example
     ///
@@ -268,6 +312,7 @@ pub trait LLMClient {
     /// [`RStructorError::Unsupported`](crate::RStructorError::Unsupported) so that
     /// media is never silently dropped. Providers with media support override this
     /// method. All four built-in clients (OpenAI, Anthropic, Grok, Gemini) support media.
+    #[doc(hidden)]
     async fn materialize_with_media<T>(&self, prompt: &str, media: &[MediaFile]) -> Result<T>
     where
         T: Instructor + DeserializeOwned + Send + 'static,
@@ -305,9 +350,15 @@ pub trait LLMClient {
     /// # Ok(())
     /// # }
     /// ```
+    #[doc(hidden)]
     async fn materialize_with_metadata<T>(&self, prompt: &str) -> Result<MaterializeResult<T>>
     where
-        T: Instructor + DeserializeOwned + Send + 'static;
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        self.materialize(prompt)
+            .await
+            .map(MaterializeResult::from_data)
+    }
 
     /// Materialize a structured object with a complete attempt ledger.
     ///
@@ -343,6 +394,7 @@ pub trait LLMClient {
     /// # Ok(())
     /// # }
     /// ```
+    #[doc(hidden)]
     async fn materialize_with_attempts<T>(
         &self,
         prompt: &str,
@@ -362,6 +414,7 @@ pub trait LLMClient {
     /// [`materialize_with_attempts`](Self::materialize_with_attempts). The
     /// default implementation preserves compatibility for custom clients but
     /// cannot recover per-attempt metadata hidden by their existing media method.
+    #[doc(hidden)]
     async fn materialize_with_media_and_attempts<T>(
         &self,
         prompt: &str,
@@ -459,7 +512,11 @@ pub trait LLMClient {
     /// # Ok(())
     /// # }
     /// ```
-    async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult>;
+    async fn generate_with_metadata(&self, prompt: &str) -> Result<GenerateResult> {
+        self.generate(prompt)
+            .await
+            .map(|text| GenerateResult::new(text, None))
+    }
 
     /// Stream a raw text completion as a sequence of token deltas.
     ///

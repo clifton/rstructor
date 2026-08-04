@@ -286,6 +286,151 @@ impl AttemptRecord {
     }
 }
 
+/// Run metadata shared by successful and failed structured extractions.
+///
+/// The same report shape is available on [`Extraction<T>`] and
+/// [`ExtractionError`], so callers can inspect attempts and usage without
+/// maintaining separate success and failure accounting code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ExtractionReport {
+    /// Usage from the final provider response, when it was reported.
+    ///
+    /// On failure this is taken from the final recorded attempt. A transport
+    /// failure or provider response that omitted usage leaves it as `None`.
+    pub final_usage: Option<TokenUsage>,
+    /// Cumulative known usage across every provider response in this run.
+    pub cumulative_usage: Option<RunUsage>,
+    /// Ordered, one-indexed attempt ledger.
+    pub attempts: Vec<AttemptRecord>,
+    /// Whether `attempts` and `cumulative_usage` cover the complete run.
+    ///
+    /// Built-in providers and the optional `MockClient` set this to `true`.
+    /// Compatibility fallbacks for custom clients set it to `false` rather
+    /// than inventing attempts they cannot observe.
+    pub attempts_complete: bool,
+}
+
+impl ExtractionReport {
+    fn from_success<T>(report: MaterializeReport<T>) -> (T, Self) {
+        let MaterializeReport {
+            data,
+            final_usage,
+            cumulative_usage,
+            attempts,
+            attempts_complete,
+        } = report;
+        (
+            data,
+            Self {
+                final_usage,
+                cumulative_usage,
+                attempts,
+                attempts_complete,
+            },
+        )
+    }
+
+    fn from_failure(failure: MaterializeFailure) -> (Box<RStructorError>, Self) {
+        let MaterializeFailure {
+            error,
+            cumulative_usage,
+            attempts,
+            attempts_complete,
+        } = failure;
+        let final_usage = attempts.last().and_then(|attempt| attempt.usage.clone());
+        (
+            error,
+            Self {
+                final_usage,
+                cumulative_usage,
+                attempts,
+                attempts_complete,
+            },
+        )
+    }
+}
+
+/// A validated value and its complete available extraction report.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Extraction<T> {
+    /// Deserialized and validated data.
+    pub data: T,
+    /// Usage and attempt metadata for the run.
+    pub report: ExtractionReport,
+}
+
+impl<T> Extraction<T> {
+    /// Map the extracted value while preserving the run report.
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Extraction<U> {
+        Extraction {
+            data: f(self.data),
+            report: self.report,
+        }
+    }
+
+    /// Consume the extraction and return its validated value.
+    #[must_use]
+    pub fn into_data(self) -> T {
+        self.data
+    }
+}
+
+impl<T> From<MaterializeReport<T>> for Extraction<T> {
+    fn from(report: MaterializeReport<T>) -> Self {
+        let (data, report) = ExtractionReport::from_success(report);
+        Self { data, report }
+    }
+}
+
+/// A failed extraction and the same report shape returned on success.
+#[derive(Debug)]
+pub struct ExtractionError {
+    error: Box<RStructorError>,
+    /// Usage and attempt metadata collected before the failure.
+    pub report: ExtractionReport,
+}
+
+impl ExtractionError {
+    /// Return the original final error.
+    #[must_use]
+    pub fn error(&self) -> &RStructorError {
+        &self.error
+    }
+
+    /// Consume the extraction error and return the original final error.
+    #[must_use]
+    pub fn into_error(self) -> RStructorError {
+        *self.error
+    }
+}
+
+impl From<MaterializeFailure> for ExtractionError {
+    fn from(failure: MaterializeFailure) -> Self {
+        let (error, report) = ExtractionReport::from_failure(failure);
+        Self { error, report }
+    }
+}
+
+impl fmt::Display for ExtractionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error().fmt(formatter)
+    }
+}
+
+impl std::error::Error for ExtractionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error())
+    }
+}
+
+/// The advanced structured-extraction result type.
+///
+/// Both variants carry an [`ExtractionReport`]: success through
+/// [`Extraction::report`] and failure through [`ExtractionError::report`].
+pub type ExtractionResult<T> = std::result::Result<Extraction<T>, ExtractionError>;
+
 /// Successful structured-output run with usage and available attempt metadata.
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -581,5 +726,70 @@ mod tests {
         assert!(failure.cumulative_usage.is_none());
         assert!(!failure.attempts_complete);
         assert!(matches!(failure.error(), RStructorError::SchemaError(_)));
+    }
+
+    #[test]
+    fn extraction_success_uses_the_shared_report_and_maps_data() {
+        let final_usage = TokenUsage::new("risk-model-v2", 120, 18);
+        let cumulative_usage = RunUsage::from_response(final_usage.clone());
+        let legacy = MaterializeReport::new(
+            "HF-ALPHA-001",
+            Some(final_usage.clone()),
+            Some(cumulative_usage.clone()),
+            vec![AttemptRecord::succeeded(1, Some(final_usage.clone()))],
+        );
+
+        let extraction = Extraction::from(legacy).map(str::len);
+
+        assert_eq!(extraction.data, 12);
+        assert_eq!(extraction.report.final_usage, Some(final_usage));
+        assert_eq!(extraction.report.cumulative_usage, Some(cumulative_usage));
+        assert_eq!(extraction.report.attempts.len(), 1);
+        assert!(extraction.report.attempts_complete);
+    }
+
+    #[test]
+    fn extraction_failure_uses_the_same_report_shape_and_final_attempt_usage() {
+        let first_usage = TokenUsage::new("risk-model-v1", 90, 15);
+        let final_usage = TokenUsage::new("risk-model-v2", 100, 12);
+        let mut cumulative_usage = RunUsage::new();
+        cumulative_usage.record(first_usage.clone());
+        cumulative_usage.record(final_usage.clone());
+        let final_error = RStructorError::OutputDecodeError {
+            path: "$.positions[1].quantity".into(),
+            message: "invalid type: string, expected i64".into(),
+        };
+        let failure = MaterializeFailure::new(
+            final_error,
+            Some(cumulative_usage.clone()),
+            vec![
+                AttemptRecord::failed(
+                    1,
+                    AttemptKind::Semantic,
+                    &RStructorError::ValidationError("invalid quantity".into()),
+                    RetryDisposition::Retried,
+                    Some(first_usage),
+                ),
+                AttemptRecord::failed(
+                    2,
+                    AttemptKind::Semantic,
+                    &RStructorError::ValidationError("invalid quantity".into()),
+                    RetryDisposition::BudgetExhausted,
+                    Some(final_usage.clone()),
+                ),
+            ],
+        );
+
+        let error = ExtractionError::from(failure);
+
+        assert!(matches!(
+            error.error(),
+            RStructorError::OutputDecodeError { path, .. }
+                if path == "$.positions[1].quantity"
+        ));
+        assert_eq!(error.report.final_usage, Some(final_usage));
+        assert_eq!(error.report.cumulative_usage, Some(cumulative_usage));
+        assert_eq!(error.report.attempts.len(), 2);
+        assert!(error.report.attempts_complete);
     }
 }

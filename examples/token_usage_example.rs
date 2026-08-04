@@ -1,4 +1,4 @@
-//! Example demonstrating token usage tracking with materialize_with_metadata.
+//! Example demonstrating token usage tracking with a uniform extraction report.
 //!
 //! This is useful for monitoring API costs and understanding token consumption.
 
@@ -31,20 +31,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let prompt = "Summarize the book '1984' by George Orwell";
 
-    // Use materialize_with_metadata to get token usage information
-    let result = client
-        .materialize_with_metadata::<BookSummary>(prompt)
-        .await?;
+    let extraction = client.extract_with_report::<BookSummary>(prompt).await?;
 
     // Access the extracted data
-    println!("Book: {} by {}", result.data.title, result.data.author);
-    println!("Summary: {}", result.data.summary);
-    println!("Themes: {:?}", result.data.themes);
+    println!(
+        "Book: {} by {}",
+        extraction.data.title, extraction.data.author
+    );
+    println!("Summary: {}", extraction.data.summary);
+    println!("Themes: {:?}", extraction.data.themes);
 
-    // Access token usage for cost tracking
-    if let Some(usage) = result.usage {
+    // Access cumulative usage across retries for cost tracking.
+    if let Some(usage) = extraction.report.cumulative_usage {
         println!("\n--- Token Usage ---");
-        println!("Model: {}", usage.model);
         println!("Input tokens: {}", usage.input_tokens);
         println!("Output tokens: {}", usage.output_tokens);
         println!("Total tokens: {}", usage.total_tokens());

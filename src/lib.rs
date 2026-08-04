@@ -86,9 +86,9 @@ pub use backend::{
     AnyClient, Provider, Request, RequestExt, client, client_from_env, parse_client_spec,
 };
 pub use backend::{
-    AttemptKind, AttemptOutcome, AttemptRecord, ChatMessage, ChatRole, GenerateResult,
-    MaterializeFailure, MaterializeReport, MaterializeResult, MediaFile, RetryDisposition,
-    RunUsage, TokenUsage,
+    AttemptKind, AttemptOutcome, AttemptRecord, ChatMessage, ChatRole, Extraction, ExtractionError,
+    ExtractionReport, ExtractionResult, GenerateResult, MaterializeFailure, MaterializeReport,
+    MaterializeResult, MediaFile, RetryDisposition, RunUsage, TokenUsage,
 };
 #[cfg(feature = "_client")]
 pub use backend::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT};
