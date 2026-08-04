@@ -1,6 +1,8 @@
 use std::{fmt, time::Duration};
 use thiserror::Error;
 
+use crate::ResponseMetadata;
+
 /// Classification of API errors for better handling and retry logic.
 ///
 /// This enum categorizes HTTP errors from LLM providers into actionable types,
@@ -357,6 +359,8 @@ pub enum RStructorError {
         provider: String,
         /// The classified error kind
         kind: ApiErrorKind,
+        /// HTTP response diagnostics, when the provider returned a response.
+        response: Option<Box<ResponseMetadata>>,
     },
 
     /// Error validating data against schema or business rules
@@ -478,6 +482,20 @@ impl RStructorError {
         RStructorError::ApiError {
             provider: provider.into(),
             kind,
+            response: None,
+        }
+    }
+
+    /// Create a classified API error with the provider's HTTP response metadata.
+    pub fn api_error_with_response(
+        provider: impl Into<String>,
+        kind: ApiErrorKind,
+        response: ResponseMetadata,
+    ) -> Self {
+        RStructorError::ApiError {
+            provider: provider.into(),
+            kind,
+            response: Some(Box::new(response)),
         }
     }
 
@@ -496,6 +514,28 @@ impl RStructorError {
             RStructorError::ApiError { kind, .. } => Some(kind),
             _ => None,
         }
+    }
+
+    /// Return HTTP response metadata when this error came from a provider response.
+    #[must_use]
+    pub fn response_metadata(&self) -> Option<&ResponseMetadata> {
+        match self {
+            RStructorError::ApiError { response, .. } => response.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Return the provider's exact HTTP status code, when available.
+    #[must_use]
+    pub fn status_code(&self) -> Option<u16> {
+        self.response_metadata().map(|response| response.status)
+    }
+
+    /// Return a preferred provider request ID, when available.
+    #[must_use]
+    pub fn request_id(&self) -> Option<&str> {
+        self.response_metadata()
+            .and_then(ResponseMetadata::request_id)
     }
 
     /// Returns whether this error is potentially retryable.
@@ -563,12 +603,14 @@ impl PartialEq for RStructorError {
                 Self::ApiError {
                     provider: p1,
                     kind: k1,
+                    response: r1,
                 },
                 Self::ApiError {
                     provider: p2,
                     kind: k2,
+                    response: r2,
                 },
-            ) => p1 == p2 && k1 == k2,
+            ) => p1 == p2 && k1 == k2 && r1 == r2,
             (Self::ValidationError(a), Self::ValidationError(b)) => a == b,
             (Self::SchemaError(a), Self::SchemaError(b)) => a == b,
             (

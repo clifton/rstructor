@@ -3,17 +3,18 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{Instrument, debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeAttemptError,
     MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
-    ThinkingLevel, TokenUsage, build_http_client, check_response_status,
+    ThinkingLevel, TokenUsage, build_http_client, check_response_status_with_capture,
     generate_with_retry_attempts_with_history, generate_with_retry_attempts_with_initial_messages,
     generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
     materialize_request_error, materialize_with_media_and_attempts_with_retry,
-    materialize_with_media_with_retry, parse_validate_and_create_output, request_messages,
+    materialize_with_media_with_retry, parse_json_response, parse_validate_and_create_output,
+    request_messages,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -104,6 +105,8 @@ pub struct GeminiConfig {
     /// Thinking level for Gemini 3.x models
     /// Controls the depth of reasoning applied to prompts
     pub thinking_level: Option<ThinkingLevel>,
+    /// Opt-in caller-sanitized provider response capture.
+    pub response_body_capture: Option<crate::ResponseBodyCapture>,
 }
 
 /// Gemini client for generating completions
@@ -197,6 +200,8 @@ impl UsageMetadata {
 
 #[derive(Debug, Deserialize)]
 struct GenerateContentResponse {
+    #[serde(rename = "responseId")]
+    response_id: Option<String>,
     candidates: Vec<Candidate>,
     #[serde(rename = "usageMetadata")]
     usage_metadata: Option<UsageMetadata>,
@@ -313,6 +318,7 @@ impl GeminiClient {
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official Gemini API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3.x
+            response_body_capture: None,
         };
 
         let client = build_http_client(DEFAULT_REQUEST_TIMEOUT);
@@ -358,6 +364,7 @@ impl GeminiClient {
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official Gemini API
             thinking_level: Some(ThinkingLevel::Low), // Default to Low thinking for Gemini 3.x
+            response_body_capture: None,
         };
 
         let client = build_http_client(DEFAULT_REQUEST_TIMEOUT);
@@ -445,6 +452,14 @@ impl GeminiClient {
             base_url,
             self.config.model.as_str()
         );
+        let gen_ai_span = crate::telemetry::inference_span(
+            "gcp.gemini",
+            "generate_content",
+            self.config.model.as_str(),
+            &url,
+            Some(f64::from(self.config.temperature)),
+            self.config.max_tokens.map(u64::from),
+        );
         debug!(
             url = %url,
             model = %self.config.model.as_str(),
@@ -458,17 +473,34 @@ impl GeminiClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
+            .instrument(gen_ai_span.clone())
             .await
-            .map_err(|error| materialize_request_error(error, "Gemini"))?;
+            .map_err(|error| {
+                crate::telemetry::record_http_client_error(&gen_ai_span, &error);
+                materialize_request_error(error, "Gemini")
+            })?;
 
-        let response = check_response_status(response, "Gemini")
-            .await
-            .map_err(MaterializeAttemptError::transport)?;
+        let response = check_response_status_with_capture(
+            response,
+            "Gemini",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .map_err(|error| {
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            MaterializeAttemptError::transport(error)
+        })?;
 
         debug!("Successfully received response from Gemini API");
-        let completion: GenerateContentResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from Gemini API");
-            MaterializeAttemptError::transport(RStructorError::from(e))
+        let (completion, response_metadata): (GenerateContentResponse, _) = parse_json_response(
+            response,
+            "Gemini",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .map_err(|error| {
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            MaterializeAttemptError::transport(error)
         })?;
 
         // Extract usage before validating the envelope so protocol failures can
@@ -484,15 +516,16 @@ impl GeminiClient {
 
         if completion.candidates.is_empty() {
             error!("Gemini API returned empty candidates array");
-            return Err(MaterializeAttemptError::transport_with_usage(
-                RStructorError::api_error(
-                    "Gemini",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No completion candidates returned".to_string(),
-                    },
-                ),
-                usage,
-            ));
+            let error = RStructorError::api_error_with_response(
+                "Gemini",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion candidates returned".to_string(),
+                },
+                response_metadata.clone(),
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            return Err(MaterializeAttemptError::transport_with_usage(error, usage)
+                .with_response(response_metadata));
         }
 
         let candidate = &completion.candidates[0];
@@ -502,10 +535,19 @@ impl GeminiClient {
         debug!(parts = parts.len(), "Processing candidate content parts");
         for part in parts {
             if let Some(text) = &part.text {
+                crate::telemetry::record_success(
+                    &gen_ai_span,
+                    completion.response_id.as_deref(),
+                    Some(&model_name),
+                    usage.as_ref(),
+                );
                 let mut raw_response = text.clone();
                 debug!(content_len = raw_response.len(), "Processing text part");
                 // With native responseJsonSchema, the response is guaranteed to be valid JSON
-                trace!(json = %raw_response, "Parsing structured output response");
+                trace!(
+                    response_bytes = raw_response.len(),
+                    "Parsing structured output response"
+                );
 
                 // Transform internally tagged enums back to adjacently tagged format if needed
                 if let Some(ref enum_info) = adjacently_tagged_info
@@ -520,20 +562,23 @@ impl GeminiClient {
                 }
 
                 // Parse and validate the response using shared utility
-                return parse_validate_and_create_output(raw_response, usage);
+                return parse_validate_and_create_output(raw_response, usage)
+                    .map(|output| output.with_response(response_metadata.clone()))
+                    .map_err(|error| error.with_response(response_metadata));
             }
         }
 
         error!("No text content in Gemini response");
-        Err(MaterializeAttemptError::transport_with_usage(
-            RStructorError::api_error(
-                "Gemini",
-                ApiErrorKind::UnexpectedResponse {
-                    details: "No text content in response".to_string(),
-                },
-            ),
-            usage,
-        ))
+        let error = RStructorError::api_error_with_response(
+            "Gemini",
+            ApiErrorKind::UnexpectedResponse {
+                details: "No text content in response".to_string(),
+            },
+            response_metadata.clone(),
+        );
+        crate::telemetry::record_error(&gen_ai_span, &error);
+        Err(MaterializeAttemptError::transport_with_usage(error, usage)
+            .with_response(response_metadata))
     }
 
     /// Internal implementation of raw text generation (no structured output).
@@ -582,6 +627,14 @@ impl GeminiClient {
             base_url,
             self.config.model.as_str()
         );
+        let gen_ai_span = crate::telemetry::inference_span(
+            "gcp.gemini",
+            "generate_content",
+            self.config.model.as_str(),
+            &url,
+            Some(f64::from(self.config.temperature)),
+            self.config.max_tokens.map(u64::from),
+        );
         debug!(
             url = %url,
             model = %self.config.model.as_str(),
@@ -594,26 +647,42 @@ impl GeminiClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
+            .instrument(gen_ai_span.clone())
             .await
-            .map_err(|e| handle_http_error(e, "Gemini"))?;
+            .map_err(|error| {
+                crate::telemetry::record_http_client_error(&gen_ai_span, &error);
+                handle_http_error(error, "Gemini")
+            })?;
 
         // Parse the response
-        let response = check_response_status(response, "Gemini").await?;
+        let response = check_response_status_with_capture(
+            response,
+            "Gemini",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .inspect_err(|error| crate::telemetry::record_error(&gen_ai_span, error))?;
 
         debug!("Successfully received response from Gemini API");
-        let completion: GenerateContentResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from Gemini API");
-            e
-        })?;
+        let (completion, response_metadata): (GenerateContentResponse, _) = parse_json_response(
+            response,
+            "Gemini",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .inspect_err(|error| crate::telemetry::record_error(&gen_ai_span, error))?;
 
         if completion.candidates.is_empty() {
             error!("Gemini API returned empty candidates array");
-            return Err(RStructorError::api_error(
+            let error = RStructorError::api_error_with_response(
                 "Gemini",
                 ApiErrorKind::UnexpectedResponse {
                     details: "No completion candidates returned".to_string(),
                 },
-            ));
+                response_metadata,
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            return Err(error);
         }
 
         // Extract usage info
@@ -624,7 +693,7 @@ impl GeminiClient {
         let usage = completion
             .usage_metadata
             .as_ref()
-            .map(|u| u.token_usage(model_name));
+            .map(|u| u.token_usage(model_name.clone()));
 
         let candidate = &completion.candidates[0];
         trace!(finish_reason = %candidate.finish_reason, "Completion finish reason");
@@ -637,6 +706,12 @@ impl GeminiClient {
             .and_then(|p| p.text.as_ref())
         {
             Some(text) => {
+                crate::telemetry::record_success(
+                    &gen_ai_span,
+                    completion.response_id.as_deref(),
+                    Some(&model_name),
+                    usage.as_ref(),
+                );
                 debug!(
                     content_len = text.len(),
                     "Successfully extracted text content from response"
@@ -645,12 +720,15 @@ impl GeminiClient {
             }
             None => {
                 error!("No text content in Gemini response");
-                Err(RStructorError::api_error(
+                let error = RStructorError::api_error_with_response(
                     "Gemini",
                     ApiErrorKind::UnexpectedResponse {
                         details: "No text content in response".to_string(),
                     },
-                ))
+                    response_metadata,
+                );
+                crate::telemetry::record_error(&gen_ai_span, &error);
+                Err(error)
             }
         }
     }
@@ -776,6 +854,7 @@ impl GeminiClient {
     ) -> impl std::future::Future<Output = Result<reqwest::Response>> + Send + 'static {
         let client = self.client.clone();
         let api_key = self.config.api_key.clone();
+        let response_body_capture = self.config.response_body_capture.clone();
         let base_url = self
             .config
             .base_url
@@ -792,7 +871,7 @@ impl GeminiClient {
                 .send()
                 .await
                 .map_err(|e| handle_http_error(e, "Gemini"))?;
-            check_response_status(resp, "Gemini").await
+            check_response_status_with_capture(resp, "Gemini", response_body_capture.as_ref()).await
         }
     }
 }
@@ -1137,7 +1216,7 @@ impl LLMClient for GeminiClient {
                 crate::backend::utils::transform_internally_to_adjacently_tagged(&mut value, info);
                 json = serde_json::to_string(&value).unwrap_or(json);
             }
-            crate::backend::utils::parse_and_validate_response::<T>(&json).map_err(|(e, _)| e)
+            crate::backend::utils::parse_and_validate_response::<T>(&json).map_err(|(e, _)| *e)
         };
 
         crate::backend::streaming::object_stream_with(
@@ -1224,7 +1303,12 @@ impl LLMClient for GeminiClient {
             .await
             .map_err(|e| handle_http_error(e, "Gemini"))?;
 
-        let response = check_response_status(response, "Gemini").await?;
+        let response = check_response_status_with_capture(
+            response,
+            "Gemini",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await?;
 
         let json: serde_json::Value = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse models response from Gemini");

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use std::time::Duration;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{Instrument, debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::routing::{
@@ -12,12 +12,13 @@ use crate::backend::{
     ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient, MaterializeAttemptError,
     MaterializeFailure, MaterializeInternalOutput, MaterializeReport, MaterializeResult, ModelInfo,
     OpenAICompatibleChatCompletionRequest, OpenAICompatibleChatCompletionResponse, ResponseFormat,
-    StrictSchemaProvider, ThinkingLevel, build_http_client, check_response_status,
+    StrictSchemaProvider, ThinkingLevel, build_http_client, check_response_status_with_capture,
     compile_strict_schema, convert_openai_compatible_chat_messages,
     generate_with_retry_attempts_with_history, generate_with_retry_attempts_with_initial_messages,
     generate_with_retry_with_history, generate_with_retry_with_initial_messages, handle_http_error,
     materialize_request_error, materialize_with_media_and_attempts_with_retry,
-    materialize_with_media_with_retry, parse_validate_and_create_output, request_messages,
+    materialize_with_media_with_retry, parse_json_response, parse_validate_and_create_output,
+    request_messages,
 };
 #[cfg(feature = "streaming")]
 use crate::backend::{OpenAICompatibleChatMessage, OpenAICompatibleMessageContent};
@@ -128,6 +129,8 @@ pub struct OpenAIConfig {
     /// Thinking level for GPT-5.x models (reasoning effort)
     /// Controls the depth of reasoning applied to prompts
     pub thinking_level: Option<ThinkingLevel>,
+    /// Opt-in caller-sanitized provider response capture.
+    pub response_body_capture: Option<crate::ResponseBodyCapture>,
 }
 
 /// OpenAI client for generating completions
@@ -151,6 +154,7 @@ impl OpenAIClient {
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official OpenAI API
             thinking_level: Some(ThinkingLevel::Medium), // GPT-5.6 defaults to medium reasoning
+            response_body_capture: None,
         };
 
         Self {
@@ -511,24 +515,49 @@ impl OpenAIClient {
             .as_deref()
             .unwrap_or("https://api.openai.com/v1");
         let url = format!("{}/chat/completions", base_url);
+        let gen_ai_span = crate::telemetry::inference_span(
+            "openai",
+            "chat",
+            self.config.model.as_str(),
+            &url,
+            Some(f64::from(effective_temp)),
+            self.config.max_tokens.map(u64::from),
+        );
         debug!(url = %url, "Sending request to OpenAI API");
         let response = optional_bearer_auth(self.client.post(&url), &self.config.api_key)
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
+            .instrument(gen_ai_span.clone())
             .await
-            .map_err(|error| materialize_request_error(error, "OpenAI"))?;
+            .map_err(|error| {
+                crate::telemetry::record_http_client_error(&gen_ai_span, &error);
+                materialize_request_error(error, "OpenAI")
+            })?;
 
         // Parse the response
-        let response = check_response_status(response, "OpenAI")
-            .await
-            .map_err(MaterializeAttemptError::transport)?;
+        let response = check_response_status_with_capture(
+            response,
+            "OpenAI",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .map_err(|error| {
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            MaterializeAttemptError::transport(error)
+        })?;
 
         debug!("Successfully received response from OpenAI");
-        let completion: OpenAICompatibleChatCompletionResponse =
-            response.json().await.map_err(|e| {
-                error!(error = %e, "Failed to parse JSON response from OpenAI");
-                MaterializeAttemptError::transport(RStructorError::from(e))
+        let (completion, response_metadata): (OpenAICompatibleChatCompletionResponse, _) =
+            parse_json_response(
+                response,
+                "OpenAI",
+                self.config.response_body_capture.as_ref(),
+            )
+            .await
+            .map_err(|error| {
+                crate::telemetry::record_error(&gen_ai_span, &error);
+                MaterializeAttemptError::transport(error)
             })?;
 
         // Extract usage before validating the envelope so protocol failures can
@@ -544,15 +573,16 @@ impl OpenAIClient {
 
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
-            return Err(MaterializeAttemptError::transport_with_usage(
-                RStructorError::api_error(
-                    "OpenAI",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No completion choices returned".to_string(),
-                    },
-                ),
-                usage,
-            ));
+            let error = RStructorError::api_error_with_response(
+                "OpenAI",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No completion choices returned".to_string(),
+                },
+                response_metadata.clone(),
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            return Err(MaterializeAttemptError::transport_with_usage(error, usage)
+                .with_response(response_metadata));
         }
 
         let message = &completion.choices[0].message;
@@ -560,6 +590,12 @@ impl OpenAIClient {
 
         // With structured outputs, the response is in message.content as guaranteed-valid JSON
         if let Some(content) = &message.content {
+            crate::telemetry::record_success(
+                &gen_ai_span,
+                completion.id.as_deref(),
+                Some(&model_name),
+                usage.as_ref(),
+            );
             let raw_response = content.clone();
             debug!(
                 content_len = raw_response.len(),
@@ -568,17 +604,20 @@ impl OpenAIClient {
 
             // Parse and validate the response using shared utility
             parse_validate_and_create_output(raw_response, usage)
+                .map(|output| output.with_response(response_metadata.clone()))
+                .map_err(|error| error.with_response(response_metadata))
         } else {
             error!("No content in OpenAI response");
-            Err(MaterializeAttemptError::transport_with_usage(
-                RStructorError::api_error(
-                    "OpenAI",
-                    ApiErrorKind::UnexpectedResponse {
-                        details: "No content in response".to_string(),
-                    },
-                ),
-                usage,
-            ))
+            let error = RStructorError::api_error_with_response(
+                "OpenAI",
+                ApiErrorKind::UnexpectedResponse {
+                    details: "No content in response".to_string(),
+                },
+                response_metadata.clone(),
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            Err(MaterializeAttemptError::transport_with_usage(error, usage)
+                .with_response(response_metadata))
         }
     }
 
@@ -625,32 +664,56 @@ impl OpenAIClient {
             .as_deref()
             .unwrap_or("https://api.openai.com/v1");
         let url = format!("{}/chat/completions", base_url);
+        let gen_ai_span = crate::telemetry::inference_span(
+            "openai",
+            "chat",
+            self.config.model.as_str(),
+            &url,
+            Some(f64::from(effective_temp)),
+            self.config.max_tokens.map(u64::from),
+        );
         debug!(url = %url, "Sending request to OpenAI API");
         let response = optional_bearer_auth(self.client.post(&url), &self.config.api_key)
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
+            .instrument(gen_ai_span.clone())
             .await
-            .map_err(|e| handle_http_error(e, "OpenAI"))?;
+            .map_err(|error| {
+                crate::telemetry::record_http_client_error(&gen_ai_span, &error);
+                handle_http_error(error, "OpenAI")
+            })?;
 
         // Parse the response
-        let response = check_response_status(response, "OpenAI").await?;
+        let response = check_response_status_with_capture(
+            response,
+            "OpenAI",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .inspect_err(|error| crate::telemetry::record_error(&gen_ai_span, error))?;
 
         debug!("Successfully received response from OpenAI");
-        let completion: OpenAICompatibleChatCompletionResponse =
-            response.json().await.map_err(|e| {
-                error!(error = %e, "Failed to parse JSON response from OpenAI");
-                e
-            })?;
+        let (completion, response_metadata): (OpenAICompatibleChatCompletionResponse, _) =
+            parse_json_response(
+                response,
+                "OpenAI",
+                self.config.response_body_capture.as_ref(),
+            )
+            .await
+            .inspect_err(|error| crate::telemetry::record_error(&gen_ai_span, error))?;
 
         if completion.choices.is_empty() {
             error!("OpenAI returned empty choices array");
-            return Err(RStructorError::api_error(
+            let error = RStructorError::api_error_with_response(
                 "OpenAI",
                 ApiErrorKind::UnexpectedResponse {
                     details: "No completion choices returned".to_string(),
                 },
-            ));
+                response_metadata,
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            return Err(error);
         }
 
         // Extract usage info
@@ -658,12 +721,21 @@ impl OpenAIClient {
             .model
             .clone()
             .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion.usage.as_ref().map(|u| u.token_usage(model_name));
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| u.token_usage(model_name.clone()));
 
         let message = &completion.choices[0].message;
         trace!(finish_reason = %completion.choices[0].finish_reason, "Completion finish reason");
 
         if let Some(content) = &message.content {
+            crate::telemetry::record_success(
+                &gen_ai_span,
+                completion.id.as_deref(),
+                Some(&model_name),
+                usage.as_ref(),
+            );
             debug!(
                 content_len = content.len(),
                 "Successfully extracted content from response"
@@ -671,12 +743,15 @@ impl OpenAIClient {
             Ok(GenerateResult::new(content.clone(), usage))
         } else {
             error!("No content in OpenAI response");
-            Err(RStructorError::api_error(
+            let error = RStructorError::api_error_with_response(
                 "OpenAI",
                 ApiErrorKind::UnexpectedResponse {
                     details: "No content in response".to_string(),
                 },
-            ))
+                response_metadata,
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            Err(error)
         }
     }
 }
@@ -735,6 +810,7 @@ impl OpenAIClient {
     ) -> impl std::future::Future<Output = Result<reqwest::Response>> + Send + 'static {
         let client = self.client.clone();
         let api_key = self.config.api_key.clone();
+        let response_body_capture = self.config.response_body_capture.clone();
         let base_url = self
             .config
             .base_url
@@ -748,7 +824,7 @@ impl OpenAIClient {
                 .send()
                 .await
                 .map_err(|e| handle_http_error(e, "OpenAI"))?;
-            check_response_status(resp, "OpenAI").await
+            check_response_status_with_capture(resp, "OpenAI", response_body_capture.as_ref()).await
         }
     }
 }
@@ -1182,7 +1258,12 @@ impl LLMClient for OpenAIClient {
             .await
             .map_err(|e| handle_http_error(e, "OpenAI"))?;
 
-        let response = check_response_status(response, "OpenAI").await?;
+        let response = check_response_status_with_capture(
+            response,
+            "OpenAI",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await?;
 
         let json: serde_json::Value = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse models response from OpenAI");

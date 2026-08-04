@@ -9,7 +9,7 @@
 
 use rstructor::{
     AnyClient, ApiErrorKind, AttemptKind, AttemptOutcome, Instructor, LLMClient, MediaFile,
-    OpenAIClient, RStructorError,
+    OpenAIClient, RStructorError, ResponseBodyCapture,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -189,6 +189,101 @@ async fn materialize_parses_a_real_response() {
         }
     );
     m.assert_async().await;
+}
+
+#[tokio::test]
+async fn extraction_report_preserves_status_and_request_id_without_body_by_default() {
+    let mut server = mockito::Server::new_async().await;
+    let response = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_header("x-request-id", "req_success_123")
+        .with_body(chat_completion(r#"{"title":"Inception","year":2010}"#))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let extraction = client(&server)
+        .extract_with_report::<Movie>("a film")
+        .await
+        .unwrap();
+    let metadata = extraction.report.attempts[0]
+        .response
+        .as_ref()
+        .expect("successful provider response metadata");
+
+    assert_eq!(metadata.status, 200);
+    assert_eq!(metadata.request_id(), Some("req_success_123"));
+    assert!(metadata.sanitized_body.is_none());
+    response.assert_async().await;
+}
+
+#[tokio::test]
+async fn opt_in_capture_retains_only_sanitized_bounded_response_body() {
+    let mut server = mockito::Server::new_async().await;
+    let response = server
+        .mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_header("request-id", "req_capture_456")
+        .with_body(chat_completion(r#"{"title":"Inception","year":2010}"#))
+        .expect(1)
+        .create_async()
+        .await;
+
+    let capture =
+        ResponseBodyCapture::new(|body| body.replace("Inception", "[REDACTED]")).max_bytes(96);
+    let extraction = client(&server)
+        .capture_response_bodies(capture)
+        .extract_with_report::<Movie>("a film")
+        .await
+        .unwrap();
+    let metadata = extraction.report.attempts[0].response.as_ref().unwrap();
+    let body = metadata.sanitized_body.as_ref().unwrap();
+
+    assert_eq!(metadata.request_id(), Some("req_capture_456"));
+    assert!(body.text.contains("[REDACTED]"));
+    assert!(!body.text.contains("Inception"));
+    assert!(body.truncated);
+    response.assert_async().await;
+}
+
+#[tokio::test]
+async fn provider_error_preserves_raw_status_request_id_and_sanitized_body() {
+    let mut server = mockito::Server::new_async().await;
+    let response = server
+        .mock("POST", "/chat/completions")
+        .with_status(429)
+        .with_header("retry-after", "0")
+        .with_header("x-request-id", "req_rate_limit_789")
+        .with_body(r#"{"error":{"message":"quota for acct-123 exhausted"}}"#)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let capture = ResponseBodyCapture::new(|body| body.replace("acct-123", "[ACCOUNT]"));
+    let failure = client(&server)
+        .no_retries()
+        .capture_response_bodies(capture)
+        .extract_with_report::<Movie>("a film")
+        .await
+        .unwrap_err();
+
+    assert_eq!(failure.error().status_code(), Some(429));
+    assert_eq!(failure.error().request_id(), Some("req_rate_limit_789"));
+    let error_metadata = failure.error().response_metadata().unwrap();
+    assert!(
+        error_metadata
+            .sanitized_body
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("[ACCOUNT]")
+    );
+    assert_eq!(
+        failure.report.attempts[0].response.as_ref().unwrap().status,
+        429
+    );
+    response.assert_async().await;
 }
 
 #[tokio::test]
@@ -844,7 +939,12 @@ async fn malformed_usage_with_valid_content_preserves_legacy_fail_fast_error() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, RStructorError::HttpError(_)));
+    assert!(matches!(
+        error.api_error_kind(),
+        Some(ApiErrorKind::UnexpectedResponse { .. })
+    ));
+    assert_eq!(error.status_code(), Some(200));
+    assert!(!error.is_retryable());
     response.assert_async().await;
 }
 
@@ -879,7 +979,12 @@ async fn malformed_usage_with_invalid_content_is_not_reclassified_as_retryable()
         .await
         .unwrap_err();
 
-    assert!(matches!(error, RStructorError::HttpError(_)));
+    assert!(matches!(
+        error.api_error_kind(),
+        Some(ApiErrorKind::UnexpectedResponse { .. })
+    ));
+    assert_eq!(error.status_code(), Some(200));
+    assert!(!error.is_retryable());
     response.assert_async().await;
 }
 

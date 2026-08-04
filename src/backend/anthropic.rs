@@ -3,19 +3,19 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{Instrument, debug, error, info, instrument, trace, warn};
 
 use crate::backend::model_macro::define_model_enum;
 use crate::backend::{
     AnthropicMessageContent, ChatMessage, DEFAULT_REQUEST_TIMEOUT, GenerateResult, LLMClient,
     MaterializeAttemptError, MaterializeFailure, MaterializeInternalOutput, MaterializeReport,
     MaterializeResult, ModelInfo, StrictSchemaProvider, ThinkingLevel, TokenUsage,
-    build_anthropic_message_content, build_http_client, check_response_status,
+    build_anthropic_message_content, build_http_client, check_response_status_with_capture,
     compile_strict_schema, generate_with_retry_attempts_with_history,
     generate_with_retry_attempts_with_initial_messages, generate_with_retry_with_history,
     generate_with_retry_with_initial_messages, handle_http_error, materialize_request_error,
     materialize_with_media_and_attempts_with_retry, materialize_with_media_with_retry,
-    parse_validate_and_create_output, request_messages,
+    parse_json_response, parse_validate_and_create_output, request_messages,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -88,6 +88,8 @@ pub struct AnthropicConfig {
     /// Thinking level for Claude 4.x models (Sonnet 4, Opus 4, etc.)
     /// When enabled, temperature is automatically set to 1.0 as required by the API
     pub thinking_level: Option<ThinkingLevel>,
+    /// Opt-in caller-sanitized provider response capture.
+    pub response_body_capture: Option<crate::ResponseBodyCapture>,
 }
 
 /// Anthropic client for generating completions
@@ -238,6 +240,7 @@ impl UsageInfo {
 
 #[derive(Debug, Deserialize)]
 struct CompletionResponse {
+    id: Option<String>,
     content: Vec<ContentBlock>,
     model: Option<String>,
     usage: Option<UsageInfo>,
@@ -280,6 +283,7 @@ impl AnthropicClient {
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official Anthropic API
             thinking_level: None, // Default: no extended thinking (faster responses)
+            response_body_capture: None,
         };
 
         debug!("Anthropic client created with default configuration");
@@ -322,6 +326,7 @@ impl AnthropicClient {
             max_retries: Some(3),                   // Default: 3 retries with error feedback
             base_url: None,                         // Default: use official Anthropic API
             thinking_level: None, // Default: no extended thinking (faster responses)
+            response_body_capture: None,
         };
 
         debug!("Anthropic client created with default configuration");
@@ -424,6 +429,14 @@ impl AnthropicClient {
             .as_deref()
             .unwrap_or("https://api.anthropic.com/v1");
         let url = format!("{}/messages", base_url);
+        let gen_ai_span = crate::telemetry::inference_span(
+            "anthropic",
+            "chat",
+            self.config.model.as_str(),
+            &url,
+            Some(f64::from(effective_temp)),
+            Some(u64::from(request.max_tokens)),
+        );
         debug!(url = %url, "Using Anthropic API endpoint");
         let response = self
             .client
@@ -434,18 +447,35 @@ impl AnthropicClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
+            .instrument(gen_ai_span.clone())
             .await
-            .map_err(|error| materialize_request_error(error, "Anthropic"))?;
+            .map_err(|error| {
+                crate::telemetry::record_http_client_error(&gen_ai_span, &error);
+                materialize_request_error(error, "Anthropic")
+            })?;
 
         // Parse the response
-        let response = check_response_status(response, "Anthropic")
-            .await
-            .map_err(MaterializeAttemptError::transport)?;
+        let response = check_response_status_with_capture(
+            response,
+            "Anthropic",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .map_err(|error| {
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            MaterializeAttemptError::transport(error)
+        })?;
 
         debug!("Successfully received response from Anthropic");
-        let completion: CompletionResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from Anthropic");
-            MaterializeAttemptError::transport(RStructorError::from(e))
+        let (completion, response_metadata): (CompletionResponse, _) = parse_json_response(
+            response,
+            "Anthropic",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .map_err(|error| {
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            MaterializeAttemptError::transport(error)
         })?;
 
         // Extract usage info
@@ -474,22 +504,35 @@ impl AnthropicClient {
             }
             None => {
                 error!("No text content in Anthropic response");
-                return Err(MaterializeAttemptError::transport_with_usage(
-                    RStructorError::api_error(
-                        "Anthropic",
-                        ApiErrorKind::UnexpectedResponse {
-                            details: "No text content in response".to_string(),
-                        },
-                    ),
-                    usage,
-                ));
+                let error = RStructorError::api_error_with_response(
+                    "Anthropic",
+                    ApiErrorKind::UnexpectedResponse {
+                        details: "No text content in response".to_string(),
+                    },
+                    response_metadata.clone(),
+                );
+                crate::telemetry::record_error(&gen_ai_span, &error);
+                return Err(MaterializeAttemptError::transport_with_usage(error, usage)
+                    .with_response(response_metadata));
             }
         };
 
+        crate::telemetry::record_success(
+            &gen_ai_span,
+            completion.id.as_deref(),
+            Some(&model_name),
+            usage.as_ref(),
+        );
+
         // Parse the JSON content directly using shared utility
         // With native structured outputs, the response is guaranteed to be valid JSON
-        trace!(json = %raw_response, "Parsing structured output response");
+        trace!(
+            response_bytes = raw_response.len(),
+            "Parsing structured output response"
+        );
         parse_validate_and_create_output(raw_response, usage)
+            .map(|output| output.with_response(response_metadata.clone()))
+            .map_err(|error| error.with_response(response_metadata))
     }
 
     /// Internal implementation of raw text generation (no structured output).
@@ -547,6 +590,14 @@ impl AnthropicClient {
             .as_deref()
             .unwrap_or("https://api.anthropic.com/v1");
         let url = format!("{}/messages", base_url);
+        let gen_ai_span = crate::telemetry::inference_span(
+            "anthropic",
+            "chat",
+            self.config.model.as_str(),
+            &url,
+            Some(f64::from(effective_temp)),
+            Some(u64::from(request.max_tokens)),
+        );
         debug!(url = %url, "Using Anthropic API endpoint");
         let response = self
             .client
@@ -556,24 +607,40 @@ impl AnthropicClient {
             .header("Content-Type", "application/json")
             .json(&request)
             .send()
+            .instrument(gen_ai_span.clone())
             .await
-            .map_err(|e| handle_http_error(e, "Anthropic"))?;
+            .map_err(|error| {
+                crate::telemetry::record_http_client_error(&gen_ai_span, &error);
+                handle_http_error(error, "Anthropic")
+            })?;
 
         // Parse the response
-        let response = check_response_status(response, "Anthropic").await?;
+        let response = check_response_status_with_capture(
+            response,
+            "Anthropic",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .inspect_err(|error| crate::telemetry::record_error(&gen_ai_span, error))?;
 
         debug!("Successfully received response from Anthropic");
-        let completion: CompletionResponse = response.json().await.map_err(|e| {
-            error!(error = %e, "Failed to parse JSON response from Anthropic");
-            e
-        })?;
+        let (completion, response_metadata): (CompletionResponse, _) = parse_json_response(
+            response,
+            "Anthropic",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await
+        .inspect_err(|error| crate::telemetry::record_error(&gen_ai_span, error))?;
 
         // Extract usage info
         let model_name = completion
             .model
             .clone()
             .unwrap_or_else(|| self.config.model.as_str().to_string());
-        let usage = completion.usage.as_ref().map(|u| u.token_usage(model_name));
+        let usage = completion
+            .usage
+            .as_ref()
+            .map(|u| u.token_usage(model_name.clone()));
 
         // Extract the content
         debug!("Extracting text content from response blocks");
@@ -587,14 +654,23 @@ impl AnthropicClient {
 
         if content.is_empty() {
             error!("No text content in Anthropic response");
-            return Err(RStructorError::api_error(
+            let error = RStructorError::api_error_with_response(
                 "Anthropic",
                 ApiErrorKind::UnexpectedResponse {
                     details: "No text content in response".to_string(),
                 },
-            ));
+                response_metadata,
+            );
+            crate::telemetry::record_error(&gen_ai_span, &error);
+            return Err(error);
         }
 
+        crate::telemetry::record_success(
+            &gen_ai_span,
+            completion.id.as_deref(),
+            Some(&model_name),
+            usage.as_ref(),
+        );
         debug!(
             content_len = content.len(),
             "Successfully extracted text content"
@@ -723,6 +799,7 @@ impl AnthropicClient {
     ) -> impl std::future::Future<Output = Result<reqwest::Response>> + Send + 'static {
         let client = self.client.clone();
         let api_key = self.config.api_key.clone();
+        let response_body_capture = self.config.response_body_capture.clone();
         let base_url = self
             .config
             .base_url
@@ -740,7 +817,8 @@ impl AnthropicClient {
                 .send()
                 .await
                 .map_err(|e| handle_http_error(e, "Anthropic"))?;
-            check_response_status(resp, "Anthropic").await
+            check_response_status_with_capture(resp, "Anthropic", response_body_capture.as_ref())
+                .await
         }
     }
 }
@@ -1156,7 +1234,12 @@ impl LLMClient for AnthropicClient {
             .await
             .map_err(|e| handle_http_error(e, "Anthropic"))?;
 
-        let response = check_response_status(response, "Anthropic").await?;
+        let response = check_response_status_with_capture(
+            response,
+            "Anthropic",
+            self.config.response_body_capture.as_ref(),
+        )
+        .await?;
 
         let json: serde_json::Value = response.json().await.map_err(|e| {
             error!(error = %e, "Failed to parse models response from Anthropic");

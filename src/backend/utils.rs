@@ -5,6 +5,7 @@ use crate::backend::{
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
+use crate::{ResponseBodyCapture, ResponseMetadata};
 use reqwest::Response;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -984,7 +985,7 @@ impl ResponseFormat {
 /// The parsed and validated data, or an error with validation context
 pub fn parse_and_validate_response<T>(
     raw_response: &str,
-) -> std::result::Result<T, (RStructorError, Option<ValidationFailureContext>)>
+) -> std::result::Result<T, (Box<RStructorError>, Option<ValidationFailureContext>)>
 where
     T: Instructor + DeserializeOwned,
 {
@@ -995,7 +996,7 @@ where
             let error_msg = error.to_string();
             error!(error = %error, "Structured output decoding failed");
             return Err((
-                error,
+                Box::new(error),
                 Some(ValidationFailureContext::new(
                     error_msg,
                     raw_response.to_string(),
@@ -1009,7 +1010,7 @@ where
         error!(error = ?e, "Custom validation failed");
         let error_msg = e.to_string();
         return Err((
-            e,
+            Box::new(e),
             Some(ValidationFailureContext::new(
                 error_msg,
                 raw_response.to_string(),
@@ -1046,9 +1047,9 @@ where
             Ok(MaterializeInternalOutput::new(result, raw_response, usage))
         }
         Err((error, Some(context))) => {
-            Err(MaterializeAttemptError::semantic(error, context, usage))
+            Err(MaterializeAttemptError::semantic(*error, context, usage))
         }
-        Err((error, None)) => Err(MaterializeAttemptError::transport_with_usage(error, usage)),
+        Err((error, None)) => Err(MaterializeAttemptError::transport_with_usage(*error, usage)),
     }
 }
 
@@ -1215,9 +1216,20 @@ fn truncate_message(msg: &str, max_len: usize) -> String {
 ///
 /// This function classifies errors into actionable types (rate limit, auth failure, etc.)
 /// and provides user-friendly error messages with suggested actions.
+#[cfg(feature = "tools")]
 pub async fn check_response_status(response: Response, provider_name: &str) -> Result<Response> {
+    check_response_status_with_capture(response, provider_name, None).await
+}
+
+/// Check HTTP response status while optionally retaining a caller-sanitized body.
+pub(crate) async fn check_response_status_with_capture(
+    response: Response,
+    provider_name: &str,
+    body_capture: Option<&ResponseBodyCapture>,
+) -> Result<Response> {
     if !response.status().is_success() {
         let status = response.status();
+        let mut metadata = response_metadata(&response);
 
         // Extract retry-after header if present
         let retry_after = response
@@ -1227,19 +1239,80 @@ pub async fn check_response_status(response: Response, provider_name: &str) -> R
             .and_then(parse_retry_after);
 
         let error_text = response.text().await?;
+        capture_response_body(&mut metadata, &error_text, body_capture);
 
         let kind = classify_api_error(status, &error_text, retry_after, None);
 
         error!(
             status = %status,
-            error = %error_text,
-            kind = %kind,
+            response_body_bytes = error_text.len(),
+            retryable = kind.is_retryable(),
             "{} API returned error response", provider_name
         );
 
-        return Err(RStructorError::api_error(provider_name, kind));
+        return Err(RStructorError::api_error_with_response(
+            provider_name,
+            kind,
+            metadata,
+        ));
     }
     Ok(response)
+}
+
+const REQUEST_ID_HEADERS: &[&str] = &[
+    "x-request-id",
+    "request-id",
+    "anthropic-request-id",
+    "openai-request-id",
+    "x-goog-request-id",
+    "x-amzn-requestid",
+    "x-amz-request-id",
+];
+
+pub(crate) fn response_metadata(response: &Response) -> ResponseMetadata {
+    let mut metadata = ResponseMetadata::new(response.status().as_u16());
+    for name in REQUEST_ID_HEADERS {
+        if let Some(value) = response
+            .headers()
+            .get(*name)
+            .and_then(|value| value.to_str().ok())
+        {
+            metadata
+                .request_ids
+                .insert((*name).to_string(), value.to_string());
+        }
+    }
+    metadata
+}
+
+pub(crate) fn capture_response_body(
+    metadata: &mut ResponseMetadata,
+    raw_body: &str,
+    body_capture: Option<&ResponseBodyCapture>,
+) {
+    metadata.sanitized_body = body_capture.map(|capture| capture.capture(raw_body));
+}
+
+/// Decode a successful JSON response while retaining its diagnostics.
+pub(crate) async fn parse_json_response<T: DeserializeOwned>(
+    response: Response,
+    provider_name: &str,
+    body_capture: Option<&ResponseBodyCapture>,
+) -> Result<(T, ResponseMetadata)> {
+    let mut metadata = response_metadata(&response);
+    let body = response.text().await?;
+    capture_response_body(&mut metadata, &body, body_capture);
+
+    let parsed = serde_json::from_str(&body).map_err(|error| {
+        RStructorError::api_error_with_response(
+            provider_name,
+            ApiErrorKind::UnexpectedResponse {
+                details: format!("response body was not valid JSON: {error}"),
+            },
+            metadata.clone(),
+        )
+    })?;
+    Ok((parsed, metadata))
 }
 
 /// Builds the user-role feedback message sent back to the LLM when a response
@@ -1423,12 +1496,17 @@ where
         match generate_fn(messages.clone()).await {
             Ok(result) => {
                 let final_usage = result.usage;
+                let response = result.response;
                 if let Some(usage) = final_usage.clone() {
                     cumulative_usage
                         .get_or_insert_with(RunUsage::new)
                         .record(usage);
                 }
-                attempts.push(AttemptRecord::succeeded(attempt + 1, final_usage.clone()));
+                attempts.push(AttemptRecord::succeeded_with_response(
+                    attempt + 1,
+                    final_usage.clone(),
+                    response,
+                ));
 
                 if attempt > 0 {
                     info!(
@@ -1456,6 +1534,7 @@ where
                 error: attempt_error,
                 context,
                 usage,
+                response,
             }) => {
                 let is_last_attempt = attempt >= max_attempts - 1;
                 let disposition = if is_last_attempt {
@@ -1468,12 +1547,13 @@ where
                         .get_or_insert_with(RunUsage::new)
                         .record(response_usage);
                 }
-                attempts.push(AttemptRecord::failed(
+                attempts.push(AttemptRecord::failed_with_response(
                     attempt + 1,
                     AttemptKind::Semantic,
                     &attempt_error,
                     disposition,
                     usage,
+                    response.map(|response| *response),
                 ));
 
                 if disposition == RetryDisposition::Retried {
@@ -1508,6 +1588,7 @@ where
             Err(MaterializeAttemptError::Transport {
                 error: attempt_error,
                 usage,
+                response,
             }) => {
                 let is_last_attempt = attempt >= max_attempts - 1;
                 let retryable = attempt_error.is_retryable();
@@ -1523,12 +1604,16 @@ where
                         .get_or_insert_with(RunUsage::new)
                         .record(response_usage);
                 }
-                attempts.push(AttemptRecord::failed(
+                let response = response
+                    .map(|response| *response)
+                    .or_else(|| attempt_error.response_metadata().cloned());
+                attempts.push(AttemptRecord::failed_with_response(
                     attempt + 1,
                     AttemptKind::Transport,
                     &attempt_error,
                     disposition,
                     usage,
+                    response,
                 ));
 
                 if disposition == RetryDisposition::Retried {
@@ -1733,6 +1818,21 @@ macro_rules! impl_client_builder_methods {
                     "Disabling retries"
                 );
                 self.config.max_retries = Some(0);
+                self
+            }
+
+            /// Retain caller-sanitized provider response bodies in diagnostics.
+            ///
+            /// Status codes and recognized request IDs are always retained for
+            /// structured extraction reports. Bodies are disabled by default;
+            /// enabling them requires a sanitizer callback via
+            /// [`ResponseBodyCapture`](crate::ResponseBodyCapture).
+            #[must_use]
+            pub fn capture_response_bodies(
+                mut self,
+                capture: $crate::ResponseBodyCapture,
+            ) -> Self {
+                self.config.response_body_capture = Some(capture);
                 self
             }
         }

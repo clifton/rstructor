@@ -714,6 +714,62 @@ inventing provider attempts it cannot observe.
 See `examples/retry_attempt_ledger.rs` for a complete success-and-failure
 example.
 
+### Provider response diagnostics
+
+Every built-in extraction attempt retains the exact HTTP status and recognized
+provider request-ID headers. The metadata has the same location on success and
+failure:
+
+```rust
+let result = client
+    .extract_with_report::<Portfolio>("Reconcile the fund book")
+    .await;
+let report = match &result {
+    Ok(extraction) => &extraction.report,
+    Err(failure) => &failure.report,
+};
+
+for attempt in &report.attempts {
+    if let Some(response) = &attempt.response {
+        println!("status={} request_id={:?}", response.status, response.request_id());
+    }
+}
+```
+
+Provider errors also expose `status_code()`, `request_id()`, and
+`response_metadata()` directly. Response bodies are never stored by default.
+Opting in requires an explicit sanitizer callback; only the callback's bounded
+output is retained:
+
+```rust
+use rstructor::ResponseBodyCapture;
+
+let account_id = account_id.to_owned();
+let capture = ResponseBodyCapture::new(move |body| {
+    body.replace(&account_id, "[ACCOUNT]")
+}).max_bytes(8 * 1024);
+let client = OpenAIClient::from_env()?.capture_response_bodies(capture);
+```
+
+Treat the callback as a privacy boundary: remove prompts, generated content,
+personal data, credentials, and internal identifiers that are not safe for your
+logs or fixtures.
+
+### OpenTelemetry GenAI spans
+
+Built-in non-streaming extraction and generation calls emit one `tracing` span
+per provider attempt using the OpenTelemetry GenAI inference-client fields. An
+application can export those spans through its existing
+`tracing-opentelemetry` layer; rstructor does not install a global subscriber or
+pull an OpenTelemetry SDK into the library dependency graph.
+
+The spans include operation, provider, requested and response models, endpoint,
+token/cache usage, response ID when supplied, and a low-cardinality error type.
+Prompt text, system instructions, model output, and tool content are never
+recorded. The upstream GenAI semantic conventions are currently marked
+development-stability; `rstructor::telemetry::GEN_AI_SEMCONV_STABILITY` exposes
+that status explicitly.
+
 ## Error Handling
 
 ```rust

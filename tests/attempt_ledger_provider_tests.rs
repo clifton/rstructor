@@ -33,6 +33,7 @@ fn assert_single_success(
     assert_eq!(report.attempts.len(), 1);
     assert_eq!(report.attempts[0].kind, AttemptKind::Semantic);
     assert_eq!(report.attempts[0].outcome, AttemptOutcome::Succeeded);
+    assert_eq!(report.attempts[0].response.as_ref().unwrap().status, 200);
     assert_eq!(report.final_usage.as_ref().unwrap().model, expected_model);
     assert_eq!(
         report.cumulative_usage.as_ref().unwrap().total_tokens(),
@@ -50,6 +51,7 @@ fn assert_usage_bearing_protocol_failure(failure: MaterializeFailure, expected_t
             ..
         }
     ));
+    assert_eq!(failure.attempts[0].response.as_ref().unwrap().status, 200);
     assert_eq!(
         failure.attempts[0].usage.as_ref().unwrap().total_tokens(),
         expected_tokens
@@ -78,6 +80,12 @@ fn assert_semantic_retry_success(
         }
     ));
     assert_eq!(report.attempts[1].outcome, AttemptOutcome::Succeeded);
+    assert!(
+        report
+            .attempts
+            .iter()
+            .all(|attempt| attempt.response.as_ref().unwrap().status == 200)
+    );
     assert_eq!(
         report.final_usage.as_ref().unwrap().model,
         expected_final_model
