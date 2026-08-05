@@ -1,6 +1,6 @@
 [package]
 name = "rstructor"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 description = "Get structured, validated data out of LLMs as native Rust structs and enums. Derive a type and rstructor generates the JSON Schema, prompts the model, parses the reply, and retries on validation errors — across OpenAI, Anthropic Claude, Google Gemini, and xAI Grok. The Rust answer to Python's Pydantic + Instructor."
 license = "MIT"
@@ -47,7 +47,7 @@ tracing-subscriber = { version = "0.3.23", features = [
   "env-filter",
 ], optional = true }
 tracing-futures = { version = "0.2.5", optional = true }
-rstructor_derive = { version = "0.5.1", path = "./rstructor_derive", optional = true }
+rstructor_derive = { version = "0.6.0", path = "./rstructor_derive", optional = true }
 schemars = { version = "1.2.2", optional = true }
 base64 = { version = "0.23.0", default-features = false, features = [
   "std",
