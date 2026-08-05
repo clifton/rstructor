@@ -57,8 +57,9 @@ async-stream = { version = "0.3.6", optional = true }
 
 # Feature flags
 [features]
-default = ["derive", "openai"]
-# Convenience bundle for applications that select providers at runtime.
+default = ["derive", "all-providers"]
+# Convenience bundle for applications that select providers at runtime. The
+# providers share `_client`, so this adds no provider-specific dependencies.
 all-providers = ["openai", "anthropic", "grok", "gemini"]
 # Each provider pulls in the shared networking + media stack via `_client`.
 openai = ["_client"]

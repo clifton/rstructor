@@ -49,7 +49,7 @@ jobs:
           shared-key: "ci-schema-only"
           cache-on-failure: true
 
-      - name: Lint default (derive + OpenAI only)
+      - name: Lint default (derive + all providers)
         run: cargo clippy --all-targets -- -D warnings
 
       # `--all-features` (the test job above) cannot catch breakage in the

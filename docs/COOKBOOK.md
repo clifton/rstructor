@@ -150,7 +150,7 @@ the self-contained demo; production can pass an `AnyClient` to the same generic
 ```toml
 [dependencies]
 axum = { version = "0.8", features = ["json"] }
-rstructor = { version = "0.5.1", default-features = false, features = ["derive", "mock"] }
+rstructor = { version = "0.6.0", default-features = false, features = ["derive", "mock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt"] }
@@ -257,7 +257,7 @@ success, validation failure, recorded-request, and re-ask paths. Enable the
 off-by-default `mock` feature:
 
 ```toml
-rstructor = { version = "0.5.1", default-features = false, features = ["derive", "mock"] }
+rstructor = { version = "0.6.0", default-features = false, features = ["derive", "mock"] }
 ```
 
 ```rust
@@ -424,7 +424,7 @@ proves that no `Instructor` derive is needed. Enable both `schemars` and `mock`
 for this offline version:
 
 ```toml
-rstructor = { version = "0.5.1", default-features = false, features = ["mock", "schemars"] }
+rstructor = { version = "0.6.0", default-features = false, features = ["mock", "schemars"] }
 schemars = "1"
 ```
 

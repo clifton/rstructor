@@ -22,14 +22,19 @@ Get structured, validated data from supported LLM providers as native Rust struc
 
 ```toml
 [dependencies]
-rstructor = "0.5.1"
+# Defaults: derive + all-providers
+# Providers: openai, anthropic, grok, gemini (bundled by all-providers)
+# Optional capabilities: logging, streaming, tools, schemars, mock
+# Set default-features = false to select a smaller feature set.
+rstructor = "0.6.0"
 serde = { version = "1.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"] }
 ```
 
-The default is intentionally useful and narrow: the derive macro plus the
-OpenAI client. Other providers, logging setup, streaming, tools, schemars
-interop, mocks, and fixture replay remain opt-in.
+The default includes the derive macro and all four built-in providers. Provider
+features share the same HTTP and async dependency stack, so enabling all of them
+does not add third-party dependencies over an OpenAI-only build. Logging setup,
+streaming, tools, schemars interop, mocks, and fixture replay remain opt-in.
 
 ## 60-Second Extraction
 
@@ -801,7 +806,7 @@ match client.extract::<Movie>("...").await {
 Enable the `streaming` feature to stream responses as they are generated.
 
 ```toml
-rstructor = { version = "0.5.1", features = ["streaming"] }
+rstructor = { version = "0.6.0", features = ["streaming"] }
 ```
 
 `materialize_iter` streams a **list of structured objects**, yielding each item as soon as it is fully generated and validated — the common case where you want a long list without buffering the whole response:
@@ -887,7 +892,7 @@ required.
 Enable the `tools` feature to let the model call your typed Rust functions and feed the results back, looping until it produces a final answer. Tool argument types derive `Instructor`, so their JSON Schema is generated automatically.
 
 ```toml
-rstructor = { version = "0.5.1", features = ["tools"] }
+rstructor = { version = "0.6.0", features = ["tools"] }
 ```
 
 ```rust
@@ -928,7 +933,7 @@ network or API key. `MockClient` implements `LLMClient`, so it drops into any
 
 ```toml
 [dev-dependencies]
-rstructor = { version = "0.5.1", default-features = false, features = ["derive", "mock"] }
+rstructor = { version = "0.6.0", default-features = false, features = ["derive", "mock"] }
 ```
 
 ```rust
@@ -1007,24 +1012,24 @@ key-free round trip based on a real 10-K metric.
 
 ```toml
 [dependencies]
-rstructor = { version = "0.5.1", features = ["all-providers"] }
+rstructor = "0.6.0" # derive + all-providers
 ```
 
-- `derive`, `openai` — The only default features: typed schemas plus one immediately usable provider
-- `anthropic`, `grok`, `gemini` — Additional provider backends; every provider shares the same HTTP/`tokio` stack
-- `all-providers` — Convenience bundle for runtime provider selection
+- `derive`, `all-providers` — Default features: typed schemas plus every built-in provider
+- `openai`, `anthropic`, `grok`, `gemini` — Provider backends sharing the same HTTP/`tokio` stack
+- `all-providers` — Bundle of all four provider features for runtime provider selection
 - `logging` — Subscriber setup helpers (the core `tracing` spans do not require it)
 - `streaming` — Streaming via `generate_stream` / `materialize_iter` / `materialize_stream` (opt-in)
 - `tools` — Tool/function calling via `Toolbox` + `client.with_tools(..).run(..)` (opt-in)
 - `schemars` — Adapter for types that already derive `schemars::JsonSchema` (opt-in)
 - `mock` — `MockClient` plus record/sanitize/replay fixtures for offline testing (opt-in; see [Testing](#testing-offline))
 
-For a single non-default provider with no unused client modules, disable defaults
-and select `derive` plus that provider:
+For a single provider with no unused client modules, disable defaults and select
+`derive` plus that provider:
 
 ```toml
 [dependencies]
-rstructor = { version = "0.5.1", default-features = false, features = ["derive", "anthropic"] }
+rstructor = { version = "0.6.0", default-features = false, features = ["derive", "anthropic"] }
 ```
 
 For a **schema-only build** — generate JSON Schema from your types with no
@@ -1032,7 +1037,7 @@ networking, `tokio`, or `reqwest` — enable only `derive`:
 
 ```toml
 [dependencies]
-rstructor = { version = "0.5.1", default-features = false, features = ["derive"] }
+rstructor = { version = "0.6.0", default-features = false, features = ["derive"] }
 ```
 
 This keeps the derive macro, `SchemaType`, the `Instructor` trait, and the `LLMClient` trait (so you can implement your own backend) without the async/HTTP dependency tree.
